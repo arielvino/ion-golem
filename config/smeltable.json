@@ -1,0 +1,14 @@
+{
+  "prefixes": ["raw_"],
+  "suffixes": ["_ore"],
+  "contains": ["_log", "_wood", "_stem"],
+  "gearPatterns": ["iron", "golden", "chainmail"],
+  "gearTypes": ["helmet", "chestplate", "leggings", "boots", "sword", "pickaxe", "axe", "shovel", "hoe", "horse_armor"],
+  "exact": [
+    "sand", "red_sand", "cobblestone", "stone", "cobbled_deepslate",
+    "clay_ball", "clay", "cactus", "chorus_fruit", "wet_sponge",
+    "netherrack", "ancient_debris", "sea_pickle", "stone_bricks",
+    "cracked_stone_bricks", "basalt", "smooth_basalt",
+    "potato", "kelp"
+  ]
+}
