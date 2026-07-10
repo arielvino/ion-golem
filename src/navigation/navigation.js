@@ -19,6 +19,7 @@ const { _pHazard, _pSurface, _pKnownSolid, _pKnownClear } = require('./blockquer
 const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
 const { reachGoal, headingGoal, until } = require('./goals')
 const { _getReachVec, _reachCheck, _digToward } = require('./reachability')
+const { navMode, clearNavState } = require('./navmode')
 
 // Summarize tool/material state for failure reasons visible to the AI
 function getToolSummary(bot) {
@@ -55,26 +56,6 @@ const HARD_BLOCKS = new Set([
 // ─── Movement Primitives ───────────────────────────────────────────
 // All movement goes through liveStep (from atomicSteps.js).
 // walkTo and walkForward have been removed — no mineflayer pathfinder.
-
-// Safety mode for liveStep/digBlock/hasWalkableLOS.
-// state.navSafetyMode is set by navigateTo from opts.mode ('safe'/'water'/'hazard').
-// If bot is currently IN water, upgrade to at least 'water' so it can escape.
-function navMode() {
-  const base = state.navSafetyMode || 'safe'
-  if (base === 'hazard') return 'hazard'
-  if (base === 'water' || state.bot?.entity?.isInWater) return 'water'
-  return 'safe'
-}
-
-// Clear all transient nav state in one place. navigateTo calls this from a
-// `finally`, so every exit path (arrival, timeout, abort, thrown error) leaves
-// clean state — abort paths used to leak navSafetyMode/navFistMining through 7
-// scattered partial clears that didn't all reset every field.
-function clearNavState() {
-  state.navigationStatus = null
-  state.navSafetyMode = null
-  state.navFistMining = false
-}
 
 // Dig a single block safely — checks neighbors for hazards first
 async function digBlock(pos, opts = {}) {
