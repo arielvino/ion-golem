@@ -1,0 +1,31 @@
+{
+  "_doc": "Perception caps. Read via config/ranges.js (not this file directly). Distance values are in blocks; the string \"chunkLoad\" means the server's loaded-chunk radius in blocks (serverViewDistance*16) — the hard perception ceiling, resolved at runtime. Angles are in degrees.",
+  "sight": {
+    "playerVisibility": "chunkLoad",
+    "nearbyEntities": "chunkLoad",
+    "ambientSurveyBlocks": 64,
+    "ambientFovDegrees": 120,
+    "ambientSurveyCap": 60000,
+    "ambientVisibleCap": 16,
+    "lookBlocks": "chunkLoad",
+    "lookEntities": "chunkLoad",
+    "lookReportCap": 15,
+    "rayScanBlocks": "chunkLoad"
+  },
+  "hearing": {
+    "soundSubtitles": 48
+  },
+  "_fields": {
+    "sight.playerVisibility": "Max range to LOS-test the named chat player for PLAYER=...(visible/NOT_VISIBLE). chunkLoad = see them as far as chunks load.",
+    "sight.nearbyEntities": "Range for the nearby= mob/entity list (LOS-gated). chunkLoad = full loaded range.",
+    "sight.ambientSurveyBlocks": "Range of the standing-context survey (exposure-culled chunk scan + LOS) that feeds VISION= see=. Per-tick cost; exposure cull keeps candidate count low so range can be larger. Profile before pushing past ~64.",
+    "sight.ambientFovDegrees": "Field-of-view cone (full angle) for the standing survey. (FOV-vs-omni still under discussion.)",
+    "sight.ambientSurveyCap": "Memory ceiling on exposed candidates per ambient survey (nearest-first), NOT a range limiter and NOT the LOS budget. Keep well above the in-range exposed-shell size (open ocean at r64 can be >8000) or distant types get clipped. LOS cost is bounded separately by ambientVisibleCap in surveyVisible.",
+    "sight.ambientVisibleCap": "Per-type visible cap (K) for the ambient survey. A block type is LOS-tested nearest-first until it has >K verified-visible blocks, then reported as 'many' and skipped (the LOS cost bound). Types under K are counted exactly. Lower = cheaper + coarser; higher = more exact counts before 'many'.",
+    "sight.lookBlocks": "[ACTION:look] block search range (palette scan, cheap to the ceiling).",
+    "sight.lookEntities": "[ACTION:look] entity search range.",
+    "sight.lookReportCap": "Max visible hits [ACTION:look] reports before stopping.",
+    "sight.rayScanBlocks": "castVisionRays distance for the periodic ray sweep (DB/biome) and [ACTION:scan].",
+    "hearing.soundSubtitles": "Max range to surface a heard sound as a subtitle."
+  }
+}

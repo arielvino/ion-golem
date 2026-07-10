@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# local secrets / machine-specific config
+.env
+claude-settings.json
+
+# per-bot generated state lives in the OS data dir by default; this only appears
+# when IONGOLEM_DATA_DIR=./runtime is set to keep it in-tree — never commit it
+runtime/
+
+# local Minecraft server working dir — server.jar is Mojang-licensed and NOT
+# redistributable; fetch it yourself via scripts/setup-server.sh
+server/
+
+# stray logs
+*.log
