@@ -2,11 +2,11 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { sleep, isAborted } = require('../core/tick')
-const { navigateTo } = require('../navigation/navigation')
+const { navigateTo, placeBlockAt } = require('../navigation/navigation')
 const { removeBlock, trackPlacedBlock, createStructure, getStructures,
         logGameEvent } = require('../world/memory')
 const { getInvMap, countMat } = require('../world/recipes')
-const { offsets, faces } = require('../config/constants')
+const { offsets } = require('../config/constants')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
 
@@ -183,27 +183,16 @@ async function doPlace(targetName) {
       if (bot.entity.position.distanceTo(airPos) > 5) continue
       if (isEntityBlocking(airPos)) continue  // skip positions occupied by entities
 
-      for (const { off, face } of faces) {
-        const ref = bot.blockAt(airPos.plus(off))
-        if (ref?.boundingBox === 'block') {
-          try {
-            await bot.lookAt(airPos.offset(0.5, 0.5, 0.5))
-            await bot.placeBlock(ref, face)
-            await sleep(100)
-            const placed = bot.blockAt(airPos)
-            if (placed && !STRUCTURAL_AIR.has(placed.name) && !WATER_BLOCKS.has(placed.name)) {
-              console.log(`  placed ${item.name} at ${airPos} (verified: ${placed.name})`)
-              trackPlacedBlock(airPos.x, airPos.y, airPos.z)
-              logGameEvent('place', placed.name, 1, airPos.x, airPos.y, airPos.z, { reason: 'place_action' })
-              // Utility blocks are tracked via the blocks table (vision stores them)
-              sendChat('Placed!')
-              state.consecutivePlaceFails = 0
-              return true
-            } else {
-              console.log(`  place ${item.name} at ${airPos} — block not there after placing (got: ${placed?.name})`)
-            }
-          } catch (e) { console.log(`  place attempt failed: ${e.message}`); continue }
-        }
+      // placeBlockAt verifies the exact block landed (not just "something solid")
+      const placedName = await placeBlockAt(item, airPos)
+      if (placedName) {
+        console.log(`  placed ${item.name} at ${airPos} (verified: ${placedName})`)
+        trackPlacedBlock(airPos.x, airPos.y, airPos.z)
+        logGameEvent('place', placedName, 1, airPos.x, airPos.y, airPos.z, { reason: 'place_action' })
+        // Utility blocks are tracked via the blocks table (vision stores them)
+        sendChat('Placed!')
+        state.consecutivePlaceFails = 0
+        return true
       }
     }
     // No air spot found — try digging out a nearby solid block to create space
@@ -225,26 +214,15 @@ async function doPlace(targetName) {
       const dug = await digBlock(digPos)
       if (dug) {
         // Now try placing at the newly cleared spot
-        for (const { off, face } of faces) {
-          const ref = bot.blockAt(digPos.plus(off))
-          if (ref?.boundingBox === 'block') {
-            try {
-              await bot.equip(item, 'hand')
-              await bot.lookAt(digPos.offset(0.5, 0.5, 0.5))
-              await bot.placeBlock(ref, face)
-              await sleep(100)
-              const placed = bot.blockAt(digPos)
-              if (placed && !STRUCTURAL_AIR.has(placed.name) && !WATER_BLOCKS.has(placed.name)) {
-                console.log(`  placed ${item.name} at ${digPos} (verified: ${placed.name}) [dug space]`)
-                trackPlacedBlock(digPos.x, digPos.y, digPos.z)
-                logGameEvent('place', placed.name, 1, digPos.x, digPos.y, digPos.z, { reason: 'place_action' })
-                // Utility blocks are tracked via the blocks table (vision stores them)
-                sendChat('Placed!')
-                state.consecutivePlaceFails = 0
-                return true
-              }
-            } catch (e) { continue }
-          }
+        const placedName = await placeBlockAt(item, digPos)
+        if (placedName) {
+          console.log(`  placed ${item.name} at ${digPos} (verified: ${placedName}) [dug space]`)
+          trackPlacedBlock(digPos.x, digPos.y, digPos.z)
+          logGameEvent('place', placedName, 1, digPos.x, digPos.y, digPos.z, { reason: 'place_action' })
+          // Utility blocks are tracked via the blocks table (vision stores them)
+          sendChat('Placed!')
+          state.consecutivePlaceFails = 0
+          return true
         }
         dugSpot = true
         break  // only dig one block

@@ -8,6 +8,7 @@ const state = require('../core/state')
 const { tickWait, AbortError, sleep, raceAbort } = require('../core/tick')
 const { castVisionRays, TRANSPARENT, PASSABLE, HAZARDS } = require('../perception/vision')
 const { isPlaceable, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
+const { faces } = require('../config/constants')
 const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
 const { liveStep, followPath, dbBlock, centerInBlock } = require('./atomicSteps')
@@ -75,7 +76,12 @@ async function digBlock(pos, opts = {}) {
     return false
   }
 
-  // Check adjacent blocks for hazards before digging
+  // Check adjacent blocks for hazards before digging.
+  // TODO(xray): this reads live bot.blockAt (raw loaded-chunk ground truth), not
+  // the LOS-honest DB (dbBlock) that STRICT liveStep uses — so it can "see"
+  // lava/water it never actually perceived. Inconsistent with nav's honest-DB
+  // discipline, and the `!nb` branch is backwards (an unloaded neighbor is
+  // treated as safe). See TODO.md "digBlock hazard check reads the live world".
   const mode = navMode()
   if (!opts.allowHazards && mode !== 'hazard') {
     const neighbors = [
@@ -134,31 +140,73 @@ async function digBlock(pos, opts = {}) {
   }
 }
 
-// Place a block against refBlock's face, robust to mineflayer's "Event
-// blockUpdate ... did not fire within timeout of 5000ms" — which it raises even
-// when the server DID place the block (missing/late confirmation packet).
-// Routing placeBlock through raceAbort (a 10s timer layered over placeBlock's
-// own 5s blockUpdate wait) both leaked that rejection as an UNHANDLED rejection
-// and misreported real placements as failures (the staircase "couldn't place
-// step" bug). Here we await placeBlock in a single try/catch frame so the
-// rejection is always consumed (placeBlock self-times-out at ~5s, so no hang),
-// then VERIFY against the live world. On success we also record the block in the
-// honest DB — same reason as digBlock: otherwise the placed step stays "unknown"
-// and the STRICT liveStep (dbCanUp's dbSolid check) refuses to climb onto it.
-// Returns true iff the cell is solid afterward.
-async function safePlace(bot, refBlock, faceVec, placePos) {
-  try {
-    await bot.placeBlock(refBlock, faceVec)
-  } catch (e) { /* verify via world state below — covers the blockUpdate timeout */ }
-  let after = null
-  try { after = bot.blockAt(placePos) } catch (e) {}
-  const ok = !!(after && !PASSABLE.has(after.name))
-  if (ok) {
+// Item name → the block name(s) that count as a successful placement of it.
+// Default: the placed block shares the item's name (cobblestone item →
+// cobblestone block), which holds for the overwhelming majority of placeable
+// blocks. A few items map to a differently-named block or transform on
+// placement — list those here. Extend as new cases surface.
+const PLACE_RESULTS = {
+  wet_sponge: ['wet_sponge', 'sponge'], // dries to `sponge` when placed in the Nether
+  redstone: ['redstone_wire'],
+  string: ['tripwire'],
+}
+function acceptedPlacements(itemName) {
+  return PLACE_RESULTS[itemName] || [itemName]
+}
+
+// The six neighbour faces of a target cell as {off, face}: `off` locates the
+// reference block relative to the target; `face` is the face of that reference
+// to click so the new block lands in the target cell (face === -off). Reuses the
+// five sides/floor from config/constants and adds the ceiling reference (place
+// hanging below the block above), which the staircase placer relies on.
+const PLACE_FACES = [...faces, { off: new Vec3(0, 1, 0), face: new Vec3(0, -1, 0) }]
+
+// Place `item` at exactly `placePos`: equip it, then try each reference face
+// until one takes, and VERIFY the resulting block is the one we meant to place
+// (or a known transform of it — see PLACE_RESULTS) rather than merely "something
+// solid". On success, record the cell in the honest DB — same reason as digBlock:
+// otherwise the placed block stays "unknown" and the STRICT liveStep (dbSolid
+// check) refuses to stand/climb on it.
+//
+// Robust to mineflayer's "Event blockUpdate ... did not fire within timeout" —
+// which it raises even when the server DID place the block. placeBlock is awaited
+// in a single try/catch frame so that rejection is always consumed (it
+// self-times-out at ~5s, so no hang), then we verify against the live world.
+// (This is why we don't wrap placeBlock in raceAbort: layering a timer over its
+// own blockUpdate wait leaked the rejection as UNHANDLED and misreported real
+// placements as failures — the old staircase "couldn't place step" bug.)
+//
+// Returns the placed block's name on success, or null. Shared by staircaseStep
+// and the place action in actions/building.js.
+//
+// TODO(directional): does not control the placed block's ORIENTATION. Blocks
+// whose facing derives from player look/click — doors, stairs, slab top/bottom,
+// redstone components (repeaters/comparators, observers, pistons, dispensers) —
+// place in whatever facing the lookAt happens to yield. Future work: accept a
+// desired facing/half and orient the bot + pick the click face/spot to match.
+async function placeBlockAt(item, placePos) {
+  const bot = state.bot
+  const accept = acceptedPlacements(item.name)
+  await raceAbort(bot.equip(item, 'hand'), 10000).catch(() => {})
+  for (const { off, face } of PLACE_FACES) {
+    if (state.abortSignal) return null
+    const ref = bot.blockAt(placePos.plus(off))
+    if (!ref || ref.boundingBox !== 'block') continue // need a full solid face to place against
     try {
-      state.stmts.upsertBlock.run(Math.floor(placePos.x), Math.floor(placePos.y), Math.floor(placePos.z), after.name, state.bot.time?.age || 0)
-    } catch (e) { /* best-effort DB write; next survey corrects it */ }
+      await raceAbort(bot.lookAt(placePos.offset(0.5, 0.5, 0.5)), 10000).catch(() => {})
+      await bot.placeBlock(ref, face)
+    } catch (e) { /* verify against the live world below — covers the blockUpdate timeout */ }
+    await sleep(100)
+    let after = null
+    try { after = bot.blockAt(placePos) } catch (e) {}
+    if (after && accept.includes(after.name)) {
+      try {
+        state.stmts.upsertBlock.run(Math.floor(placePos.x), Math.floor(placePos.y), Math.floor(placePos.z), after.name, state.bot.time?.age || 0)
+      } catch (e) { /* best-effort DB write; next survey corrects it */ }
+      return after.name
+    }
   }
-  return ok
+  return null
 }
 
 // ─── LOS & Waypoint Finding ────────────────────────────────────────
@@ -459,25 +507,10 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     const placePos = new Vec3(cx + stepX * 2, curY, cz + stepZ * 2)
     const placeableSlot = bot.inventory.items().find(i => isPlaceable(i.name))
     if (placeableSlot) {
-      const adjacents = [
-        { pos: new Vec3(placePos.x, placePos.y - 1, placePos.z), face: new Vec3(0, 1, 0) },
-        { pos: new Vec3(placePos.x - 1, placePos.y, placePos.z), face: new Vec3(1, 0, 0) },
-        { pos: new Vec3(placePos.x + 1, placePos.y, placePos.z), face: new Vec3(-1, 0, 0) },
-        { pos: new Vec3(placePos.x, placePos.y, placePos.z - 1), face: new Vec3(0, 0, 1) },
-        { pos: new Vec3(placePos.x, placePos.y, placePos.z + 1), face: new Vec3(0, 0, -1) },
-        { pos: new Vec3(placePos.x, placePos.y + 1, placePos.z), face: new Vec3(0, -1, 0) },
-      ]
-      await raceAbort(bot.equip(placeableSlot, 'hand'), 10000)
-      for (const adj of adjacents) {
-        const refBlock = bot.blockAt(adj.pos)
-        if (refBlock && !TRANSPARENT.has(refBlock.name)) {
-          await raceAbort(bot.lookAt(adj.pos.offset(0.5, 0.5, 0.5)), 10000).catch(() => {})
-          if (await safePlace(bot, refBlock, adj.face, placePos)) {
-            logGameEvent('place', placeableSlot.name, 1, placePos.x, placePos.y, placePos.z, { reason: 'staircase' })
-            console.log(`  stairUp: placed safety block at ${placePos}`)
-            break
-          }
-        }
+      const placedName = await placeBlockAt(placeableSlot, placePos)
+      if (placedName) {
+        logGameEvent('place', placedName, 1, placePos.x, placePos.y, placePos.z, { reason: 'staircase' })
+        console.log(`  stairUp: placed safety block at ${placePos}`)
       }
     }
   }
@@ -502,33 +535,13 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
         console.log('  stairUp: no blocks for step')
         return false
       }
-      await raceAbort(bot.equip(placeableSlot, 'hand'), 10000)
-      // Try all 6 adjacent blocks as placement reference
-      const adjacents = [
-        { pos: new Vec3(cx + stepX, curY - 1, cz + stepZ), face: new Vec3(0, 1, 0) },  // below
-        { pos: new Vec3(cx + stepX, curY + 1, cz + stepZ), face: new Vec3(0, -1, 0) }, // above
-        { pos: new Vec3(cx + stepX - 1, curY, cz + stepZ), face: new Vec3(1, 0, 0) },  // -X side
-        { pos: new Vec3(cx + stepX + 1, curY, cz + stepZ), face: new Vec3(-1, 0, 0) }, // +X side
-        { pos: new Vec3(cx + stepX, curY, cz + stepZ - 1), face: new Vec3(0, 0, 1) },  // -Z side
-        { pos: new Vec3(cx + stepX, curY, cz + stepZ + 1), face: new Vec3(0, 0, -1) }, // +Z side
-      ]
-      let placed = false
-      for (const adj of adjacents) {
-        const refBlock = bot.blockAt(adj.pos)
-        if (refBlock && !TRANSPARENT.has(refBlock.name)) {
-          await raceAbort(bot.lookAt(adj.pos.offset(0.5, 0.5, 0.5)), 10000).catch(() => {})
-          if (await safePlace(bot, refBlock, adj.face, stepPos)) {
-            logGameEvent('place', placeableSlot.name, 1, cx + stepX, curY, cz + stepZ, { reason: 'staircase' })
-            console.log(`  stairUp: placed step at ${cx + stepX},${curY},${cz + stepZ} (ref=${refBlock.name}@${adj.pos.x},${adj.pos.y},${adj.pos.z})`)
-            placed = true
-            break
-          }
-        }
-      }
-      if (!placed) {
-        console.log(`  stairUp: couldn't place step (no solid adjacent blocks)`)
+      const placedName = await placeBlockAt(placeableSlot, stepPos)
+      if (!placedName) {
+        console.log(`  stairUp: couldn't place step (no valid placement)`)
         return false
       }
+      logGameEvent('place', placedName, 1, cx + stepX, curY, cz + stepZ, { reason: 'staircase' })
+      console.log(`  stairUp: placed step at ${cx + stepX},${curY},${cz + stepZ}`)
     }
 
     // Dig space for body at +1 level ahead (feet after stepping up)
@@ -1372,4 +1385,4 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
 // Returns how many blocks are clear, up to `blocks`.
 // verifyWalkable and visionWalk removed — replaced by cardinalWalk
 
-module.exports = { navigateTo, digHeading, until, digBlock, hasWalkableLOS, cardinalWalk, tunnelStep, staircaseStep, pillarUp, isUnderground }
+module.exports = { navigateTo, digHeading, until, digBlock, placeBlockAt, hasWalkableLOS, cardinalWalk, tunnelStep, staircaseStep, pillarUp, isUnderground }
