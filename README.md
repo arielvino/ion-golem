@@ -93,19 +93,23 @@ code instead (convenient for hacking or a quick reset), set `IONGOLEM_DATA_DIR=.
 ## Project layout
 
 ```
-bot.js            entry point — Mineflayer setup, runtime dir, shutdown
-engine.js         main decision loop
-ai.js             AI message handling + system prompt / personalities
-ai-provider.js    pluggable AI backend (claude-code CLI; anthropic-api stub)
-mcp-server.js     MCP server exposing world-query tools to the AI
-actions/          primitive actions (mining, building, crafting, combat, …)
-atomicSteps.js    low-level step primitives
-navigation.js     pathfinding & movement
-memory.js         persistent block/world memory (SQLite via better-sqlite3)
-context.js        builds the per-turn context handed to the AI
-config/           blocks, ranges, personalities, timings, safety
-scripts/          setup-server.sh and other helpers
-server/           local server working dir (gitignored)
+bot.js               entry point — Mineflayer setup, runtime dir, shutdown
+src/
+  core/              state, tick (abort/timing), shared utils
+  ai/                AI message handling, provider (claude-code CLI; anthropic-api
+                     stub), MCP server, per-turn context, system prompt/personalities
+  engine/            main decision loop, autonomous behaviour, background tasks,
+                     safety guard, task stack
+  navigation/        pathfinding & movement, planner, low-level step primitives,
+                     block queries, reachability, goals
+  perception/        vision (ray casting), visibility survey, chunk scanning
+  world/             persistent block/world memory (SQLite), block map, recipes
+  actions/           primitive actions (mining, building, crafting, combat, …)
+  config/            blocks, ranges, personalities, timings, safety
+  lib/               blueprint parser, terminal colors
+test/                unit tests (run: node --test)
+scripts/             setup-server.sh and other helpers
+server/              local server working dir (gitignored)
 ```
 
 Per-bot generated state lives outside the repo by default (see [Where data is

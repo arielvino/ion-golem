@@ -8,18 +8,18 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const state = require('./state')
-const { c, color } = require('./lib/colors')
-const { initDB } = require('./memory')
-const { loadStack, stackTitles } = require('./tasks')
-const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, syncInventory, logChatDB, logGameEvent, upsertVisionChunked } = require('./memory')
-const { initChatLogs, initAI } = require('./ai')
-const { setupAutonomous } = require('./autonomous')
-const { startEngine, stopEngine, interrupt, softInterrupt } = require('./engine')
-const { castVisionRays } = require('./vision')
-const { surveyVisible } = require('./visibility')
-const ranges = require('./config/ranges')
-const { stopAll } = require('./tick')
+const state = require('./src/core/state')
+const { c, color } = require('./src/lib/colors')
+const { initDB } = require('./src/world/memory')
+const { loadStack, stackTitles } = require('./src/engine/tasks')
+const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, syncInventory, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
+const { initChatLogs, initAI } = require('./src/ai/ai')
+const { setupAutonomous } = require('./src/engine/autonomous')
+const { startEngine, stopEngine, interrupt, softInterrupt } = require('./src/engine/engine')
+const { castVisionRays } = require('./src/perception/vision')
+const { surveyVisible } = require('./src/perception/visibility')
+const ranges = require('./src/config/ranges')
+const { stopAll } = require('./src/core/tick')
 
 // --- Bot config ---
 const DEBUG_MODE = process.argv.includes('--debug')
@@ -285,7 +285,7 @@ function createBot() {
         }
 
         if (name) {
-          const { debugChat } = require('./utils')
+          const { debugChat } = require('./src/core/utils')
           debugChat(`[pickup] ${count}x ${name}`)
           logGameEvent('pickup', name, count, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
         } else {

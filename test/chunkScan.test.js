@@ -4,8 +4,8 @@ const assert = require('node:assert')
 const { Vec3 } = require('vec3')
 const mcData = require('minecraft-data')('1.21.11')
 
-const state = require('../state')
-const { resolveTargets, findByTypeMap, findByType, scanCandidates, getOpaqueSet } = require('../chunkScan')
+const state = require('../src/core/state')
+const { resolveTargets, findByTypeMap, findByType, scanCandidates, getOpaqueSet } = require('../src/perception/chunkScan')
 
 const NETHER_BRICK = mcData.blocksByName['nether_bricks'].minStateId // 9133
 const STONE = mcData.blocksByName['stone'].minStateId
@@ -165,7 +165,7 @@ test('exposure: block whose only eye-facing neighbor is opaque is excluded', () 
   // eye at (8.5,70.5,13.5) → block (8,70,8) faces it on +z, neighbor cell (8,70,9)
   const eye = new Vec3(8.5, 70.5, 13.5)
   const { s, ly } = worldToSection(70)
-  const idMap = require('../chunkScan').resolveTargets('nether_bricks')
+  const idMap = require('../src/perception/chunkScan').resolveTargets('nether_bricks')
 
   // exposed: neighbor (8,70,9) is air → returned
   let sections = new Array(NUM_SECTIONS).fill(null)
@@ -188,7 +188,7 @@ test('cone: block behind the eye excluded under FOV, included when omni', () => 
   const eye = new Vec3(8.5, 70.5, 8.5)
   const look = { x: 0, y: 0, z: -1 } // facing north (-z)
   const { s, ly } = worldToSection(70)
-  const idMap = require('../chunkScan').resolveTargets('nether_bricks')
+  const idMap = require('../src/perception/chunkScan').resolveTargets('nether_bricks')
   const sections = new Array(NUM_SECTIONS).fill(null)
   sections[s] = indirect([0, NETHER_BRICK], {
     [idx(8, ly, 2)]: NETHER_BRICK,   // in front (north), air neighbors → exposed

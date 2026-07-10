@@ -2,8 +2,8 @@
 const test = require('node:test')
 const assert = require('node:assert')
 
-const state = require('../state')
-const ranges = require('../config/ranges')
+const state = require('../src/core/state')
+const ranges = require('../src/config/ranges')
 
 test('chunkLoad sentinel resolves to serverViewDistance*16 at runtime', () => {
   state.bot = { game: { serverViewDistance: 10 } }
