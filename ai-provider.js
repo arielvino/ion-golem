@@ -19,7 +19,7 @@ const { c, color } = require('./lib/colors')
 // ——— Claude Code CLI provider (claude -p with stream-json) ———
 
 function createClaudeCodeProvider(opts = {}) {
-  const model = opts.model || process.env.AI_MODEL || 'claude-sonnet-4-5'
+  const model = opts.model || process.env.AI_MODEL || 'sonnet'
   let proc = null
   let ready = false
   let responseResolve = null

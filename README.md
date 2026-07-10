@@ -65,7 +65,7 @@ offline server with the CLI AI backend, so a fresh clone runs with zero edits.
 | Variable      | Default             | Purpose                                                        |
 |---------------|---------------------|---------------------------------------------------------------|
 | `AI_PROVIDER` | `claude-code`       | AI backend. Only `claude-code` ships; `anthropic-api` is a stub. |
-| `AI_MODEL`    | `claude-sonnet-4-5` | Model id passed to the `claude` CLI.                          |
+| `AI_MODEL`    | `sonnet`            | Model id (or alias) passed to the `claude` CLI; `sonnet` tracks the latest Sonnet. |
 | `MC_HOST`     | `localhost`         | Server host to join.                                          |
 | `MC_PORT`     | `25565`             | Server port.                                                  |
 | `MC_VERSION`  | `1.21.11`           | Protocol version.                                             |
