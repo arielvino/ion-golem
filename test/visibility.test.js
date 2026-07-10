@@ -3,9 +3,9 @@ const test = require('node:test')
 const assert = require('node:assert')
 const { Vec3 } = require('vec3')
 
-const state = require('../state')
+const state = require('../src/core/state')
 const mcData = require('minecraft-data')('1.21.11')
-const { viewVector, inFov, blockVisible, surveyVisible, formatSurvey } = require('../visibility')
+const { viewVector, inFov, blockVisible, surveyVisible, formatSurvey } = require('../src/perception/visibility')
 
 const MIN_Y = -64, NUM_SECTIONS = 24
 const sid = (name) => name === 'air' ? 0 : (mcData.blocksByName[name]?.minStateId ?? 0)
