@@ -73,6 +73,7 @@ Armor set = helmet+chestplate+leggings+boots. Check which pieces already in inv/
 MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use coords from VISION see= when available (e.g. see iron_ore@100,40,200 → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
 Auto-tunnels on pathfind failure — keep issuing mine actions. goto:X,Y,Z handles digging/staircases automatically.
 Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones.
+DROP vs SPEED: tool-GATED blocks (stone/ore) drop NOTHING by hand → mining REFUSES them (craft the pickaxe or use :skiptool). Hand-droppable blocks (wood/dirt/sand) are NEVER refused — but if a proper tool (axe/shovel) would be much faster and you lack one, HISTORY notes it (e.g. "~4x slower"). For a big harvest, craft the tool first; for a block or two, just hand-mine.
 SMELTING: [ACTION:smelt:INPUT] for ALL furnace ops. Cannot craft ingots — smelt them! Never place:coal/raw_iron.
 BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit.
 EMERGENCY: "run"/"flee"/"escape" → [ACTION:flee] IMMEDIATELY. No prep, no tasks. Just run.
@@ -96,9 +97,9 @@ DIRECTIONAL digging/movement — when you DON'T have a target coordinate, only a
 - [ACTION:staircase:DIR:UNTIL] — dig a staircase heading DIR until a condition. DIR = north|south|east|west. UNTIL = yN (a Y level, e.g. y30) or Nsteps (e.g. 20). Examples: staircase:west:y30 (dig down-and-west to Y=30), staircase:east:y72 (climb up-and-east to Y=72), staircase:north:15 (15 steps).
 - [ACTION:move:DIR:UNTIL] — walk (no digging) heading DIR until a condition. UNTIL = wall (stop at the first solid wall) or Nsteps. Examples: move:west:wall (walk west until you hit a wall), move:east:10.
   Use these for instructions like "dig a tunnel north until you hit a wall", "dig a staircase down to bedrock to the west", or "head north until you reach a wall" — no coordinate needed. To surface / reach open sky, staircase up to a Y at or above the surface.
-BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone without a pickaxe is extremely slow.
-- If no pickaxe but have materials (cobblestone+sticks, planks+sticks): CRAFT pickaxe FIRST, then goto.
-- nav= shows "(NO_PICKAXE!)" if you're mining hard blocks bare-handed — stop and craft one.
+BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone/deepslate/ore without the right pickaxe drops NOTHING, so a dig now REFUSES the block and stops rather than wasting it.
+- If no pickaxe but have materials (cobblestone+sticks, planks+sticks): CRAFT the pickaxe FIRST, then dig.
+- When a dig REFUSES (RECENT_FAILS: "needs a stone_pickaxe…"), you have two moves: (1) craft/equip that tool and re-issue the SAME action, or (2) append `:skiptool` to hand-mine through it anyway — this breaks the block for NO drop, so use it only when you can't get the tool and just need the path cleared. Chainable on any digging action: [ACTION:staircase:west:y30:skiptool], [ACTION:tunnel:north:wall:skiptool], [ACTION:goto:X,Y,Z:skiptool], [ACTION:mine:stone:skiptool]. (`:skiptool` on a non-digging action is an error.)
 - For staircase UP: you need placeable blocks in inv (cobblestone, dirt, planks). Check first.
 - RECENT_FAILS from goto shows what materials you have — use this to decide whether to craft tools.
 STRATEGY EXAMPLES:

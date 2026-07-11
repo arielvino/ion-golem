@@ -2,13 +2,13 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { tickWait, raceAbort, AbortError, stopAll, isAborted } = require('../core/tick')
-const { navigateTo } = require('../navigation/navigation')
+const { navigateTo, digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
 const { c, color } = require('../lib/colors')
-const { sendChat, debugChat, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
+const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 
-async function doMine(targetName) {
+async function doMine(targetName, opts = {}) {
   stopAll()
   const bot = state.bot
   const mcData = require('minecraft-data')(bot.version)
@@ -52,6 +52,7 @@ async function doMine(targetName) {
 
   const isWood = normalized.includes('log') || normalized.includes('wood') || normalized.includes('stem')
   let mined = 0
+  let speedWarned = false  // harvest speed advisory fires at most once per mine action
 
   for (let batch = 0; batch < batchCount; batch++) {
   if (isAborted()) break
@@ -173,29 +174,29 @@ async function doMine(targetName) {
   try {
     const target = bot.blockAt(bPos)
     if (target && bot.canDigBlock(target)) {
-      if (target.harvestTools) {
-        try {
-          await bot.tool.equipForBlock(target, { requireHarvest: true })
-        } catch (e) {
-          if (!target.canHarvest(bot.heldItem ? bot.heldItem.type : null)) {
-            const validTools = Object.keys(target.harvestTools).map(id => mcData.items[id]?.name).filter(Boolean)
-            console.log(`  warning: mining ${target.name} without proper tool (need: ${validTools.join(', ')})`)
-          }
-        }
-      } else {
-        try { await bot.tool.equipForBlock(target) } catch (e) { console.warn('  [MINE] equip err:', e.message) }
-      }
-      await raceAbort(bot.dig(target), 30000)
-      const check = bot.blockAt(bPos)
-      if (check && check.name === target.name) {
-        console.log(`  dig completed but ${target.name} still there, skipping`)
-        state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
-        recordFailure(`mine:${targetName} - block at ${bPos.x},${bPos.y},${bPos.z} unbreakable (wrong tool?)`)
-      } else {
-        removeBlock(bPos.x, bPos.y, bPos.z)
+      // The dig itself goes through the atomic. Intent 'harvest' equips a
+      // drop-capable tool and REFUSES a block that would drop nothing without one
+      // — unless the AI escalated with :skiptool (→ clear-no-tool, hand-mine it).
+      // The AI explicitly targeted THIS block, so we honour its exact spot:
+      // ignore path/blueprint protection and mine even next to hazards (ore beside
+      // lava is common). The atomic handles equip, break-verify, DB + event log.
+      const intent = opts.skipTool ? 'clear-no-tool' : 'harvest'
+      const res = await digBlock(bPos, { intent, reason: 'mine_action',
+        ignorePathBlocks: true, ignorePlacedBlocks: true, allowHazards: true })
+      // digBlock swallows AbortError (nav's "never throw on abort" contract), so a
+      // mid-dig stop returns {ok:false}. Break cleanly instead of logging a failure.
+      if (isAborted()) break
+      if (res.ok) {
         mined++
-        logGameEvent('mine', target.name, 1, bPos.x, bPos.y, bPos.z, { tool: bot.heldItem?.name || 'hand', reason: 'mine_action' })
         console.log(color(c.green, `\n  mined ${target.name}${batchCount > 1 ? ` (${mined}/${batchCount})` : ''}`))
+        // Harvest succeeded by hand, but a tool would be much faster — note it once
+        // (HISTORY=, not a failure) so the AI can choose to craft one for the batch.
+        if (res.warn && !speedWarned) {
+          speedWarned = true
+          const { tool, factor } = res.warn
+          console.log(color(c.yellow, `  hand-mining ${target.name} — a ${tool} would be ~${factor}x faster`))
+          logEvent(`hand-mining ${rawName} without a ${tool} (~${factor}x slower than with one) — craft a ${tool} to speed up this batch`)
+        }
         try { await tickWait(400) } catch(e) {}
         if (!isAborted()) {
           const drop = bot.nearestEntity(e => e.name === 'item' && e.position.distanceTo(bPos) < 5)
@@ -204,6 +205,14 @@ async function doMine(targetName) {
             console.log('  collected drop')
           }
         }
+      } else if (res.reason === 'need_tool') {
+        console.log(color(c.yellow, `  refusing to hand-mine ${target.name} — no ${res.need} (would drop nothing)`))
+        recordFailure(`mine:${targetName} - ${target.name} needs a ${res.need} to drop anything (mining by hand yields nothing). Craft/equip a ${res.need}, or re-issue [ACTION:mine:${rawName}:skiptool] to break it for no drop.`)
+        break
+      } else {
+        console.log(`  dig failed on ${target.name} (${res.reason})`)
+        state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
+        recordFailure(`mine:${targetName} - block at ${bPos.x},${bPos.y},${bPos.z} ${res.reason === 'unbreakable' ? 'unbreakable (wrong tool?)' : `could not be dug (${res.reason})`}`)
       }
     } else {
       console.log(`  can't dig ${target?.name || 'null'}`)

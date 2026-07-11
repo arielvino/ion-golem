@@ -77,7 +77,6 @@ function getBotContext(chatUsername) {
   const bgInfo = getBackgroundSummary()
   const task = bgInfo ? `bg:${bgInfo}` : (state.currentTask || 'idle')
   let navInfo = state.navigationStatus ? ` nav=${state.navigationStatus}` : ''
-  if (state.navFistMining && navInfo) navInfo += '(NO_PICKAXE!)'
   const queueList = state.actionQueue.map(a => a.actionStr)
   const queueStr = queueList.length > 0 ? queueList.join('→') : 'empty'
 

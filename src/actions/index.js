@@ -20,11 +20,27 @@ const ranges = require('../config/ranges')
 // Actions worth logging to event history (skip noisy/trivial ones)
 const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit'])
 
+// Digging actions that accept a chained `:skiptool` suffix — the AI's escalation
+// to hand-mine through a tool-gated block instead of stopping to craft the tool.
+const SKIPTOOL_ACTIONS = new Set(['mine', 'goto', 'goto~', 'goto!', 'digto', 'come', 'staircase', 'tunnel', 'build', 'place'])
+
 async function executeAction(actionStr, username, opts = {}) {
-  const parts = actionStr.split(':')
+  // Pull a `skiptool` token out of the args wherever it sits (position-independent,
+  // so it survives chaining and the existing `goto:X,Y,Z:tunnel` 4th part).
+  const raw = actionStr.split(':')
+  const skipTool = raw.includes('skiptool')
+  const parts = raw.filter(p => p !== 'skiptool')
   const action = parts[0]
   const target = parts.slice(1).join(':')
-  console.log(color(c.green, `\n  [${state.actionQueue.length} left] exec: ${action}${target ? ':' + target : ''}`))
+  console.log(color(c.green, `\n  [${state.actionQueue.length} left] exec: ${action}${target ? ':' + target : ''}${skipTool ? ':skiptool' : ''}`))
+
+  // :skiptool only means something on a digging action (it selects clear-no-tool
+  // intent). On anything else it's a malformed command — fail loudly, don't ignore.
+  if (skipTool && !SKIPTOOL_ACTIONS.has(action)) {
+    console.log(color(c.yellow, `  ${action}: skiptool is not valid here`))
+    recordFailure(`${action}: :skiptool is only valid on digging actions (${[...SKIPTOOL_ACTIONS].join('/')})`)
+    return false
+  }
 
   const prevTask = state.currentTask
   let succeeded = false
@@ -42,16 +58,16 @@ async function executeAction(actionStr, username, opts = {}) {
         engine.interrupt()
         break
       }
-      case 'come': result = await doCome(username); break
+      case 'come': result = await doCome(username, { skipTool }); break
       case 'attack': result = await doAttack(target); break
-      case 'mine': result = await doMine(target); break
+      case 'mine': result = await doMine(target, { skipTool }); break
       case 'collect': result = await doCollect(); break
       case 'drop': result = await doDrop(target); break
       case 'eat': result = await doEat(); break
       case 'sleep': result = await doSleep(); break
       case 'equip': result = await doEquip(target); break
       case 'unequip': result = await doUnequip(target); break
-      case 'place': result = await doPlace(target); break
+      case 'place': result = await doPlace(target, { skipTool }); break
       case 'craft': {
         const craftParts = target.split(':')
         const craftTarget = craftParts[0]
@@ -60,20 +76,20 @@ async function executeAction(actionStr, username, opts = {}) {
         break
       }
       case 'smelt': result = await doSmelt(target); break
-      case 'goto': result = await doGoto(target); break
-      case 'goto~': result = await doGoto(target, { mode: 'water' }); break
-      case 'goto!': result = await doGoto(target, { allowHazards: true }); break
-      case 'digto': result = await doGoto(target); break
-      case 'staircase': result = await doStaircase(target); break
+      case 'goto': result = await doGoto(target, { skipTool }); break
+      case 'goto~': result = await doGoto(target, { mode: 'water', skipTool }); break
+      case 'goto!': result = await doGoto(target, { allowHazards: true, skipTool }); break
+      case 'digto': result = await doGoto(target, { skipTool }); break
+      case 'staircase': result = await doStaircase(target, { skipTool }); break
       case 'move': result = await doMove(target); break
-      case 'tunnel': result = await doTunnel(target); break
+      case 'tunnel': result = await doTunnel(target, { skipTool }); break
       case 'give': result = await doGive(target, username); break
       case 'wiki': result = await doWiki(target); break
       case 'flee': result = await doFlee(); break
       case 'mount': result = await doMount(target); break
       case 'dismount': result = await doDismount(); break
       case 'sail': result = await doSail(target); break
-      case 'build': result = await doBuild(); break
+      case 'build': result = await doBuild({ skipTool }); break
       case 'turn': result = await doTurn(target); break
       case 'face': result = await doTurn(target); break
       case 'fill': result = await doFill(target); break

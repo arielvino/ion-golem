@@ -21,6 +21,7 @@ const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
 const { reachGoal, headingGoal, until } = require('./goals')
 const { _getReachVec, _reachCheck, _digToward } = require('./reachability')
 const { navMode, clearNavState } = require('./navmode')
+const { blockNeedsMissingTool, toolSpeedAdvice, equipForDig } = require('../world/tooling')
 
 // Summarize tool/material state for failure reasons visible to the AI
 function getToolSummary(bot) {
@@ -45,35 +46,41 @@ function getToolSummary(bot) {
   return parts.length > 0 ? ` (${parts.join('; ')})` : ''
 }
 
-// Blocks that are painfully slow to mine without a pickaxe
-const HARD_BLOCKS = new Set([
-  'stone', 'cobblestone', 'deepslate', 'cobbled_deepslate',
-  'granite', 'diorite', 'andesite', 'tuff', 'calcite',
-  'obsidian', 'netherrack', 'basalt', 'blackstone',
-  'sandstone', 'red_sandstone', 'smooth_stone', 'bricks',
-  'mossy_cobblestone', 'smooth_basalt',
-])
-
 // ─── Movement Primitives ───────────────────────────────────────────
 // All movement goes through liveStep (from atomicSteps.js).
 // walkTo and walkForward have been removed — no mineflayer pathfinder.
 
-// Dig a single block safely — checks neighbors for hazards first
+// The single atomic dig primitive — EVERY block break funnels through here
+// (except the deferred survive/swimUp path). Behaviour is gated by `intent`:
+//
+//   harvest       — the drop IS the point. Equip a drop-capable tool; REFUSE if
+//                   none (mining stone/ore by hand destroys it for nothing).
+//   clear         — I need this cell gone. Equip the fastest tool for speed; still
+//                   REFUSE a tool-gated block (don't waste it) unless skipped.
+//   clear-no-tool — like clear, but dig by hand regardless (the AI's :skiptool).
+//   survive       — dig now, tool be damned (reserved; swimUp handles its own).
+//
+// A refusal sets state.navToolNeed and returns {ok:false, reason:'need_tool'} so
+// the nav driver bails to the AI (craft the tool, or re-issue with :skiptool).
+// Intent comes from opts.intent, else state.navIntent (set by the running nav
+// op), else 'clear'. Returns { ok, reason?, need?, block? }.
 async function digBlock(pos, opts = {}) {
   const bot = state.bot
   const b = bot.blockAt(pos)
-  if (!b || !b.diggable || STRUCTURAL_AIR.has(b.name)) return false
+  if (!b || !b.diggable || STRUCTURAL_AIR.has(b.name)) return { ok: false, reason: 'not_diggable' }
+
+  const intent = opts.intent || state.navIntent || 'clear'
 
   // Protect blueprint-placed blocks from being destroyed by navigation
   if (!opts.ignorePlacedBlocks && state.stmts.isPlaced && state.stmts.isPlaced.get(pos.x, pos.y, pos.z)) {
     console.log(`  digBlock: placed block (blueprint) at ${pos.x},${pos.y},${pos.z}, skipping`)
-    return false
+    return { ok: false, reason: 'placed' }
   }
 
   // Protect path blocks (staircases, tunnels) from being destroyed
   if (!opts.ignorePathBlocks && isPathBlock(pos.x, pos.y, pos.z)) {
     console.log(`  digBlock: path block at ${pos.x},${pos.y},${pos.z}, skipping`)
-    return false
+    return { ok: false, reason: 'path' }
   }
 
   // Check adjacent blocks for hazards before digging.
@@ -94,24 +101,33 @@ async function digBlock(pos, opts = {}) {
       if (!nb) continue
       if (nb.name === 'lava') {
         console.log(`  digBlock: lava adjacent at ${np}, skipping`)
-        return false
+        return { ok: false, reason: 'hazard' }
       }
       if (mode === 'safe' && WATER_BLOCKS.has(nb.name)) {
         console.log(`  digBlock: water adjacent at ${np}, skipping`)
-        return false
+        return { ok: false, reason: 'hazard' }
       }
     }
   }
 
-  try {
-    await bot.tool.equipForBlock(b).catch(() => {})
-    // Detect fist-mining on hard blocks (stone, ores, deepslate, etc.)
-    const held = bot.heldItem
-    if (!held || !held.name.includes('pickaxe')) {
-      if (HARD_BLOCKS.has(b.name) || b.name.includes('_ore')) {
-        state.navFistMining = true
-      }
+  // Tool decision. Equip for the intent, then (for harvest/clear) refuse a block
+  // whose drops need a tool we don't have — destroying it would yield nothing.
+  await equipForDig(bot, b, intent)
+  let warn = null
+  if (intent === 'harvest' || intent === 'clear') {
+    const { needsTool, need } = blockNeedsMissingTool(bot, b)
+    if (needsTool) {
+      state.navToolNeed = { need, block: b.name, pos: { x: pos.x, y: pos.y, z: pos.z } }
+      console.log(color(c.yellow, `  digBlock: ${b.name} needs a ${need} to drop (intent=${intent}) — refusing`))
+      return { ok: false, reason: 'need_tool', need, block: b.name }
     }
+    // Not gated: the block drops by hand. But harvest still accounts for SPEED —
+    // if a proper tool would be much faster and we lack one, surface a non-blocking
+    // warn (the caller decides whether to craft it). We proceed regardless.
+    if (intent === 'harvest') warn = toolSpeedAdvice(bot, b)
+  }
+
+  try {
     // raceAbort: bot.dig waits for the server's block-break confirmation and can
     // hang forever if the bot is pushed out of reach mid-dig (common underwater),
     // never resolving and never observing abortSignal. A bare await here wedged
@@ -119,6 +135,13 @@ async function digBlock(pos, opts = {}) {
     // slot, every queued action (including 'stop') stalled behind it: the
     // "staircase deadlock". Bound it by timeout + abort, like mining.js does.
     await raceAbort(bot.dig(b), 30000)
+    // Verify the block actually broke — bedrock / a block the held item can't
+    // break at all leaves it standing. This is the atomic's single source of
+    // truth for "did it break", so callers (doMine) don't re-check.
+    const after = bot.blockAt(pos)
+    if (after && after.name === b.name && !STRUCTURAL_AIR.has(after.name)) {
+      return { ok: false, reason: 'unbreakable', block: b.name }
+    }
     removeBlock(pos.x, pos.y, pos.z)
     // Record the now-open cell in the honest DB as its true post-dig block
     // (air/cave_air, or water if it flowed in). removeBlock only DELETES the row,
@@ -129,14 +152,13 @@ async function digBlock(pos, opts = {}) {
     // looking at it, so this write is LOS-honest.
     try {
       const bx = Math.floor(pos.x), by = Math.floor(pos.y), bz = Math.floor(pos.z)
-      const after = bot.blockAt(pos)
       state.stmts.upsertBlock.run(bx, by, bz, after ? after.name : 'cave_air', state.bot.time?.age || 0)
     } catch (e) { /* DB write is best-effort; next survey will correct it */ }
     logGameEvent('mine', b.name, 1, pos.x, pos.y, pos.z, { tool: bot.heldItem?.name || 'hand', reason: opts.reason || 'navigation' })
-    return true
+    return { ok: true, block: b.name, warn }
   } catch (e) {
     console.log(`  digBlock err at ${pos}: ${e.message}`)
-    return false
+    return { ok: false, reason: 'error', error: e.message }
   }
 }
 
@@ -669,7 +691,7 @@ async function pillarUp(targetY, maxBlocks = 5) {
     if (ceiling && !PASSABLE.has(ceiling.name) && !TRANSPARENT.has(ceiling.name)) {
       console.log(`  pillarUp: ceiling ${ceiling.name} at Y=${headY}, digging`)
       const dug = await digBlock(ceilPos, { reason: 'pillar_clearance' })
-      if (!dug) { console.log('  pillarUp: can\'t clear ceiling'); break }
+      if (!dug.ok) { console.log('  pillarUp: can\'t clear ceiling'); break }
     }
 
     await raceAbort(bot.equip(slot, 'hand'), 10000)
@@ -1162,6 +1184,17 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
       console.log(color(c.yellow, `  runStrategy[${name}]: step threw (${e.message})`))
     }
 
+    // A digging step hit a tool-gated block and digBlock REFUSED it (harvest/clear
+    // intent, no drop-capable tool). Bail immediately so control returns to the AI
+    // — which crafts the tool or re-issues with :skiptool (→ clear-no-tool, which
+    // never sets this). This is the "think of using tools mid-digging" hook: it
+    // fires on the FIRST such block, wasting none. Carry the tool name out so the
+    // driver's failure message can name it after clearNavState wipes the flag.
+    if (state.navToolNeed) {
+      console.log(color(c.red, `  runStrategy[${name}]: needs a ${state.navToolNeed.need} — bailing so the AI can craft one or use :skiptool`))
+      return { ok: false, reason: 'need_tool', need: state.navToolNeed.need, block: state.navToolNeed.block }
+    }
+
     // Stuck-detection: any increase in the goal's progress scalar resets it.
     const p = goal.progress(ctx)
     if (p > best + 0.5) { stuck = 0; best = p }
@@ -1191,7 +1224,8 @@ async function headingWalkStep(ctx) {
 // 'staircase' digs a descending/ascending stair; 'move' walks without digging.
 async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
   state.navSafetyMode = opts.allowHazards ? 'hazard' : (opts.mode || 'safe')
-  state.navFistMining = false
+  state.navIntent = opts.intent || 'clear'
+  state.navToolNeed = null
   const goal = headingGoal(dir, goalOpts)
   const stepFn = stratName === 'move' ? headingWalkStep
     : stratName === 'tunnel' ? (ctx) => tunnelStep(0, 0, 0, ctx)
@@ -1201,7 +1235,10 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
   if (!res.ok) {
     const p = state.bot.entity.position
     const toolInfo = getToolSummary(state.bot)
-    state.navFailReason = `${stratName} ${res.reason} (${goal.desc}), at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
+    const at = `at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
+    state.navFailReason = res.reason === 'need_tool'
+      ? `${stratName} stopped: ${res.block || 'a block'} needs a ${res.need || 'better tool'} — hand-mining it drops nothing. Craft/equip one and re-issue, or append :skiptool to hand-mine through it anyway. ${at}`
+      : `${stratName} ${res.reason} (${goal.desc}), ${at}`
     console.log(color(c.red, `  nav: ${state.navFailReason}`))
   }
   return res.ok
@@ -1217,7 +1254,8 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
 
   state.navigationStatus = `navigating to ${tx},${ty},${tz}`
   state.navSafetyMode = opts.allowHazards ? 'hazard' : (opts.mode || 'safe')
-  state.navFistMining = false  // reset fist-mining flag
+  state.navIntent = opts.intent || 'clear'   // dig intent for any digging strategy this run picks
+  state.navToolNeed = null
   const lastChatStrategy = { v: null }  // wrapped in object for pass-by-ref
   console.log(`\n  nav: starting toward ${tx},${ty},${tz} (range=${range})`)
 
@@ -1248,14 +1286,17 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
       for (const [nm, fn] of chain) {
         res = await runStrategy(nm, fn, goal, { timeout, stuckLimit: opts.strategy === 'walk' ? 3 : 5 })
         if (res.ok) break
-        // A genuine abort/hazard stops the whole chain; a 'stuck'/'timeout' on
-        // one walk executor may still let the next one try.
-        if (res.reason === 'abort' || res.reason === 'hostile' || res.reason === 'low_health' || res.reason === 'drowning') break
+        // A genuine abort/hazard — or a tool-refusal bail — stops the whole chain;
+        // a 'stuck'/'timeout' on one walk executor may still let the next one try.
+        if (res.reason === 'abort' || res.reason === 'hostile' || res.reason === 'low_health' || res.reason === 'drowning' || res.reason === 'need_tool') break
       }
       if (!res.ok) {
         const p = bot.entity.position
         const toolInfo = getToolSummary(bot)
-        state.navFailReason = `${opts.strategy} ${res.reason}, ${Math.round(p.distanceTo(target))}m remaining, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
+        const at = `${Math.round(p.distanceTo(target))}m remaining, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
+        state.navFailReason = res.reason === 'need_tool'
+          ? `${opts.strategy} stopped: ${res.block || 'a block'} needs a ${res.need || 'better tool'} — hand-mining it drops nothing. Craft/equip one and re-issue, or append :skiptool to hand-mine through it anyway. ${at}`
+          : `${opts.strategy} ${res.reason}, ${at}`
         console.log(color(c.red, `  nav: ${state.navFailReason}`))
       }
       return res.ok
@@ -1296,6 +1337,14 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
         if (!_reachCheck(bot, rv)) {
           const dug = await _digToward(bot, rv)
           if (dug) { failCounts = {}; continue }
+          // The last-meter blocker is tool-gated and digBlock refused it — surface
+          // the exact tool (or :skiptool) instead of spinning 5 "can't reach" rounds.
+          if (state.navToolNeed) {
+            const toolInfo = getToolSummary(bot)
+            state.navFailReason = `goto blocked: ${state.navToolNeed.block} needs a ${state.navToolNeed.need} to dig through — hand-mining drops nothing. Craft/equip one and re-issue, or append :skiptool. ${Math.round(dist)}m away, at ${Math.floor(pos.x)},${Math.round(pos.y)},${Math.floor(pos.z)}${toolInfo}`
+            console.log(color(c.red, `  nav: ${state.navFailReason}`))
+            break
+          }
           console.log(`  nav: close (${Math.round(dist)}m) but can't reach target through blocks`)
           noProgressRounds++
           if (noProgressRounds >= 5) break
@@ -1356,6 +1405,17 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
         break
       }
       failCounts[s.name] = (failCounts[s.name] || 0) + 1
+    }
+
+    // A digging strategy refused a tool-gated block — bail to the AI with the
+    // exact tool it needs (or the :skiptool escalation), like the explicit chain.
+    // Open-ended goto can't route a hand-mine on its own, so it stops here.
+    if (state.navToolNeed) {
+      const p = bot.entity.position
+      const toolInfo = getToolSummary(bot)
+      state.navFailReason = `goto blocked: ${state.navToolNeed.block} needs a ${state.navToolNeed.need} to dig through — hand-mining drops nothing. Craft/equip one and re-issue, or append :skiptool. ${Math.round(p.distanceTo(target))}m away, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
+      console.log(color(c.red, `  nav: ${state.navFailReason}`))
+      break
     }
 
     if (!progress) noProgressRounds++

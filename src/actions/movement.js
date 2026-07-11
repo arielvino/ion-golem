@@ -74,7 +74,7 @@ function doFollow(username) {
   }, 1000)
 }
 
-async function doCome(username) {
+async function doCome(username, opts = {}) {
   stopAll()
   const bot = state.bot
   let tgt = resolvePlayerTarget(bot, username)
@@ -109,7 +109,8 @@ async function doCome(username) {
     const legTimeout = tgt.tracked ? Math.max(30000, Math.round(dist * 2000 + yD * 3000)) : 20000
     const ok = await navigateTo(Math.floor(tgt.x), Math.floor(tgt.y), Math.floor(tgt.z),
       tgt.tracked ? 2 : 6, legTimeout,
-      tgt.tracked ? { reachTarget: () => bot.players[username]?.entity?.position } : { noReachCheck: true })
+      { ...(tgt.tracked ? { reachTarget: () => bot.players[username]?.entity?.position } : { noReachCheck: true }),
+        intent: opts.skipTool ? 'clear-no-tool' : 'clear' })
 
     if (tgt.tracked) {
       // We could see them and the nav still failed — that's a real, reportable failure.
@@ -402,6 +403,9 @@ async function doGoto(target, opts = {}) {
   if (opts.allowHazards) navOpts.allowHazards = true
   if (opts.mode) navOpts.mode = opts.mode
   if (strategy) navOpts.strategy = strategy
+  // :skiptool → hand-mine tool-gated blocks along the way; default 'clear' refuses
+  // them and reports which tool to craft.
+  navOpts.intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await navigateTo(tx, ty, tz, 2, timeout, navOpts)
   if (!ok && !isAborted()) {
     const reason = state.navFailReason || 'unknown'
@@ -450,7 +454,7 @@ function pushFail(msg) {
   state.navFailReason = null
 }
 
-async function doStaircase(arg) {
+async function doStaircase(arg, opts = {}) {
   stopAll()
   const bot = state.bot
   const { dirName, dir, untilStr } = parseHeadingArgs(arg)
@@ -462,7 +466,8 @@ async function doStaircase(arg) {
   const pattern = u.pattern || 'down'
   if (pattern === 'flat') { pushFail(`staircase: "${untilStr}" needs a vertical goal — use yN`); return }
   state.currentTask = `staircase ${dirName} until ${u.desc}`
-  const ok = await digHeading('staircase', dir, { pattern, until: u.fn, untilDesc: u.desc })
+  const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
+  const ok = await digHeading('staircase', dir, { pattern, until: u.fn, untilDesc: u.desc }, { intent })
   if (!ok && !isAborted()) pushFail(`staircase:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
 }
@@ -484,7 +489,7 @@ async function doMove(arg) {
 // condition. The compass heading is committed once, so "tunnel north" can never
 // drift south the way a hand-picked goto coordinate can. UNTIL = wall | Nsteps.
 // (A changing-Y goal belongs to staircase, not tunnel — rejected below.)
-async function doTunnel(arg) {
+async function doTunnel(arg, opts = {}) {
   stopAll()
   const bot = state.bot
   const { dirName, dir, untilStr } = parseHeadingArgs(arg)
@@ -496,7 +501,8 @@ async function doTunnel(arg) {
     return
   }
   state.currentTask = `tunnel ${dirName} until ${u.desc}`
-  const ok = await digHeading('tunnel', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc })
+  const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
+  const ok = await digHeading('tunnel', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc }, { intent })
   if (!ok && !isAborted()) pushFail(`tunnel:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
 }
