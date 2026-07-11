@@ -95,9 +95,9 @@ DIRECTIONAL digging/movement — when you DON'T have a target coordinate, only a
 - [ACTION:staircase:DIR:UNTIL] — dig a staircase heading DIR until a condition. DIR = north|south|east|west. UNTIL = yN (a Y level, e.g. y30) or Nsteps (e.g. 20). Examples: staircase:west:y30 (dig down-and-west to Y=30), staircase:east:y72 (climb up-and-east to Y=72), staircase:north:15 (15 steps).
 - [ACTION:move:DIR:UNTIL] — walk (no digging) heading DIR until a condition. UNTIL = wall (stop at the first solid wall) or Nsteps. Examples: move:west:wall (walk west until you hit a wall), move:east:10.
   Use these for instructions like "dig a tunnel north until you hit a wall", "dig a staircase down to bedrock to the west", or "head north until you reach a wall" — no coordinate needed. To surface / reach open sky, staircase up to a Y at or above the surface.
-BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone without a pickaxe is extremely slow.
-- If no pickaxe but have materials (cobblestone+sticks, planks+sticks): CRAFT pickaxe FIRST, then goto.
-- nav= shows "(NO_PICKAXE!)" if you're mining hard blocks bare-handed — stop and craft one.
+BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone/deepslate/ore without the right pickaxe drops NOTHING, so a dig now REFUSES the block and stops rather than wasting it.
+- If no pickaxe but have materials (cobblestone+sticks, planks+sticks): CRAFT the pickaxe FIRST, then dig.
+- When a dig REFUSES (RECENT_FAILS: "needs a stone_pickaxe…"), you have two moves: (1) craft/equip that tool and re-issue the SAME action, or (2) append `:skiptool` to hand-mine through it anyway — this breaks the block for NO drop, so use it only when you can't get the tool and just need the path cleared. Chainable on any digging action: [ACTION:staircase:west:y30:skiptool], [ACTION:tunnel:north:wall:skiptool], [ACTION:goto:X,Y,Z:skiptool], [ACTION:mine:stone:skiptool]. (`:skiptool` on a non-digging action is an error.)
 - For staircase UP: you need placeable blocks in inv (cobblestone, dirt, planks). Check first.
 - RECENT_FAILS from goto shows what materials you have — use this to decide whether to craft tools.
 STRATEGY EXAMPLES:

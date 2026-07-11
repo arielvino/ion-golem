@@ -2,7 +2,7 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { sleep } = require('../core/tick')
-const { navigateTo } = require('../navigation/navigation')
+const { navigateTo, digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemoryFuzzy, searchContainersFor, logGameEvent, queryUtilityBlocks } = require('../world/memory')
 const { reachDbUtilityBlock } = require('./utilityBlocks')
 const { getInvMap, countMat, generalize, getBestRecipe } = require('../world/recipes')
@@ -406,11 +406,11 @@ async function doCraft(targetName, count = 1) {
         const tp = useTable.position
         if (portable.x === tp.x && portable.y === tp.y && portable.z === tp.z) {
           try {
-            await bot.dig(useTable)
-            removeBlock(tp.x, tp.y, tp.z)
-            logGameEvent('mine', 'crafting_table', 1, tp.x, tp.y, tp.z, { reason: 'pickup_portable' })
+            // Reclaim our own table via the atomic. It's tracked as a placed block,
+            // so ignorePlacedBlocks lets us break it; a table has no harvestTools so
+            // intent 'clear' never refuses. digBlock does removeBlock + DB + log.
+            await digBlock(useTable.position, { intent: 'clear', ignorePlacedBlocks: true, ignorePathBlocks: true, reason: 'pickup_portable' })
             console.log('  broke crafting table (portable)')
-            // removeBlock already handles DB cleanup
             state.portableCraftingTable = null
             await sleep(400)
             const drop = bot.nearestEntity(e => e.name === 'item' && e.position.distanceTo(tp) < 4)

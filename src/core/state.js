@@ -47,7 +47,8 @@ module.exports = {
   // Navigation flags
   navSafetyMode: null,  // null/'safe'/'water'/'hazard' — set by navigateTo, cleared on exit
   navFailReason: null,  // detailed failure reason from last navigateTo failure
-  navFistMining: false,  // true when digging hard blocks without a pickaxe
+  navIntent: null,       // dig intent for the running nav op ('harvest'|'clear'|'clear-no-tool'|'survive') — read by digBlock; set by navigateTo/digHeading
+  navToolNeed: null,     // set by digBlock when it REFUSES a tool-gated block ({need, block, pos}); nav bails so the AI crafts the tool or re-issues with :skiptool
   // (staircase direction + DB pathfind cache now live on per-run strategy ctx — see navigation.js)
   // Database (set by memory.js init)
   db: null,

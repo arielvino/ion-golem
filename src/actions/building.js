@@ -2,7 +2,7 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { sleep, isAborted } = require('../core/tick')
-const { navigateTo, placeBlockAt } = require('../navigation/navigation')
+const { navigateTo, placeBlockAt, digBlock } = require('../navigation/navigation')
 const { removeBlock, trackPlacedBlock, createStructure, getStructures,
         logGameEvent } = require('../world/memory')
 const { getInvMap, countMat } = require('../world/recipes')
@@ -10,7 +10,7 @@ const { offsets } = require('../config/constants')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
 
-async function doPlace(targetName) {
+async function doPlace(targetName, opts = {}) {
   const bot = state.bot
   state.currentTask = `placing ${targetName}`
   const normalized = normalizeItemName(targetName)
@@ -196,7 +196,6 @@ async function doPlace(targetName) {
       }
     }
     // No air spot found — try digging out a nearby solid block to create space
-    const { digBlock } = require('../navigation/navigation')
     const digCandidates = [
       [1,0,0],[-1,0,0],[0,0,1],[0,0,-1],
       [1,0,1],[-1,0,-1],[1,0,-1],[-1,0,1],
@@ -211,8 +210,8 @@ async function doPlace(targetName) {
       // Don't dig out blocks we're standing on
       if (dy === -1) continue
       console.log(`  place: no air spots, digging ${block.name} at ${digPos} to make room`)
-      const dug = await digBlock(digPos)
-      if (dug) {
+      const dug = await digBlock(digPos, { intent: opts.skipTool ? 'clear-no-tool' : 'clear', reason: 'place_clear' })
+      if (dug.ok) {
         // Now try placing at the newly cleared spot
         const placedName = await placeBlockAt(item, digPos)
         if (placedName) {
@@ -241,7 +240,7 @@ async function doPlace(targetName) {
   return false
 }
 
-async function doBuild() {
+async function doBuild(opts = {}) {
   const { stopAll } = require('../core/tick')
   stopAll()
   const bot = state.bot
@@ -321,14 +320,17 @@ async function doBuild() {
       if (isAborted()) { state.currentTask = null; return false }
       const dist = bot.entity.position.distanceTo(c.pos)
       if (dist > 4) await navigateTo(c.pos.x, c.pos.y, c.pos.z, 3, 8000)
-      try {
-        await bot.tool.equipForBlock(c.block).catch(() => {})
-        await bot.dig(c.block)
-        removeBlock(c.pos.x, c.pos.y, c.pos.z)
-        logGameEvent('mine', c.block.name, 1, c.pos.x, c.pos.y, c.pos.z, { reason: 'build_clear' })
+      // Clear via the atomic. Intent 'clear' refuses a tool-gated obstruction (so
+      // the AI is told to get a pickaxe) unless :skiptool was passed. The atomic
+      // handles equip + DB removal + event log.
+      const dug = await digBlock(c.pos, { intent: opts.skipTool ? 'clear-no-tool' : 'clear', reason: 'build_clear' })
+      if (dug.ok) {
         console.log(`    cleared ${c.block.name} at (${c.pos.x},${c.pos.y},${c.pos.z})`)
-      } catch (e) {
-        console.log(`    failed to clear ${c.block.name} at (${c.pos.x},${c.pos.y},${c.pos.z}): ${e.message}`)
+      } else if (dug.reason === 'need_tool') {
+        recordFailure(`build: ${c.block.name} at ${c.pos.x},${c.pos.y},${c.pos.z} needs a ${dug.need} to clear. Craft/equip one, or re-issue [ACTION:build:skiptool] to hand-clear.`)
+        console.log(`    can't clear ${c.block.name} — needs a ${dug.need}`)
+      } else {
+        console.log(`    failed to clear ${c.block.name} at (${c.pos.x},${c.pos.y},${c.pos.z}): ${dug.reason}`)
       }
     }
     await sleep(300)

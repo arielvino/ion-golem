@@ -72,7 +72,9 @@ async function _digToward(bot, tpVec) {
       || findBlockingBlock(eye, new Vec3(cx, cy + 1.62, cz))
   if (blocking) {
     console.log(`  nav: blocked, digging at ${blocking}`)
-    return await digBlock(blocking)
+    // Uses the running nav op's intent (state.navIntent) — a tool-gated blocker
+    // refuses and surfaces via state.navToolNeed, same as any other dig.
+    return (await digBlock(blocking)).ok
   }
   return false
 }

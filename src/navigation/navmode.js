@@ -16,12 +16,13 @@ function navMode() {
 
 // Clear all transient nav state in one place. navigateTo calls this from a
 // `finally`, so every exit path (arrival, timeout, abort, thrown error) leaves
-// clean state — abort paths used to leak navSafetyMode/navFistMining through 7
+// clean state — abort paths used to leak navSafetyMode/navIntent through 7
 // scattered partial clears that didn't all reset every field.
 function clearNavState() {
   state.navigationStatus = null
   state.navSafetyMode = null
-  state.navFistMining = false
+  state.navIntent = null
+  state.navToolNeed = null
 }
 
 module.exports = { navMode, clearNavState }
