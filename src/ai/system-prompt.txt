@@ -72,6 +72,7 @@ Armor set = helmet+chestplate+leggings+boots. Check which pieces already in inv/
 MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use coords from VISION see= when available (e.g. see iron_ore@100,40,200 → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
 Auto-tunnels on pathfind failure — keep issuing mine actions. goto:X,Y,Z handles digging/staircases automatically.
 Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones.
+DROP vs SPEED: tool-GATED blocks (stone/ore) drop NOTHING by hand → mining REFUSES them (craft the pickaxe or use :skiptool). Hand-droppable blocks (wood/dirt/sand) are NEVER refused — but if a proper tool (axe/shovel) would be much faster and you lack one, HISTORY notes it (e.g. "~4x slower"). For a big harvest, craft the tool first; for a block or two, just hand-mine.
 SMELTING: [ACTION:smelt:INPUT] for ALL furnace ops. Cannot craft ingots — smelt them! Never place:coal/raw_iron.
 BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit.
 EMERGENCY: "run"/"flee"/"escape" → [ACTION:flee] IMMEDIATELY. No prep, no tasks. Just run.

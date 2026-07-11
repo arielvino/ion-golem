@@ -6,7 +6,7 @@ const { navigateTo, digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
 const { c, color } = require('../lib/colors')
-const { sendChat, debugChat, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
+const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 
 async function doMine(targetName, opts = {}) {
   stopAll()
@@ -52,6 +52,7 @@ async function doMine(targetName, opts = {}) {
 
   const isWood = normalized.includes('log') || normalized.includes('wood') || normalized.includes('stem')
   let mined = 0
+  let speedWarned = false  // harvest speed advisory fires at most once per mine action
 
   for (let batch = 0; batch < batchCount; batch++) {
   if (isAborted()) break
@@ -188,6 +189,14 @@ async function doMine(targetName, opts = {}) {
       if (res.ok) {
         mined++
         console.log(color(c.green, `\n  mined ${target.name}${batchCount > 1 ? ` (${mined}/${batchCount})` : ''}`))
+        // Harvest succeeded by hand, but a tool would be much faster — note it once
+        // (HISTORY=, not a failure) so the AI can choose to craft one for the batch.
+        if (res.warn && !speedWarned) {
+          speedWarned = true
+          const { tool, factor } = res.warn
+          console.log(color(c.yellow, `  hand-mining ${target.name} — a ${tool} would be ~${factor}x faster`))
+          logEvent(`hand-mining ${rawName} without a ${tool} (~${factor}x slower than with one) — craft a ${tool} to speed up this batch`)
+        }
         try { await tickWait(400) } catch(e) {}
         if (!isAborted()) {
           const drop = bot.nearestEntity(e => e.name === 'item' && e.position.distanceTo(bPos) < 5)

@@ -21,7 +21,7 @@ const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
 const { reachGoal, headingGoal, until } = require('./goals')
 const { _getReachVec, _reachCheck, _digToward } = require('./reachability')
 const { navMode, clearNavState } = require('./navmode')
-const { blockNeedsMissingTool, equipForDig } = require('../world/tooling')
+const { blockNeedsMissingTool, toolSpeedAdvice, equipForDig } = require('../world/tooling')
 
 // Summarize tool/material state for failure reasons visible to the AI
 function getToolSummary(bot) {
@@ -113,6 +113,7 @@ async function digBlock(pos, opts = {}) {
   // Tool decision. Equip for the intent, then (for harvest/clear) refuse a block
   // whose drops need a tool we don't have — destroying it would yield nothing.
   await equipForDig(bot, b, intent)
+  let warn = null
   if (intent === 'harvest' || intent === 'clear') {
     const { needsTool, need } = blockNeedsMissingTool(bot, b)
     if (needsTool) {
@@ -120,6 +121,10 @@ async function digBlock(pos, opts = {}) {
       console.log(color(c.yellow, `  digBlock: ${b.name} needs a ${need} to drop (intent=${intent}) — refusing`))
       return { ok: false, reason: 'need_tool', need, block: b.name }
     }
+    // Not gated: the block drops by hand. But harvest still accounts for SPEED —
+    // if a proper tool would be much faster and we lack one, surface a non-blocking
+    // warn (the caller decides whether to craft it). We proceed regardless.
+    if (intent === 'harvest') warn = toolSpeedAdvice(bot, b)
   }
 
   try {
@@ -150,7 +155,7 @@ async function digBlock(pos, opts = {}) {
       state.stmts.upsertBlock.run(bx, by, bz, after ? after.name : 'cave_air', state.bot.time?.age || 0)
     } catch (e) { /* DB write is best-effort; next survey will correct it */ }
     logGameEvent('mine', b.name, 1, pos.x, pos.y, pos.z, { tool: bot.heldItem?.name || 'hand', reason: opts.reason || 'navigation' })
-    return { ok: true, block: b.name }
+    return { ok: true, block: b.name, warn }
   } catch (e) {
     console.log(`  digBlock err at ${pos}: ${e.message}`)
     return { ok: false, reason: 'error', error: e.message }

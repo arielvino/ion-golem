@@ -26,6 +26,30 @@ function blockNeedsMissingTool(bot, block) {
   return { needsTool: true, need }
 }
 
+// Speed advisory for HAND-mineable blocks: when `block` WILL drop by hand but a
+// proper tool would be MUCH faster and we aren't holding one, name the tool class
+// and the rough speedup so the caller can WARN (not refuse — the drop is fine).
+// Returns null when there's no meaningful speedup to gain: the block is tool-gated
+// (that's the refusal path, not this), fast enough by hand already (dirt/sand/
+// leaves), has no tool class, or we already hold something effective. Call AFTER
+// equipForDig so bot.heldItem reflects the best tool we actually have.
+function toolSpeedAdvice(bot, block) {
+  if (!block || block.harvestTools) return null            // gated → refusal handles it
+  const mat = block.material || ''
+  if (!mat.startsWith('mineable/')) return null            // no effective tool class
+  const tool = mat.slice('mineable/'.length)               // axe | shovel | pickaxe | hoe
+  const handMs = block.digTime(null)
+  if (handMs < 1000) return null                           // already trivial by hand — don't nag
+  const held = bot.heldItem
+  const heldMs = held ? block.digTime(held.type) : handMs
+  if (heldMs <= handMs * 0.5) return null                  // we already hold an effective tool
+  const ref = mc().itemsByName[`stone_${tool}`]            // a cheaply-craftable reference tier
+  if (!ref) return null
+  const factor = Math.round(handMs / block.digTime(ref.id))
+  if (factor < 2) return null
+  return { tool, factor }
+}
+
 // Equip a tool for digging `block`. intent 'harvest' requires a drop-capable tool
 // (won't settle for a faster-but-non-harvesting one); any other intent just grabs
 // the fastest available tool for speed. Best-effort — never throws; the caller
@@ -36,4 +60,4 @@ async function equipForDig(bot, block, intent) {
   } catch (e) { /* no suitable tool in inventory — refusal handled by caller */ }
 }
 
-module.exports = { blockNeedsMissingTool, equipForDig }
+module.exports = { blockNeedsMissingTool, toolSpeedAdvice, equipForDig }
