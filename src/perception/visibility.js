@@ -182,7 +182,19 @@ function _markSightline(eye, cnd, seen, writes, names) {
   return n
 }
 
-function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = 2000 } = {}) {
+// The candidate cap, not maxDistance, bounds how much the bot actually learns per survey:
+// scanCandidates sorts nearest-first and slices to `count`, so once the cap binds, extra
+// radius is scanned and thrown away (measured: at cap 2000, r16 and r64 returned the
+// identical 2000 candidates while scan cost went 3.1ms -> 81.0ms).
+//
+// Raised 2000 -> 4000 now that the fastworld rewrite made the per-candidate cost ~5x
+// cheaper. Effect by call site: the r16-r20 surveys in navigation.js stop being capped at
+// all (only ~2400 exposed candidates exist within r16, so they now get complete coverage),
+// and the r32 surveys double their coverage. Measured r32/cap4000 = ~62ms, still below the
+// ~82ms the ORIGINAL r32/cap2000 cost before the perf work.
+const NAV_CANDIDATE_CAP = 4000
+
+function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = NAV_CANDIDATE_CAP } = {}) {
   const bot = state.bot
   if (!bot?.entity || !state.stmts?.upsertBlock || !state.db) return null
   const eye = bot.entity.position.offset(0, 1.62, 0)
