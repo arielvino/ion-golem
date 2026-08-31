@@ -141,15 +141,41 @@ async function main() {
   }
   console.log(`blockVisible            ${cands.length} candidates, ${bvBad} mismatches`)
 
-  // ── 3. full surveyForNav write set ───────────────────────────────────
-  // Compare what actually lands in the DB: same coords, same block names.
+  // ── 3. block NAMES via fastworld vs bot.blockAt ──────────────────────
+  // The name path is separate from the boolean LOS path and needs its own check: an
+  // earlier bug sized the state->name table from blocksByStateId.length (undefined on
+  // a plain object), so every sightline cell was silently written as 'air' while every
+  // ray test above still passed. Names are what land in the DB — verify them directly.
+  const fwmod = require('../src/perception/fastworld')
+  const names = fwmod.stateNames(require('minecraft-data')(bot.version))
+  const base = bot.entity.position.floored()
+  let nameBad = 0, nameChecked = 0
+  for (let dx = -24; dx <= 24; dx += 2) {
+    for (let dy = -12; dy <= 12; dy += 2) {
+      for (let dz = -24; dz <= 24; dz += 2) {
+        const x = base.x + dx, y = base.y + dy, z = base.z + dz
+        const ref = bot.blockAt(new Vec3(x, y, z))
+        const fast = fwmod.nameAt(names, x, y, z)
+        nameChecked++; checked++
+        const refName = ref ? ref.name : null
+        if (refName !== fast) {
+          nameBad++; fails++
+          if (nameBad <= 5) console.log(`  MISMATCH name @${x},${y},${z}: fast=${fast} ref=${refName}`)
+        }
+      }
+    }
+  }
+  console.log(`nameAt                  ${nameChecked} cells, ${nameBad} mismatches`)
+
+  // ── 4. full surveyForNav write set ───────────────────────────────────
   const { surveyForNav } = require('../src/perception/visibility')
   const capture = []
   const origRun = state.stmts.upsertBlock.run.bind(state.stmts.upsertBlock)
   state.stmts.upsertBlock.run = (x, y, z, n, t) => { capture.push(`${x},${y},${z}=${n}`); return origRun(x, y, z, n, t) }
   surveyForNav({})
   const fastSet = new Set(capture)
-  console.log(`surveyForNav            ${fastSet.size} distinct writes`)
+  const airWrites = capture.filter(s => s.endsWith('=air')).length
+  console.log(`surveyForNav            ${fastSet.size} distinct writes, ${airWrites} air`)
 
   console.log(`\n${fails === 0 ? 'PASS' : 'FAIL'} — ${checked} comparisons, ${fails} mismatches`)
   bot.quit()

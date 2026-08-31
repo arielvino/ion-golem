@@ -17,6 +17,17 @@ const state = require('../core/state')
 // predicate as a Uint8Array indexed by state id is a single array read.
 const _lutCache = new Map()   // versionKey -> Map<nameSet, Uint8Array>
 
+// NOTE: mcData.blocksByStateId is a plain OBJECT, not an array — its `.length` is
+// undefined. Sizing a table from it yields a zero-length buffer that silently rejects
+// every lookup. Always derive the bound from blocksArray.maxStateId.
+function maxStateId(mcData) {
+  let maxId = 0
+  for (const b of mcData.blocksArray) {
+    if (b.maxStateId != null && b.maxStateId > maxId) maxId = b.maxStateId
+  }
+  return maxId
+}
+
 function stateLUT(mcData, nameSet) {
   const vKey = mcData.version?.minecraftVersion || 'x'
   let perVersion = _lutCache.get(vKey)
@@ -24,11 +35,7 @@ function stateLUT(mcData, nameSet) {
   const hit = perVersion.get(nameSet)
   if (hit) return hit
 
-  let maxId = 0
-  for (const b of mcData.blocksArray) {
-    if (b.maxStateId != null && b.maxStateId > maxId) maxId = b.maxStateId
-  }
-  const lut = new Uint8Array(maxId + 1)
+  const lut = new Uint8Array(maxStateId(mcData) + 1)
   for (const b of mcData.blocksArray) {
     if (!nameSet.has(b.name) || b.minStateId == null) continue
     for (let id = b.minStateId; id <= b.maxStateId; id++) lut[id] = 1
@@ -45,8 +52,9 @@ function stateNames(mcData) {
   const hit = _nameCache.get(vKey)
   if (hit) return hit
   const byState = mcData.blocksByStateId
-  const names = new Array(byState.length)
-  for (let i = 0; i < byState.length; i++) names[i] = byState[i]?.name
+  const max = maxStateId(mcData)
+  const names = new Array(max + 1)
+  for (let i = 0; i <= max; i++) names[i] = byState[i]?.name
   _nameCache.set(vKey, names)
   return names
 }
@@ -118,4 +126,4 @@ function nameAt(names, x, y, z) {
   return names[id]
 }
 
-module.exports = { stateLUT, stateNames, getState, inLUT, nameAt, UNLOADED, EMPTY_SECTION }
+module.exports = { stateLUT, stateNames, maxStateId, getState, inLUT, nameAt, UNLOADED, EMPTY_SECTION }

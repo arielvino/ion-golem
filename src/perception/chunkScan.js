@@ -83,6 +83,7 @@ function findByType(query, opts) {
 
 const AIR = new Set(['air', 'cave_air', 'void_air'])
 const _opaqueCache = new Map()
+const _scratch = new Int32Array(4096)   // reused section buffer, see scanCandidates
 
 // State ids of blocks that fully occlude sight (solid full cubes). Used as the
 // "is this face buried?" test: a face whose neighbor is opaque can never be seen.
@@ -100,6 +101,30 @@ function getOpaqueSet(mcData) {
   }
   _opaqueCache.set(key, set)
   return set
+}
+
+// State-id tables for the scan inner loop, which runs ~1.2M times per omni survey.
+// `skip` = 1 for ids that are air or map to no block; `opaque` mirrors getOpaqueSet.
+// A Uint8Array read replaces (array index + property access + Set.has on a string),
+// and lets the loop defer resolving the name string to the handful of survivors.
+const _lutCache = new Map()
+function getScanLUTs(mcData) {
+  const key = mcData.version?.minecraftVersion || 'x'
+  if (_lutCache.has(key)) return _lutCache.get(key)
+  const byState = mcData.blocksByStateId
+  // blocksByStateId is an object, not an array — see fastworld.maxStateId.
+  const n = require('./fastworld').maxStateId(mcData) + 1
+  const skip = new Uint8Array(n)
+  const opaque = new Uint8Array(n)
+  const opaqueSet = getOpaqueSet(mcData)
+  for (let i = 0; i < n; i++) {
+    const n = byState[i]?.name
+    skip[i] = (!n || AIR.has(n)) ? 1 : 0
+    opaque[i] = opaqueSet.has(i) ? 1 : 0
+  }
+  const luts = { skip, opaque }
+  _lutCache.set(key, luts)
+  return luts
 }
 
 // Exposure-aware candidate scan over loaded chunks. Returns [{x,y,z,name,dist}]
@@ -124,6 +149,7 @@ function scanCandidates({ origin, look, cosHalf = -1, maxDistance = 64, count = 
   if (!bot?.world || !bot.entity) return []
   const mcData = require('minecraft-data')(bot.version)
   const opaque = getOpaqueSet(mcData)
+  const { skip: skipLut, opaque: opaqueLut } = getScanLUTs(mcData)
   const byState = mcData.blocksByStateId
   const eye = origin || bot.entity.position
   const maxD = maxDistance, maxD2 = maxD * maxD
@@ -204,14 +230,32 @@ function scanCandidates({ origin, look, cosHalf = -1, maxDistance = 64, count = 
       }
 
       // --- read the section once, then test each cell ---
-      const arr = new Int32Array(4096)
-      for (let i = 0; i < 4096; i++) arr[i] = container.get(i)
+      // Scratch buffer is reused across sections: allocating a fresh Int32Array(4096)
+      // per section churned ~18MB per survey in 16KB blocks, and the GC cost of that
+      // showed up directly as scan time. scanCandidates is synchronous and never
+      // re-enters, so a single shared buffer is safe.
+      const arr = _scratch
+      const singleId = container.value !== undefined ? container.value : -1
+      if (singleId >= 0) arr.fill(singleId)
+      else for (let i = 0; i < 4096; i++) arr[i] = container.get(i)
+      // A uniform opaque section (solid stone, the common case underground) can only
+      // expose its outer shell — every interior cell is surrounded by the same opaque
+      // block, so the exposure test below is false by construction. Skipping the
+      // interior is exact, not an approximation.
+      // ...except when the eye is inside this section, where the original marks the
+      // containing cell exposed via the `!(fx||fy||fz)` branch (bot suffocating in rock).
+      const eyeInSection = eye.x >= baseX && eye.x < baseX + 16 &&
+                           eye.y >= baseY && eye.y < baseY + 16 &&
+                           eye.z >= baseZ && eye.z < baseZ + 16
+      const shellOnly = singleId >= 0 && opaque.has(singleId) && !eyeInSection
       for (let i = 0; i < 4096; i++) {
+        // Cheapest rejections first. The name string is resolved at the bottom, only
+        // for cells that survive air/distance/cone/exposure — reordering this was worth
+        // more than either the buffer reuse or the uniform-section skip.
         const id = arr[i]
-        let name
-        if (idToName) { name = idToName.get(id); if (!name) continue }
-        else { name = byState[id]?.name; if (!name || AIR.has(name)) continue }
+        if (idToName ? !idToName.has(id) : (id >= skipLut.length || skipLut[id] === 1)) continue
         const llx = i & 15, llz = (i >> 4) & 15, lly = (i >> 8) & 15
+        if (shellOnly && llx > 0 && llx < 15 && lly > 0 && lly < 15 && llz > 0 && llz < 15) continue
         const wx = baseX + llx, wy = baseY + lly, wz = baseZ + llz
         const dx = wx + 0.5 - eye.x, dy = wy + 0.5 - eye.y, dz = wz + 0.5 - eye.z
         const d2 = dx * dx + dy * dy + dz * dz
@@ -228,13 +272,14 @@ function scanCandidates({ origin, look, cosHalf = -1, maxDistance = 64, count = 
           const nid = (nlx >= 0 && nlx < 16 && nly >= 0 && nly < 16 && nlz >= 0 && nlz < 16)
             ? arr[(nly << 8) | (nlz << 4) | nlx]
             : stateIdAt(nwx, nwy, nwz)
-          return nid === null || !opaque.has(nid)
+          return nid === null || nid >= opaqueLut.length || opaqueLut[nid] === 0
         }
         if (!exposed && fx) exposed = nbr(llx + fx, lly, llz, wx + fx, wy, wz)
         if (!exposed && fy) exposed = nbr(llx, lly + fy, llz, wx, wy + fy, wz)
         if (!exposed && fz) exposed = nbr(llx, lly, llz + fz, wx, wy, wz + fz)
         if (!exposed) continue
 
+        const name = idToName ? idToName.get(id) : byState[id].name
         if (groups) {
           let g = groups.get(name)
           if (!g) groups.set(name, g = { total: 0, nearest: [] })
