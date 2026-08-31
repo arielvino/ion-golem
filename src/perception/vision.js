@@ -238,6 +238,11 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
   const seen = new Set()
   const solid = new Set()
   const passThrough = mode === 'reach' ? PASSABLE : TRANSPARENT
+  // null under PERCEPTION_SLOW, which drops the loop back to bot.blockAt so
+  // tools/verify-vision.js can diff the two implementations.
+  const rayNames = _forceSlow ? null : (() => {
+    try { return fw.stateNames(require('minecraft-data')(bot.version)) } catch (e) { return null }
+  })()
   const reachMap = new Map() // key -> 'yes' | null (null = needs resolution)
 
   for (let ri = 0; ri < dirs.length; ri++) {
@@ -267,12 +272,20 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         continue
       }
 
-      let block
-      try { block = bot.blockAt(new Vec3(bx, by, bz)) } catch(e) { break }
-      if (!block) break
+      // Only `.name` is ever read from the block here, so this goes through fastworld
+      // rather than building a full prismarine Block per ray step. Both return
+      // null/undefined for an unloaded column, which ends the ray exactly as before.
+      let name
+      if (rayNames) {
+        name = fw.nameAt(rayNames, bx, by, bz)
+        if (!name) break
+      } else {
+        let block
+        try { block = bot.blockAt(new Vec3(bx, by, bz)) } catch(e) { break }
+        if (!block) break
+        name = block.name
+      }
       seen.add(key)
-
-      const name = block.name
       if (passThrough.has(name)) {
         if (passageBlocked) break
         airCount++

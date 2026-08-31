@@ -150,9 +150,11 @@ async function main() {
   const names = fwmod.stateNames(require('minecraft-data')(bot.version))
   const base = bot.entity.position.floored()
   let nameBad = 0, nameChecked = 0
-  for (let dx = -24; dx <= 24; dx += 2) {
-    for (let dy = -12; dy <= 12; dy += 2) {
-      for (let dz = -24; dz <= 24; dz += 2) {
+  // Wide, because castVisionRays now reads names through this path exclusively (it only
+  // ever used block.name), and it is not otherwise output-diffed here.
+  for (let dx = -40; dx <= 40; dx += 2) {
+    for (let dy = -24; dy <= 24; dy += 2) {
+      for (let dz = -40; dz <= 40; dz += 2) {
         const x = base.x + dx, y = base.y + dy, z = base.z + dz
         const ref = bot.blockAt(new Vec3(x, y, z))
         const fast = fwmod.nameAt(names, x, y, z)

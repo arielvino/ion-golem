@@ -29,6 +29,8 @@ const { initDB } = require('../src/world/memory')
 initDB()
 
 const { surveyForNav, surveyVisible } = require('../src/perception/visibility')
+const { castVisionRays } = require('../src/perception/vision')
+const ranges = require('../src/config/ranges')
 
 const stats = (xs) => {
   const s = [...xs].sort((a, b) => a - b)
@@ -67,7 +69,8 @@ async function main() {
 
   const navT = [], navScan = [], navLos = [], navWrite = [], navBA = []
   const visT = [], visBA = []
-  let lastNav = null, lastVis = null
+  const rayT = [], rayBA = []
+  let lastNav = null, lastVis = null, lastRay = null
 
   for (let i = 0; i < ITER + 3; i++) {
     // rotate the bot each iteration so surveyVisible's cone samples varied terrain
@@ -78,16 +81,90 @@ async function main() {
     const nBA = blockAtCalls
     if (!r) { console.error('surveyForNav returned null'); process.exit(1) }
 
+    // Exactly what bot.js:265 runs on the ambient tick — measuring anything else
+    // gives a number that does not correspond to a cost the bot actually pays.
     blockAtCalls = 0
     const t0 = performance.now()
-    const v = surveyVisible({ maxDistance: 40, fovDegrees: 120 })
+    const v = surveyVisible({
+      maxDistance: ranges.sight.ambientSurveyBlocks,
+      fovDegrees: ranges.sight.ambientFovDegrees,
+      cap: ranges.sight.ambientSurveyCap,
+      visibleCap: ranges.sight.ambientVisibleCap,
+    })
     const vT = performance.now() - t0
     const vBA = blockAtCalls
+
+    // castVisionRays shares the ambient 3s interval with surveyVisible (bot.js:265),
+    // so the tick's real cost is the sum of all three.
+    blockAtCalls = 0
+    const t1 = performance.now()
+    const cv = castVisionRays(8, ranges.sight.rayScanBlocks)
+    const cT = performance.now() - t1
+    const cBA = blockAtCalls
 
     if (i < 3) continue // warmup: JIT + sqlite page cache
     navT.push(r.tTotal); navScan.push(r.tScan); navLos.push(r.tLos); navWrite.push(r.tWrite); navBA.push(nBA)
     visT.push(vT); visBA.push(vBA)
-    lastNav = r; lastVis = v
+    rayT.push(cT); rayBA.push(cBA)
+    lastNav = r; lastVis = v; lastRay = cv
+  }
+
+  // ── radius sweep ─────────────────────────────────────────────────────
+  // The whole point of making perception cheap is to afford seeing further. This is the
+  // cost curve: candidate count grows ~r^3 until it saturates the `count` cap, and LOS
+  // ray length grows with r, so the scaling is worse than linear. Read it before
+  // raising ranges.sight — the budget is what a 100ms engine tick can absorb.
+  if (process.env.BENCH_SWEEP === '1') {
+    // Two axes, because they are NOT interchangeable: scanCandidates sorts by distance
+    // and keeps the nearest `maxCandidates`, so raising maxDistance alone just scans
+    // more chunks and discards the extra. Radius sets how far you *could* see; the cap
+    // sets how much of it you actually process.
+    console.log('A. radius at production cap (2000) — extra range is scanned then discarded\n')
+    console.log('    r   candidates   writes    scan     los   write   total')
+    for (const r of [16, 24, 32, 48, 64]) {
+      const ts = [], sc = [], ls = [], wr = []
+      let last = null
+      for (let i = 0; i < 7; i++) {
+        const res = surveyForNav({ maxDistance: r, passableRange: 22, maxCandidates: 2000 })
+        if (i < 2) continue
+        ts.push(res.tTotal); sc.push(res.tScan); ls.push(res.tLos); wr.push(res.tWrite); last = res
+      }
+      console.log(`  ${String(r).padStart(3)}   ${String(last.candidates).padStart(10)}   ${String(last.writes).padStart(6)}` +
+        `  ${stats(sc).med.toFixed(1).padStart(6)}  ${stats(ls).med.toFixed(1).padStart(6)}` +
+        `  ${stats(wr).med.toFixed(1).padStart(6)}  ${stats(ts).med.toFixed(1).padStart(6)}`)
+    }
+
+    console.log('\nB. candidate cap at r32 — the axis that actually adds knowledge\n')
+    console.log(  '  cap   candidates   writes    scan     los   write   total')
+    for (const cap of [2000, 4000, 8000, 16000]) {
+      const ts = [], sc = [], ls = [], wr = []
+      let last = null
+      for (let i = 0; i < 7; i++) {
+        const res = surveyForNav({ maxDistance: 32, passableRange: 22, maxCandidates: cap })
+        if (i < 2) continue
+        ts.push(res.tTotal); sc.push(res.tScan); ls.push(res.tLos); wr.push(res.tWrite); last = res
+      }
+      console.log(`  ${String(cap).padStart(4)}  ${String(last.candidates).padStart(10)}   ${String(last.writes).padStart(6)}` +
+        `  ${stats(sc).med.toFixed(1).padStart(6)}  ${stats(ls).med.toFixed(1).padStart(6)}` +
+        `  ${stats(wr).med.toFixed(1).padStart(6)}  ${stats(ts).med.toFixed(1).padStart(6)}`)
+    }
+
+    console.log('\nC. full survey (cap 20000) — true cost of actually seeing that far\n')
+    console.log(  '    r   candidates   writes    scan     los   write   total')
+    for (const r of [16, 24, 32, 48, 64, 80]) {
+      const ts = [], sc = [], ls = [], wr = []
+      let last = null
+      for (let i = 0; i < 7; i++) {
+        const res = surveyForNav({ maxDistance: r, passableRange: Math.round(r * 0.7), maxCandidates: 20000 })
+        if (i < 2) continue
+        ts.push(res.tTotal); sc.push(res.tScan); ls.push(res.tLos); wr.push(res.tWrite); last = res
+      }
+      console.log(`  ${String(r).padStart(3)}   ${String(last.candidates).padStart(10)}   ${String(last.writes).padStart(6)}` +
+        `  ${stats(sc).med.toFixed(1).padStart(6)}  ${stats(ls).med.toFixed(1).padStart(6)}` +
+        `  ${stats(wr).med.toFixed(1).padStart(6)}  ${stats(ts).med.toFixed(1).padStart(6)}`)
+    }
+    console.log()
+    bot.quit(); process.exit(0)
   }
 
   const nt = stats(navT)
@@ -100,9 +177,16 @@ async function main() {
   console.log(`  split          scan ${pct(navScan)}%   los ${pct(navLos)}%   write ${pct(navWrite)}%`)
   console.log(`  bot.blockAt    ${Math.round(stats(navBA).med)} calls/survey\n`)
 
-  console.log(`surveyVisible (120° r40, ${lastVis.candidatesScanned} scanned, ${lastVis.losTests} los tests)`)
+  console.log(`surveyVisible (${lastVis.fov}° r${lastVis.maxDistance}, ${lastVis.candidatesScanned} scanned, ${lastVis.losTests} los tests)`)
   console.log(row('total', stats(visT)))
-  console.log(`  bot.blockAt    ${Math.round(stats(visBA).med)} calls/survey`)
+  console.log(`  bot.blockAt    ${Math.round(stats(visBA).med)} calls/survey\n`)
+
+  console.log(`castVisionRays (res 8, r${ranges.sight.rayScanBlocks}, ${lastRay?.allBlocks?.length ?? 0} blocks)`)
+  console.log(row('total', stats(rayT)))
+  console.log(`  bot.blockAt    ${Math.round(stats(rayBA).med)} calls/cast\n`)
+
+  const tick = stats(visT).med + stats(rayT).med
+  console.log(`ambient 3s tick (surveyVisible + castVisionRays): ${tick.toFixed(1)}ms blocking`)
 
   bot.quit()
   process.exit(0)
