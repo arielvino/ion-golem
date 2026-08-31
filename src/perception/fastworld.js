@@ -64,9 +64,14 @@ function stateNames(mcData) {
 // chunk column, so a single-entry cache hits well over 90% of the time and needs no
 // invalidation policy beyond chunk unload (below). A Map cache would add staleness
 // risk for a few percent more hit rate — not worth it.
-let _lastKey = -1
+// The empty sentinel MUST be NaN, not -1: the key is `cx * 8388608 + cz`, so chunk
+// (0,-1) computes to exactly -1 and would collide with the sentinel — that chunk would
+// then hit the cache, read _lastCol === null, and report UNLOADED, blocking every ray
+// through it. NaN can never equal a computed key, so `key === _lastKey` is simply false
+// whenever the cache is empty.
+let _lastKey = NaN
 let _lastCol = null
-let _unloadHooked = null    // the bot instance we attached the unload listener to
+let _unloadHooked = null    // the bot instance we attached the invalidation listeners to
 
 const UNLOADED = -1         // column not loaded — caller decides (LOS treats as blocked)
 const EMPTY_SECTION = -2    // section absent — prismarine treats this as all-air
@@ -74,10 +79,17 @@ const EMPTY_SECTION = -2    // section absent — prismarine treats this as all-
 function _hookUnload(bot) {
   if (_unloadHooked === bot) return
   _unloadHooked = bot
-  _lastKey = -1; _lastCol = null
-  // A column object is replaced (not mutated) on unload/reload, so a stale cached
-  // reference would silently serve blocks from a chunk that is no longer loaded.
-  try { bot.world.on('chunkColumnUnload', () => { _lastKey = -1; _lastCol = null }) } catch (e) { /* no emitter */ }
+  _lastKey = NaN; _lastCol = null
+  // A column object is replaced (not mutated) on unload AND on reload — prismarine's
+  // setColumn swaps in a new Column and emits chunkColumnLoad, so listening only for
+  // unload would let a cached reference keep serving blocks from the superseded object
+  // after a chunk resend. Both events clear it; block updates mutate the live column in
+  // place and need no invalidation.
+  try {
+    const clear = () => { _lastKey = NaN; _lastCol = null }
+    bot.world.on('chunkColumnUnload', clear)
+    bot.world.on('chunkColumnLoad', clear)
+  } catch (e) { /* no emitter */ }
 }
 
 // Raw block state id at world coords. Returns UNLOADED / EMPTY_SECTION sentinels.
