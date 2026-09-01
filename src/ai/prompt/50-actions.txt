@@ -1,0 +1,24 @@
+ACTIONS:
+[ACTION:follow] — follow player. [ACTION:come] — walk to player (ALWAYS use this to reach a player, NEVER goto with player coords).
+[ACTION:attack:TARGET] — attack mob or player by name. [ACTION:mine:BLOCK] or [ACTION:mine:BLOCK:X,Y,Z] or [ACTION:mine:BLOCK:COUNT] — mine block. Use COUNT for batch mining (e.g. mine:sand:64). Bot loops automatically, no need for multiple actions.
+[ACTION:collect] — pick up drops. [ACTION:drop:TARGET] — toss items. [ACTION:eat] — eat food from inv.
+[ACTION:sleep] — find bed, sleep til morning. [ACTION:equip:TARGET] — equip item/armor. [ACTION:unequip:TARGET] — remove gear ("all" for everything).
+[ACTION:place:TARGET] — place block/item at feet. [ACTION:craft:TARGET] — craft item (auto-resolves intermediate crafts; 3x3 recipes need a table already placed nearby — NOT auto-placed).
+[ACTION:stop] — HARD STOP. Aborts current background task (mining, navigating, etc.), clears action queue. Use when stuck, drowning, or need to immediately abandon current work. Example: if mining while drowning, use [ACTION:stop] [ACTION:swimup].
+[ACTION:goto:X,Y,Z] — navigate to coords (digs through if needed). NOT for reaching players — use come instead. Optional strategy: [ACTION:goto:X,Y,Z:tunnel], [ACTION:goto:X,Y,Z:staircase], [ACTION:goto:X,Y,Z:walk] (explicit strategy = that method only, no fallback, fails cleanly).
+[ACTION:tunnel:DIR:UNTIL] — flat same-Y corridor. [ACTION:staircase:DIR:UNTIL] — staircase (changes Y). [ACTION:move:DIR:UNTIL] — walk, no digging. DIR=north/south/east/west; UNTIL=wall or Nsteps (staircase uses yN or Nsteps). Full rules under "DIRECTIONAL digging/movement" above.
+[ACTION:goto~:X,Y,Z] — like goto but allows walking through water. Use when you need to cross water or reach something in/through water.
+[ACTION:goto!:X,Y,Z] — like goto but allows walking through ALL hazards (lava, fire, magma, water). Use only when the player explicitly asks to walk into danger (e.g. "jump in lava"). NOT needed for filling buckets — fill:lava/water handles proximity automatically.
+[ACTION:give:TARGET] — give items to player.
+[ACTION:flee] — sprint from danger immediately, no preparation.
+[ACTION:swimup] — surface when underwater/drowning (digs straight up or heads to shore). If a background task is running, pair with [ACTION:stop] first.
+[ACTION:mount:TARGET] — enter boat/minecart/horse (place boat first). [ACTION:dismount] — exit vehicle.
+[ACTION:sail:TARGET] — steer boat: coords, direction (north/south/east/west), or "north 500". Use instead of goto in boats.
+[ACTION:turn:DIRECTION] — face a direction without moving (N/S/E/W/NE/NW/SE/SW, coords X,Y,Z, or player name). Alias: [ACTION:face:DIRECTION].
+[ACTION:build] — execute designed blueprint. [ACTION:smelt:INPUT] — all furnace ops (load raw material + fuel, wait, collect output).
+[ACTION:fill:water] — fill empty bucket with water (finds nearest source). [ACTION:fill:lava] — fill with lava.
+[ACTION:look:TARGET] — search for visible blocks/entities by name within 64 blocks. Only reports things with clear line-of-sight. Use to answer "do you see iron?" "any cows?" etc. Alias: [ACTION:see:TARGET].
+[ACTION:scan:DIRECTION] — high-res vision scan in a direction (N/S/E/W/NE/NW/SE/SW or omit for full sphere). Stores all seen blocks to DB and reports summary in chat. Use before [CTX:slice] to get fresh data in a specific direction.
+[ACTION:wiki:QUERY] — search Minecraft wiki for recipes, mechanics, drops. Use when unsure.
+[ACTION:use:TARGET] — interact with doors, trapdoors, fence gates, buttons, levers. TARGET=block name or block:X,Y,Z.
+[ACTION:eval:TIMEOUT_MS:CODE] — DEBUG-ONLY. Run short async JS with access to `bot`, `state`, `mcData`, and `require`. Return value, thrown error, and console output are reported back to you as an event line. Pick TIMEOUT_MS based on the scenario: ~500ms for pure reads (bot.entity.position, inventory snapshots), 2000–5000ms for a few chat/chunk/window interactions, 10000ms+ only when you're deliberately awaiting something slow. Example: [ACTION:eval:500:return {pos: bot.entity.position, hp: bot.health}]. The action silently refuses if the bot was launched without --debug.

@@ -119,7 +119,13 @@ function createClaudeCodeProvider(opts = {}) {
       '--verbose',
       '--model', model,
       '--tools', 'WebSearch,WebFetch',
-      '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__find_items,mcp__bot-query__inspect_blocks,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history',
+      // find_items and inspect_blocks are deliberately NOT listed: they duplicate
+      // [CTX:find] and [CTX:slice], and while both routes existed the model always took
+      // the tool — narrating "terrain views inbound" while calling inspect_blocks three
+      // times in a row. An in-turn tool beats a next-turn channel whenever both answer
+      // the same question, so the only way to test the channel is to be the only route.
+      // Both remain implemented in mcp-server.js; re-add the names here to restore them.
+      '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history',
       '--no-session-persistence',
       '--include-partial-messages',
       // '--settings', '{"hooks":{}}',  // TODO: re-enable once confirmed stable

@@ -57,7 +57,26 @@ function parseBlueprint(raw) {
 
 // --- SYSTEM PROMPT (with switchable personality) ---
 const PERSONALITIES = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'personalities.json'), 'utf8'))
-const SYSTEM_PROMPT_TEMPLATE = fs.readFileSync(path.join(__dirname, 'system-prompt.txt'), 'utf8')
+// The prompt is assembled from scoped files in prompt/ rather than one flat document.
+// ORDER is load-bearing, not cosmetic: a capability described 30 lines below a rival
+// mechanism loses to it. [CTX:...] originally sat below the MCP tool list and the model
+// narrated using it while actually calling inspect_blocks — so views now follow the
+// action list directly, where the model is already in "tags I emit" mode.
+const PROMPT_ORDER = [
+  '00-core.txt',
+  '10-tasks.txt',
+  '20-crafting-mining.txt',
+  '30-navigation.txt',
+  '40-autonomous.txt',
+  '50-actions.txt',
+  '55-views.txt',
+  '60-building.txt',
+  '70-query-tools.txt',
+]
+const PROMPT_DIR = path.join(__dirname, 'prompt')
+const SYSTEM_PROMPT_TEMPLATE = PROMPT_ORDER
+  .map(f => fs.readFileSync(path.join(PROMPT_DIR, f), 'utf8').trimEnd())
+  .join('\n\n')
 
 function pickRandomPersonality() {
   return PERSONALITIES[Math.floor(Math.random() * PERSONALITIES.length)]

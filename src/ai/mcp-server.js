@@ -95,6 +95,19 @@ const server = new McpServer({
   version: '1.0.0',
 })
 
+// Tools superseded by the [CTX:...] views in the system prompt. They must be left
+// UNREGISTERED rather than merely dropped from --allowedTools: that flag governs
+// permission, not discovery, so the model still finds a denied tool via ToolSearch,
+// retries it, and burns the turn — which is exactly how the bot ended up in a timeout
+// backoff loop. Registering through this shim keeps both restorable by emptying the set.
+//   find_items     -> [CTX:find]
+//   inspect_blocks -> [CTX:slice]
+const SUPERSEDED_BY_CTX = new Set(['find_items', 'inspect_blocks'])
+const registerTool = (name, ...rest) => {
+  if (SUPERSEDED_BY_CTX.has(name)) return
+  return server.tool(name, ...rest)
+}
+
 // Tool: query_structures — list all structures the bot has built
 server.tool(
   'query_structures',
@@ -247,7 +260,7 @@ server.tool(
 )
 
 // Tool: inspect_blocks — query blocks at specific coordinates or in a region from DB
-server.tool(
+registerTool(
   'inspect_blocks',
   'Query what blocks exist at specific coordinates or in a small region from the bot\'s block memory DB. Use to check what\'s at a location before navigating, or to understand terrain around a point. Only returns blocks the bot has previously seen (via vision raycasting).',
   {
@@ -316,7 +329,7 @@ server.tool(
 )
 
 // Tool: find_items — search blocks, containers, and inventory by multiple partial names
-server.tool(
+registerTool(
   'find_items',
   `Search for items/blocks across world blocks DB, containers (chests/furnaces/barrels), and bot inventory.
 Accepts multiple search terms — each is matched as a substring against item/block names.

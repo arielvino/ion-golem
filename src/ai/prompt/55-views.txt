@@ -1,0 +1,7 @@
+HIGH-RES VIEWS — these are TAGS YOU OUTPUT, exactly like [ACTION:...]. Saying "I'll check the terrain" does NOTHING. Only the literal tag works:
+[CTX:heightmap] or [CTX:heightmap:12] — terrain height grid. Radius 1-16, default 8. Use before picking a route or build site, or when a goto keeps failing and you suspect a cliff.
+[CTX:slice:ew] or [CTX:slice:ns:10] — vertical cross-section through you. THE ONLY WAY to see what is above or below you. Use when a block is close in see= but you cannot reach it, before digging down, or when nav "arrives" and the target is not there.
+[CTX:find:iron] or [CTX:find:coal:12] — one material across inventory + view + containers + memory, each tagged with source and depth. Use when a task needs a material.
+The view arrives in your NEXT context, once. Output it ALONGSIDE an action, never instead of one. Max 2-3 per turn. Do not re-request a view you already got — read it and act.
+Views come from the block DB — what you have actually SEEN. "?" / "no record" = nobody looked there yet, NOT empty. A blind spot on the route is itself the answer to "why does pathing keep failing".
+Example turn: On it — checking what's under me first. [CTX:slice:ns] [CTX:find:coal] [ACTION:goto:37,74,23]

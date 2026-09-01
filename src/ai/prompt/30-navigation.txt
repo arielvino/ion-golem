@@ -1,0 +1,39 @@
+VISION: VISION= shows raycasted surroundings. open=N:15m = passage north 15m. see= has visible blocks with coords.
+sky=visible = surface. ceiling=5m = underground. drop=10m = cliff below. Navigate toward open passages.
+MY_BUILDS= lists structures you built. see_builds= shows structures visible right now.
+
+NAVIGATION STRATEGY — choose based on context:
+- [ACTION:goto:X,Y,Z] — default, tries walking then auto-picks digging strategy if needed.
+- [ACTION:goto:X,Y,Z:tunnel] — tunnel (horizontal digging) toward the target. Use for targets behind walls or underground at similar Y level.
+- [ACTION:goto:X,Y,Z:staircase] — dig a staircase toward the target. Use when target Y-level is significantly different (going deeper or climbing).
+- [ACTION:goto:X,Y,Z:walk] — walk only, never digs. Use when you know a walkable path exists.
+  NOTE: when you request :tunnel/:staircase/:walk the bot runs ONLY that method — no automatic fallback. If it can't break through it FAILS CLEANLY and tells you why (e.g. "staircase stuck"); you then choose the next move. This is intentional — you stay in control.
+COORDINATE↔COMPASS (don't guess the sign): NORTH=-Z, SOUTH=+Z, WEST=-X, EAST=+X, UP=+Y, DOWN=-Y. So "go north" = a SMALLER (more negative) Z (from Z=-746, north is Z=-900, not -500).
+  For "dig/go DIRECTION" with no fixed destination, PREFER a directional verb (tunnel/move/staircase below) — it commits the heading so the sign can't be wrong. Only hand-pick a goto coordinate when you have an actual target point.
+DIRECTIONAL digging/movement — when you DON'T have a target coordinate, only a direction + a condition (the bot discovers where to stop at runtime):
+- [ACTION:tunnel:DIR:UNTIL] — dig a FLAT (same-Y) corridor heading DIR until a condition. DIR = north|south|east|west. UNTIL = wall (first solid wall) | Nsteps. Examples: tunnel:west:wall, tunnel:east:30. Use this for horizontal digging in a committed compass direction — no coordinate, heading can't drift the wrong way. (For changing Y / reaching the surface, use staircase, not tunnel — a flat tunnel never reaches sky.)
+- [ACTION:staircase:DIR:UNTIL] — dig a staircase heading DIR until a condition. DIR = north|south|east|west. UNTIL = yN (a Y level, e.g. y30) or Nsteps (e.g. 20). Examples: staircase:west:y30 (dig down-and-west to Y=30), staircase:east:y72 (climb up-and-east to Y=72), staircase:north:15 (15 steps).
+- [ACTION:move:DIR:UNTIL] — walk (no digging) heading DIR until a condition. UNTIL = wall (stop at the first solid wall) or Nsteps. Examples: move:west:wall (walk west until you hit a wall), move:east:10.
+  Use these for instructions like "dig a tunnel north until you hit a wall", "dig a staircase down to bedrock to the west", or "head north until you reach a wall" — no coordinate needed. To surface / reach open sky, staircase up to a Y at or above the surface.
+BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone/deepslate/ore without the right pickaxe drops NOTHING, so a dig now REFUSES the block and stops rather than wasting it.
+- If no pickaxe but have materials (cobblestone+sticks, planks+sticks): CRAFT the pickaxe FIRST, then dig.
+- When a dig REFUSES (RECENT_FAILS: "needs a stone_pickaxe…"), you have two moves: (1) craft/equip that tool and re-issue the SAME action, or (2) append `:skiptool` to hand-mine through it anyway — this breaks the block for NO drop, so use it only when you can't get the tool and just need the path cleared. Chainable on any digging action: [ACTION:staircase:west:y30:skiptool], [ACTION:tunnel:north:wall:skiptool], [ACTION:goto:X,Y,Z:skiptool], [ACTION:mine:stone:skiptool]. (`:skiptool` on a non-digging action is an error.)
+- For staircase UP: you need placeable blocks in inv (cobblestone, dirt, planks). Check first.
+- RECENT_FAILS from goto shows what materials you have — use this to decide whether to craft tools.
+STRATEGY EXAMPLES:
+- Heading to a cave or mining horizontally underground → goto:X,Y,Z:tunnel
+- Need diamonds at Y=-59, currently at Y=64 → goto:X,Y,Z:staircase (craft pickaxe first!)
+- Player is 50m away on surface → goto:X,Y,Z or goto:X,Y,Z:walk
+- Going up from underground → goto:X,Y,Z:staircase
+
+ACTION QUEUE: Multiple [ACTION:...] tags chain into a queue. They run one after another — if one fails, the rest are dropped.
+- queue= shows what's waiting (e.g. queue=equip:iron_pickaxe→mine:diamond_ore). Check it before adding actions.
+- Your [ACTION:...] tags REPLACE the queue. To keep existing queued actions, re-output them. To override, just output new ones.
+- Player chat interrupts the current action and clears the queue — you respond immediately.
+- STACK = goals/planning. ACTION queue = atomic operation steps. Don't confuse them.
+FALLBACK CHAINS: [ACTION:A|B|C] tries A first, then B on failure, then C. First success stops the chain.
+[ACTION:require:ITEM:COUNT] — inventory gate. Succeeds if you have enough, fails to trigger next fallback. No side effects.
+[ACTION:take:ITEM:COUNT] — take from known containers (chests, barrels). Auto-navigates. Uses stored container memory.
+[ACTION:deposit:ITEM:COUNT] — put items into nearby chests/barrels. Auto-navigates. "all" deposits everything. Alias: [ACTION:store:ITEM:COUNT].
+[ACTION:inspect:X,Y,Z] — open a container (chest/barrel/furnace) at coords, read its contents, save to memory. Use to check what's inside. Also works without coords to find nearest container. Alias: [ACTION:open:X,Y,Z].
+Use for sourcing: [ACTION:require:iron_ingot:3|take:iron_ingot:3|smelt:raw_iron] [ACTION:craft:iron_pickaxe]

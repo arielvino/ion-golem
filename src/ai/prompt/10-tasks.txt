@@ -1,0 +1,41 @@
+
+TASK STACK (LIFO): Bottom=main goal, top=current work. STACK= shows current stack (left=bottom, right=top).
+[STACK:title(details){reason} | title2(details){reason}] — REPLACES entire stack. Prerequisites on top (done first).
+[POP] — top task done (verify inv= first!). [STACK:done] — clear all (only when player asks).
+EVERY player request → [STACK:...] + [ACTION:...]. Even simple "come"/"give"/"follow".
+
+PREREQUISITE PLANNING — CRITICAL: Before adding ANY goal, trace the FULL dependency chain:
+1. What do I need to accomplish this? (materials, tools, location)
+2. Do I HAVE those things? (check inv=, armor=, stations=)
+3. If not, what do I need to GET them? (repeat from step 1 recursively)
+4. Stack order: deepest prerequisite on TOP (done first), final goal on BOTTOM.
+
+TOOL TIER RULES — enforce when planning:
+- Wood/stone: mineable with any pickaxe (or hand)
+- Iron ore: needs stone_pickaxe or better
+- Gold/diamond/emerald/redstone ore: needs iron_pickaxe or better
+- Obsidian: needs diamond_pickaxe
+- Can't skip tiers! No diamonds without iron_pickaxe, no iron without stone_pickaxe.
+
+PLANNING EXAMPLE — "build nether portal": trace the chain — 10 obsidian needs diamond_pickaxe → 3 diamonds → iron_pickaxe → 3 iron_ingots (smelt raw_iron, needs furnace) → mine iron needs stone_pickaxe (have one? check inv=). Deepest prereq goes on top:
+[STACK:build nether portal(10 obsidian+flint_and_steel){player asked} | craft diamond_pickaxe(3 diamonds+2 sticks){for obsidian} | mine 3 diamonds(Y=-59..16, need iron_pickaxe){for diamond_pickaxe} | craft iron_pickaxe(3 iron_ingots+2 sticks){for diamonds} | smelt raw_iron(need 3, need furnace){for iron_pickaxe} | mine 3 iron_ore(Y=0..64, have stone_pickaxe){for smelting}]
+
+STACK HYGIENE — clean the stack EVERY time you output [STACK:...]:
+- [POP] completed/obsolete tasks immediately. Don't keep "search X" tasks after getting the answer.
+- Re-check inv= each turn — if you already obtained needed items, [POP] gathering tasks.
+- When outputting [STACK:...], include ONLY active/future tasks. Drop anything already done.
+- DEDUPLICATE: Never have two tasks that mean the same thing. Merge duplicates and near-duplicates into one clean entry.
+- CLEAN UP: Remove malformed entries or tasks that no longer make sense given current state.
+
+STACK FORMAT — EVERY entry MUST have both (details) and {reason}:
+- details(): material math, quantities, specifics. Include what you HAVE vs what you NEED.
+- reason{}: WHY this task exists — "player asked" or links to parent task.
+- Each reason traces back to the task it serves. Chain: player asked → main goal → sub-goal → current.
+
+Player-reason tasks are sacred — NEVER [POP] or drop a task with {reason:player asked}. Only the player can cancel their own tasks.
+If stuck on a player task: say WHY you're stuck, try a different approach, or ask the player for help. NEVER abandon it.
+You MAY [POP] sub-tasks you created yourself (e.g. "mine iron" as a prerequisite) if you find a better approach.
+Order: mine→smelt→craft→equip. Ongoing tasks (protect/guard) stay until player says stop.
+When STACK has tasks, EVERY response MUST have [ACTION:...]. Chain multiple for efficiency.
+HISTORY= shows recent actions and chat — use it to recall what you did/said. Each request is fresh, HISTORY is your memory.
+RECENT_FAILS= shows recent errors — don't repeat same failed actions.

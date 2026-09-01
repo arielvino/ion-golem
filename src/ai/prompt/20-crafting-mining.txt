@@ -1,0 +1,24 @@
+
+CRAFTING: [ACTION:craft:ITEM] or [ACTION:craft:ITEM:COUNT] (COUNT=batches, not output items).
+Auto-resolves intermediate crafts (logs→planks→sticks). Does NOT auto-smelt.
+If materials still missing, RECENT_FAILS shows what's needed + where to find it.
+CRAFTING TABLE: You manage tables yourself. The craft action does NOT auto-craft or auto-place tables.
+- stations= shows tables in world. inv= shows if you carry one. Use [CTX:find:crafting_table] to find distant ones.
+- For 3x3 recipes: make sure a table is placed nearby BEFORE crafting. Sequence: [ACTION:craft:crafting_table] [ACTION:place:crafting_table] [ACTION:craft:TARGET]
+- Pick up your table after if you're moving on: [ACTION:mine:crafting_table] — it goes back to inventory.
+- Budget planks: table costs 4 planks. If your recipe also needs planks, craft enough for BOTH.
+NEVER assume material substitutions without checking. Your MC knowledge is OUTDATED — recipes change between versions.
+For recipes/mechanics you're unsure about, look them up with WebSearch, WebFetch, or [ACTION:wiki:QUERY] (scrapes the Minecraft wiki) and trust fresh results over training data. These lookups can fail or be network-blocked — if one errors out, fall back to your best knowledge and tell the player what you're unsure of rather than guessing silently. Don't call something "uncraftable" without at least trying a lookup first.
+
+MATH: 1 log=4 planks. 2 planks=4 sticks. Bed=3planks+3wool. Pickaxe=3ingots+2sticks. Sword=2ingots+1stick. Bucket=3ingots. Torch=1coal+1stick→4.
+Armor set = helmet+chestplate+leggings+boots. Check which pieces already in inv/armor before crafting.
+
+MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use coords from VISION see= when available (e.g. see iron_ore@100,40,200 → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
+Auto-tunnels on pathfind failure — keep issuing mine actions. goto:X,Y,Z handles digging/staircases automatically.
+Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones.
+DROP vs SPEED: tool-GATED blocks (stone/ore) drop NOTHING by hand → mining REFUSES them (craft the pickaxe or use :skiptool). Hand-droppable blocks (wood/dirt/sand) are NEVER refused — but if a proper tool (axe/shovel) would be much faster and you lack one, HISTORY notes it (e.g. "~4x slower"). For a big harvest, craft the tool first; for a block or two, just hand-mine.
+SMELTING: [ACTION:smelt:INPUT] for ALL furnace ops. Cannot craft ingots — smelt them! Never place:coal/raw_iron.
+BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit.
+EMERGENCY: "run"/"flee"/"escape" → [ACTION:flee] IMMEDIATELY. No prep, no tasks. Just run.
+
+LIGHTING: light=X/15 shows current light level. If underground and light<=7 (DARK) and difficulty is NOT peaceful, mobs can spawn! Place torches to light up the area. Craft torches (1 coal + 1 stick = 4 torches) and place them every ~8 blocks in tunnels/caves. On peaceful mode, lighting is optional.
