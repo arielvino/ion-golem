@@ -101,6 +101,11 @@ function idleWakeReason(bgResult) {
   if (bgResult) return 'task-finished'
   // First idle tick after work ended (or on spawn): announce once, then go quiet.
   if (!state.idleAnnounced) return 'going-idle'
+  // A [CTX:...] view the model asked for is still queued. renderPending() only runs
+  // while building a turn's context, so with an empty stack there is no next turn to
+  // deliver it on — the bot promises to look, goes quiet, and the request sits
+  // forever. The model asking is itself the signal that a call is worth spending.
+  if (state.ctxRequests.length > 0) return 'ctx-pending'
   // Threats / critical self-status — must react even with an empty stack. preCheck encodes
   // the same hostile-scan (range 12), low-health (<=6) and drowning rules nav uses.
   try {
