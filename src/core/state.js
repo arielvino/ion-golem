@@ -61,4 +61,7 @@ module.exports = {
   recentSubtitles: [],  // [{ text, x, y, z, dist, age, category }]
   // Result of the last look/view/scan query, surfaced to the model as LOOKED= for one cycle
   lastObservation: null,  // { ts, text }
+  // High-resolution context views the model asked for with [CTX:...]. Rendered into the
+  // NEXT context build and cleared — one-shot, see ai/ctxProviders.js.
+  ctxRequests: [],  // [{ name, args }]
 }

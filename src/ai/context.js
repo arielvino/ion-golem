@@ -9,6 +9,7 @@ const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityB
 const { stackTitlesWithSrc, stackTop } = require('../engine/tasks')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
+const { providerNames, renderPending } = require('./ctxProviders')
 
 // --- Main context builder ---
 function getBotContext(chatUsername) {
@@ -237,7 +238,16 @@ function getBotContext(chatUsername) {
     bodyStr = ` body=[head:${blockName(headBlock)},feet:${blockName(feetBlock)},floor:${blockName(floorBlock)}]`
   } catch(e) { console.warn('  [CTX] body block detection err:', e.message) }
 
-  return `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${stackInfo}${topDetails}${historyInfo}${failInfo}]`
+  // Names only — the usage syntax lives in the system prompt. Generated from the
+  // provider table so a new view becomes askable the moment it is registered.
+  const ctxAvail = ` CTX_AVAIL=[${providerNames().join(',')}]`
+
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${stackInfo}${topDetails}${historyInfo}${failInfo}${ctxAvail}]`
+
+  // Requested views hang OUTSIDE the blob: they are multi-line grids, and the blob is
+  // parsed elsewhere by splitting on top-level keys, which would mangle them.
+  const views = renderPending()
+  return views ? `${blob}\n${views}` : blob
 }
 
 module.exports = { getBotContext }

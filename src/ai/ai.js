@@ -9,6 +9,7 @@ const { sendChat, debugChat, logEvent } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
 const { logChatDB, logTaskAction } = require('../world/memory')
 const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
+const { isProvider, providerNames } = require('./ctxProviders')
 
 // --- Chat logging ---
 const CHAT_LOG_DIR = () => path.join(state.BOT_DATA_DIR, 'chat-logs')
@@ -147,6 +148,19 @@ async function handleMessage(username, message, historyAs) {
     }
     if (rawReply.includes('[POP]')) stackPop()
 
+    // [CTX:name] / [CTX:name:arg:arg] — ask for a high-resolution view in the NEXT
+    // turn's context. An unknown name is queued rather than dropped: the renderer
+    // turns it into a CTX_ERR line listing the real ones, so the model corrects
+    // itself from the reply. That feedback loop is the entire validation story.
+    for (const m of rawReply.matchAll(/\[CTX:([^\]]+)\]/g)) {
+      const parts = m[1].split(':').map(s => s.trim()).filter(Boolean)
+      if (parts.length === 0) continue
+      const name = parts[0].toLowerCase()
+      state.ctxRequests.push({ name, args: parts.slice(1) })
+      const bad = isProvider(name) ? '' : color(c.red, ` — UNKNOWN (have: ${providerNames().join(', ')})`)
+      console.log(color(c.magenta, `  [CTX] queued ${name}${parts.length > 1 ? ':' + parts.slice(1).join(':') : ''}`) + bad)
+    }
+
     const bpMatch = rawReply.match(/\[BLUEPRINT:([\s\S]*?)\]/)
     if (bpMatch) {
       state.pendingBlueprint = parseBlueprint(bpMatch[1])
@@ -210,7 +224,7 @@ async function handleMessage(username, message, historyAs) {
     function onDelta(_delta, fullText) {
       // Early chat send: before first tag
       if (!chatSent) {
-        const tagIdx = fullText.search(/\[(?:ACTION|STACK|POP|PUSH|GOAL|BLUEPRINT):?/)
+        const tagIdx = fullText.search(/\[(?:ACTION|STACK|POP|PUSH|GOAL|BLUEPRINT|CTX):?/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
@@ -253,6 +267,7 @@ async function handleMessage(username, message, historyAs) {
         .replace(/\s*\[PUSH:[^\]]+\]/g, '')
         .replace(/\s*\[GOAL:[^\]]+\]/g, '')
         .replace(/\s*\[POP\]/g, '')
+        .replace(/\s*\[CTX:[^\]]+\]/g, '')
         .replace(/\s*\[BLUEPRINT:[\s\S]*?\]/g, '').trim()
 
       const playerAskedStack = isPlayerMessage && /stack|status|what.*doing|task/i.test(message)
