@@ -95,31 +95,31 @@ function heightmap(args) {
 //
 // A 1-block-thick plane is a razor: a vein one block off-axis is invisible, which is
 // exactly the near-miss that stalls a dig ("the coal's one block west"). `thick` widens
-// the cut into a slab and PROJECTS it onto a single grid — so thickness costs N times
-// the DB query but the same number of output tokens. That projection is the whole point;
-// stacking N grids would multiply the context cost the CTX channel exists to avoid.
+// the SEARCH for notable blocks either side of the cut — it does NOT widen the grid.
 //
-// Projection needs a rule for which of the N blocks in a column-depth wins. It is
-// ranked by what would change a decision — a lava pocket or an ore anywhere in the slab
-// matters more than the stone around it — so the slab reads as "what is in here", not
-// "what is on the centre plane". The cost is that depth is flattened away, so the two
-// glyphs that actually justify travel ($ and !) get their true coordinates listed below
-// the grid.
-const PROJ_RANK = { '!': 0, '$': 1, '~': 2, '#': 3, ',': 4, '.': 5, '?': 6 }
-
+// The grid stays a true single-plane cross-section on purpose. An earlier version
+// projected the whole slab onto one grid, ranking each cell by the most decision-relevant
+// block at that depth. It read well and cost no extra tokens, but it invented a wall that
+// does not exist: a "#" could be one solid block among four air, and "." only held when
+// every plane was air. The two questions the view is actually for — can I walk here, is
+// this face solid — were the two the projection could not answer, and it needed a
+// disclaimer telling the model how not to misread it. A view that needs that is shaped
+// wrong. Detection is what thickness genuinely fixes, so thickness now feeds only the
+// coordinate list, where an off-plane find can be reported at its true position instead
+// of being smeared onto a fictional surface.
 function slice(args) {
   const bot = state.bot
   const raw = String(args[0] || 'ew').toLowerCase()
   const axis = /^[ns]/.test(raw) ? 'ns' : 'ew'
   const r = clamp(intArg(args[1], 8), 1, 16)
-  // `thick` is the total plane count; even values round UP so a request never yields
-  // fewer planes than asked. half=0 reproduces the original single-plane slice exactly.
-  const half = clamp(Math.floor(intArg(args[2], 1) / 2), 0, 4)
+  // `thick` is the total width of the SEARCH band in planes; even values round up so a
+  // request never scans narrower than asked. thick=1 searches the drawn plane only.
+  const half = clamp(Math.floor(intArg(args[2], 1) / 2), 0, 8)
   const thick = 2 * half + 1
   const p = bot.entity.position.floored()
   const yTop = p.y + 5, yBot = p.y - clamp(r * 2, 6, 32)
 
-  // Along-axis extent is the slice width; cross-axis extent is the slab thickness.
+  // Along-axis extent is the slice width; cross-axis extent is the search band.
   const box = axis === 'ew'
     ? queryRegion(p.x - r, yBot, p.z - half, p.x + r, yTop, p.z + half)
     : queryRegion(p.x - half, yBot, p.z - r, p.x + half, yTop, p.z + r)
@@ -134,25 +134,23 @@ function slice(args) {
     return '#'
   }
 
-  // Collapse the slab: for each (along-axis, y) column-depth keep the highest-ranked
-  // glyph, breaking ties toward the plane nearest the bot so `notable` cites the
-  // closest instance rather than an arbitrary one.
-  const cell = new Map()  // "axisCoord,y" -> { g, off, name, block }
-  const notable = new Map()  // blockName -> { count, best, dist }
+  const crossOf = (b) => (axis === 'ew' ? b.z : b.x) - (axis === 'ew' ? p.z : p.x)
+
+  const cell = new Map()     // "axisCoord,y" -> glyph, CENTRE PLANE ONLY
+  const notable = new Map()  // blockName -> { count, best, dist, offPlane }
   for (const b of box) {
-    const along = axis === 'ew' ? b.x : b.z
-    const off = Math.abs((axis === 'ew' ? b.z : b.x) - (axis === 'ew' ? p.z : p.x))
+    const off = crossOf(b)
     const g = glyph(b.name)
-    const k = `${along},${b.y}`
-    const cur = cell.get(k)
-    if (!cur || PROJ_RANK[g] < PROJ_RANK[cur.g] || (PROJ_RANK[g] === PROJ_RANK[cur.g] && off < cur.off)) {
-      cell.set(k, { g, off, name: b.name })
-    }
+    // Only the bot's own plane is ever drawn, so the grid remains literally true.
+    if (off === 0) cell.set(`${axis === 'ew' ? b.x : b.z},${b.y}`, g)
     if (g === '$' || g === '!') {
       const d = new Vec3(b.x, b.y, b.z).distanceTo(p)
       const rec = notable.get(b.name)
-      if (!rec) notable.set(b.name, { count: 1, best: b, dist: d })
-      else { rec.count++; if (d < rec.dist) { rec.best = b; rec.dist = d } }
+      if (!rec) notable.set(b.name, { count: 1, best: b, dist: d, offPlane: off !== 0 })
+      else {
+        rec.count++
+        if (d < rec.dist) { rec.best = b; rec.dist = d; rec.offPlane = off !== 0 }
+      }
     }
   }
 
@@ -163,39 +161,65 @@ function slice(args) {
     let line = ''
     for (let d = -r; d <= r; d++) {
       if (d === 0 && y === p.y) { line += '@'; continue }
-      const hit = cell.get(`${base + d},${y}`)
-      if (hit) observed++
-      line += hit ? hit.g : '?'
+      const g = cell.get(`${base + d},${y}`)
+      if (g) observed++
+      line += g || '?'
     }
     rows.push(`${String(y).padStart(4)} ${line}`)
   }
 
-  const dirLabel = axis === 'ew' ? 'west <-> east' : 'north <-> south'
+  // Horizontal ruler. Without it the only way to turn a column into a coordinate is to
+  // count characters and add the origin — a silent-error generator, and the grid's whole
+  // job is producing coordinates to act on.
+  const alongLabel = axis === 'ew' ? 'x' : 'z'
+  let ticks = '', labels = ''
+  for (let d = -r; d <= r; d++) {
+    const a = base + d
+    if (a % 5 === 0 && labels.length <= ticks.length) {
+      ticks += "'"
+      labels += String(a)
+    } else {
+      ticks += ' '
+      if (labels.length < ticks.length) labels += ' '
+    }
+  }
+  const pad = ' '.repeat(5)
+
+  const dirLabel = axis === 'ew' ? 'west(-) <-> east(+)' : 'north(-) <-> south(+)'
   const crossLabel = axis === 'ew' ? 'z' : 'x'
-  const head = thick === 1
-    ? `slice ${axis} r=${r} through you@${p.x},${p.y},${p.z} (${dirLabel}, y descending)`
-    : `slice ${axis} r=${r} thick=${thick} through you@${p.x},${p.y},${p.z} (${dirLabel}, y descending)`
 
   const out = [
-    head,
+    `slice ${axis} through you@${p.x},${p.y},${p.z} — ${alongLabel} ${base - r}..${base + r} (${dirLabel}), y ${yTop}..${yBot} (top row is y=${yTop})`,
     `legend: #=solid $=ore/resource ~=water !=hazard ,=plant .=OBSERVED AIR (walkable) @=you ?=never observed`,
+    `every cell is a REAL block on the single plane ${crossLabel}=${axis === 'ew' ? p.z : p.x}; nothing is merged or inferred`,
+    `coverage: ${observed}/${(2 * r + 1) * (yTop - yBot + 1) - 1} cells observed`,
+    pad + labels.trimEnd(),
+    pad + ticks.trimEnd(),
+    ...rows,
   ]
-  if (thick > 1) {
-    out.push(
-      `PROJECTED over ${thick} planes (${crossLabel}=${(axis === 'ew' ? p.z : p.x) - half}..${(axis === 'ew' ? p.z : p.x) + half}); ` +
-      `each cell shows the most decision-relevant block at that depth (! > $ > ~ > # > , > .).`,
-      `So "." means at least one plane is air, NOT a guaranteed 1-wide corridor — re-check with thick=1 before committing to a tunnel.`
-    )
-  }
-  out.push(`coverage: ${observed}/${(2 * r + 1) * (yTop - yBot + 1) - 1} cells observed`)
-  out.push(...rows)
 
   if (notable.size) {
     const items = [...notable.entries()]
       .sort((a, b) => a[1].dist - b[1].dist)
       .slice(0, 8)
-      .map(([name, v]) => `${name} x${v.count} nearest@${v.best.x},${v.best.y},${v.best.z} (${Math.round(v.dist)}m)`)
-    out.push(`notable in slab: ${items.join('  ')}`)
+      .map(([name, v]) => {
+        const off = crossOf(v.best)
+        const where = off === 0
+          ? 'ON this plane'
+          : `${Math.abs(off)} ${axis === 'ew' ? (off > 0 ? 'south' : 'north') : (off > 0 ? 'east' : 'west')} of it`
+        return `${name} x${v.count} nearest@${v.best.x},${v.best.y},${v.best.z} (${Math.round(v.dist)}m, ${where})`
+      })
+    out.push(
+      half === 0
+        ? `notable on this plane:`
+        : `notable within ${half} block(s) either side of the plane (${crossLabel}=${(axis === 'ew' ? p.z : p.x) - half}..${(axis === 'ew' ? p.z : p.x) + half}) — ` +
+          `anything listed as off the plane is NOT drawn in the grid above; go by its coordinates:`,
+      ...items.map((s) => `  ${s}`)
+    )
+  } else {
+    out.push(half === 0
+      ? `notable on this plane: none — widen the search with [CTX:slice:${axis}:${r}:5] to look either side of it`
+      : `notable within ${half} block(s) either side of the plane: no ores or hazards recorded`)
   }
 
   return out.join('\n')
@@ -250,7 +274,7 @@ const PROVIDERS = {
     render: heightmap,
   },
   slice: {
-    usage: 'slice[:ns|ew][:radius][:thick]  vertical cross-section (default ew, r=8, thick=1; thick 1-9 projects a slab, same token cost)',
+    usage: 'slice[:ns|ew][:radius][:thick]  vertical cross-section of the plane you stand on (default ew, r=8); thick widens the ORE/HAZARD SEARCH either side of it, not the grid',
     render: slice,
   },
   find: {
