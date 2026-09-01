@@ -4,7 +4,7 @@ const state = require('../core/state')
 const { tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
 const { navigateTo, digHeading, until } = require('../navigation/navigation')
 const { castVisionRays } = require('../perception/vision')
-const { sendChat, recordFailure, fuzzyMatch } = require('../core/utils')
+const { sendChat, recordFailure, fuzzyMatch, resolvePlayerName } = require('../core/utils')
 const { logGameEvent } = require('../world/memory')
 const { OXYGEN_SURFACED } = require('../config/safety')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
@@ -41,10 +41,15 @@ function resolvePlayerTarget(bot, username) {
   return null
 }
 
-function doFollow(username) {
+function doFollow(requested) {
   stopAll()
   const bot = state.bot
-  if (!resolvePlayerTarget(bot, username)) { sendChat("Can't see you and no locator fix on you!"); return }
+  const username = resolvePlayerName(requested)
+  if (!username || !resolvePlayerTarget(bot, username)) {
+    sendChat("Can't see you and no locator fix on you!")
+    recordFailure(`follow:${requested || '?'} failed (no such player online, or no position/locator fix)`)
+    return false
+  }
   state.currentTask = `following ${username}`
   state.followTarget = username
   let busy = false
@@ -74,11 +79,16 @@ function doFollow(username) {
   }, 1000)
 }
 
-async function doCome(username, opts = {}) {
+async function doCome(requested, opts = {}) {
   stopAll()
   const bot = state.bot
-  let tgt = resolvePlayerTarget(bot, username)
-  if (!tgt) { sendChat("Can't see you and no locator fix on you!"); return }
+  const username = resolvePlayerName(requested)
+  let tgt = username ? resolvePlayerTarget(bot, username) : null
+  if (!tgt) {
+    sendChat("Can't see you and no locator fix on you!")
+    recordFailure(`come:${requested || '?'} failed (no such player online, or no position/locator fix)`)
+    return false
+  }
 
   if (bot.vehicle) {
     console.log(`  come: in vehicle, using sail to ${Math.floor(tgt.x)},${Math.floor(tgt.y)},${Math.floor(tgt.z)}`)

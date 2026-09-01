@@ -57,6 +57,46 @@ function fuzzyMatch(a, b) {
   return a.includes(b) || b.includes(a)
 }
 
+// Usernames the engine uses for non-player actors: 'self' for autonomous loop
+// turns, 'auto' for reflexes, 'event' for game events. None is ever a real
+// player, so a player lookup on one silently resolves to nothing — which reads
+// in chat as "I can't see you" while the player stands a metre away.
+const PSEUDO_USERNAMES = new Set(['self', 'auto', 'event'])
+
+function isPseudoUsername(name) {
+  return PSEUDO_USERNAMES.has(name)
+}
+
+/**
+ * Resolve an action's intended player from whatever names it has to work with
+ * (an explicit action target, then the requesting username), returning a real
+ * key of bot.players or null.
+ *
+ * With no usable candidate, fall back to a player named in the current task
+ * title. Autonomous turns arrive as 'self', and the requesting username is
+ * in-memory only while the task stack is persisted — so after a restart a
+ * restored "follow Sargon564" task has the name in its title and nowhere else.
+ * A candidate that IS a real name but isn't online returns null instead: the
+ * caller asked for someone specific and deserves an honest miss.
+ */
+function resolvePlayerName(...candidates) {
+  const bot = state.bot
+  if (!bot) return null
+  const names = Object.keys(bot.players).filter(n => n !== bot.username)
+  let asked = false
+  for (const cand of candidates) {
+    if (!cand || isPseudoUsername(cand)) continue
+    asked = true
+    const hit = names.find(n => n === cand) ||
+      names.find(n => n.toLowerCase() === cand.toLowerCase())
+    if (hit) return hit
+  }
+  if (asked) return null
+  const title = state.taskStack.length ? state.taskStack[state.taskStack.length - 1].t : ''
+  if (!title) return null
+  return names.find(n => title.toLowerCase().includes(n.toLowerCase())) || null
+}
+
 const MAX_FAILURES = 5
 
 /** Record a recent failure reason (shown to AI as RECENT_FAILS=), keeping the last few */
@@ -81,4 +121,4 @@ function clearQueuedActions(prefix) {
   state.actionQueue = state.actionQueue.filter(a => !a.actionStr.startsWith(prefix))
 }
 
-module.exports = { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget, clearQueuedActions }
+module.exports = { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget, clearQueuedActions, isPseudoUsername, resolvePlayerName }

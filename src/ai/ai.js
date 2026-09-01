@@ -5,7 +5,7 @@ const state = require('../core/state')
 const { getBotContext } = require('./context')
 const { saveStack, stackTitles, stackTop, stackPop } = require('../engine/tasks')
 const { c, color } = require('../lib/colors')
-const { sendChat, debugChat, logEvent } = require('../core/utils')
+const { sendChat, debugChat, logEvent, isPseudoUsername, resolvePlayerName } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
 const { logChatDB, logTaskAction } = require('../world/memory')
 const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
@@ -123,7 +123,11 @@ async function handleMessage(username, message, historyAs) {
   // them to the cheaper/faster Haiku provider. Everything else stays on Sonnet.
   const isMonitorCall = username === 'self' && typeof message === 'string' && message.startsWith('[MONITOR]')
   const activeProvider = isMonitorCall ? monitorProvider : provider
-  const playerForContext = isPlayerMessage ? username : (historyAs && historyAs !== 'self' ? historyAs : null)
+  // Autonomous turns have no requesting player, so fall back to the one the
+  // current task names. Without it a "follow X" task runs blind — PLAYER= (and
+  // its locator fix) is only emitted on turns where X happens to talk to us.
+  const playerForContext = isPlayerMessage ? username
+    : (historyAs && !isPseudoUsername(historyAs) ? historyAs : resolvePlayerName())
   const context = getBotContext(playerForContext)
   addToHistory(histKey, 'user', `${context}\n${username}: ${message}`)
   logChat({ type: 'user', username, message, context })
