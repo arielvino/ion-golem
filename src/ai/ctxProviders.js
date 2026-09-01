@@ -40,6 +40,13 @@ const COVER = new Set([
 
 const isPlant = (n) => /_log$|_leaves$|_wood$|mushroom_block|_stem$|cactus|bamboo/.test(n)
 
+// The survey records air as well as solids — it is ~60% of the table — so these views
+// must exclude it explicitly. Treating "has a row" as "is solid" renders every observed
+// air cell as rock and every heightmap column as the top of the sky.
+// Air that WAS observed is not the same as a cell with no row at all, and the slice
+// distinguishes the two: known-empty is navigable, unknown is where to go look.
+const AIR = new Set(['air', 'cave_air', 'void_air'])
+
 // ── heightmap ────────────────────────────────────────────────────────────
 // Topmost recorded solid per column, as a grid. Rows run north->south, columns
 // west->east, matching how the coordinates read (+z is south, +x is east).
@@ -51,7 +58,7 @@ function heightmap(args) {
 
   const top = new Map()   // "x,z" -> { y, name }
   for (const b of queryRegion(p.x - r, yLo, p.z - r, p.x + r, yHi, p.z + r)) {
-    if (COVER.has(b.name)) continue
+    if (AIR.has(b.name) || COVER.has(b.name)) continue
     const k = `${b.x},${b.z}`
     const cur = top.get(k)
     if (!cur || b.y > cur.y) top.set(k, { y: b.y, name: b.name })
@@ -101,10 +108,12 @@ function slice(args) {
   for (const b of box) cell.set(`${axis === 'ew' ? b.x : b.z},${b.y}`, b.name)
 
   const glyph = (n) => {
-    if (!n) return '.'
+    if (!n) return '?'          // no row at all — never observed
+    if (AIR.has(n)) return '.'  // observed and empty — walkable
     if (HAZARDS.has(n)) return '!'
     if (WATER_BLOCKS.has(n)) return '~'
     if (RESOURCES.has(n)) return '$'
+    if (COVER.has(n)) return ','  // ground cover — walk straight through
     return '#'
   }
 
@@ -122,7 +131,7 @@ function slice(args) {
   const dirLabel = axis === 'ew' ? 'west <-> east' : 'north <-> south'
   return [
     `slice ${axis} r=${r} through you@${p.x},${p.y},${p.z} (${dirLabel}, y descending)`,
-    `legend: #=solid $=ore/resource ~=water !=hazard @=you .=no record (air OR never observed)`,
+    `legend: #=solid $=ore/resource ~=water !=hazard ,=plant .=OBSERVED AIR (walkable) @=you ?=never observed`,
     ...rows,
   ].join('\n')
 }
