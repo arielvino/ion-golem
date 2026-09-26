@@ -3,18 +3,16 @@ const test = require('node:test')
 const assert = require('node:assert')
 const { GoalTree, GoalTreeError } = require('../src/engine/goalTree')
 
-const world = (inv) => ({ count: (item) => inv[item] || 0 })
-
 // The iron-pickaxe tree from BRAIN_PLAN.md §3, trimmed.
 function pickaxeTree() {
   const t = new GoalTree()
   const root = t.addGoal(null, { text: 'give Sargon an iron_pickaxe', reason: 'Sargon asked' })
   const craft = t.addStrategy(root.id, { text: 'craft', est: { min: 15, conf: 0.8 } })
   const loot = t.addStrategy(root.id, { text: 'loot a village chest', est: { conf: 0.3 } })
-  const ingots = t.addGoal(craft.id, { text: '3 iron_ingot', check: 'have:iron_ingot:3' })
-  const sticks = t.addGoal(craft.id, { text: '2 stick', check: 'have:stick:2' })
+  const ingots = t.addGoal(craft.id, { text: '3 iron_ingot' })
+  const sticks = t.addGoal(craft.id, { text: '2 stick' })
   const smelt = t.addStrategy(ingots.id, { text: 'smelt raw iron' })
-  const raw = t.addGoal(smelt.id, { text: '3 raw_iron', check: 'have:raw_iron:3' })
+  const raw = t.addGoal(smelt.id, { text: '3 raw_iron' })
   const mine = t.addStrategy(raw.id, { text: 'strip-mine at y15' })
   const cave = t.addStrategy(raw.id, { text: 'cave-surface ore' })
   return { t, root, craft, loot, ingots, sticks, smelt, raw, mine, cave }
@@ -26,44 +24,31 @@ test('first strategy auto-activates; later ones stay dormant', () => {
   assert.strictEqual(loot.status, 'dormant')
 })
 
-test('root goals must be model-judged', () => {
-  const t = new GoalTree()
-  assert.throws(() => t.addGoal(null, { text: 'x', check: 'have:stick:1' }), GoalTreeError)
-})
-
-test('bad check syntax is rejected with a usable message', () => {
-  const t = new GoalTree()
-  const r = t.addGoal(null, { text: 'r' })
-  const s = t.addStrategy(r.id, { text: 's' })
-  assert.throws(() => t.addGoal(s.id, { text: 'x', check: 'owns iron' }), /have:<item>:<n>/)
-})
-
 test('active path descends to the leaf strategy', () => {
   const { t } = pickaxeTree()
   assert.deepStrictEqual(t.activePath().map(n => n.id), ['g1', 's2', 'g4', 's6', 'g7', 's8'])
   assert.deepStrictEqual(t.stackView().map(e => e.t), ['give Sargon an iron_pickaxe', '3 iron_ingot', '3 raw_iron'])
 })
 
-test('code checks collapse satisfied subgoals and roll up', () => {
+test('model verdicts on subgoals roll up; the parent goal still waits for its own', () => {
   const { t, ingots, sticks, smelt, craft, root } = pickaxeTree()
-  t.refresh(world({ stick: 4 }))
-  assert.strictEqual(sticks.status, 'done')
+  t.markGoal(sticks.id, 'done')
   assert.strictEqual(craft.status, 'active')
-  t.refresh(world({ stick: 4, iron_ingot: 3 }))
-  assert.strictEqual(ingots.status, 'done')
-  // craft had both subgoals done → done; the model-judged root waits for a verdict
+  t.markGoal(ingots.id, 'done')
+  // craft had both subgoals done → done; the root is not assumed done
   assert.strictEqual(craft.status, 'done')
   assert.strictEqual(root.status, 'verify')
-  assert.strictEqual(smelt.status, 'active') // untouched: ingots were satisfied from elsewhere
+  assert.strictEqual(smelt.status, 'active') // untouched: the model judged ingots done directly
   t.markGoal(root.id, 'done')
   assert.strictEqual(t.focus(), null)
 })
 
-test('code checks latch: consuming the items does not reopen the goal', () => {
-  const { t, sticks } = pickaxeTree()
-  t.refresh(world({ stick: 2 }))
-  t.refresh(world({}))
-  assert.strictEqual(sticks.status, 'done')
+test('a finished leaf strategy never marks its goal done by itself', () => {
+  const { t, mine, raw, smelt } = pickaxeTree()
+  t.completeStrategy(mine.id)
+  assert.strictEqual(raw.status, 'verify')
+  assert.strictEqual(smelt.status, 'active')
+  assert.match(t.render(), /g7 GOAL 3 raw_iron \[verify\] ← confirm done\?/)
 })
 
 test('switching strategy keeps the old one dormant', () => {
@@ -119,18 +104,14 @@ test('after: edges gate subgoal order', () => {
   const t = new GoalTree()
   const r = t.addGoal(null, { text: 'wooden_pickaxe' })
   const s = t.addStrategy(r.id, { text: 'craft' })
-  const table = t.addGoal(s.id, { text: 'crafting_table', check: 'have:crafting_table:1' })
-  const planks = t.addGoal(s.id, { text: 'planks', check: 'have:oak_planks:3', after: [] })
-  const pick = t.addGoal(s.id, { text: 'pickaxe', check: 'have:wooden_pickaxe:1', after: [table.id, planks.id] })
+  const table = t.addGoal(s.id, { text: 'crafting_table' })
+  const planks = t.addGoal(s.id, { text: 'planks', after: [] })
+  const pick = t.addGoal(s.id, { text: 'pickaxe', after: [table.id, planks.id] })
   assert.deepStrictEqual(t.actionable(s.id).map(g => g.id), [table.id, planks.id])
-  t.refresh(world({ crafting_table: 1, oak_planks: 3 }))
+  t.markGoal(table.id, 'done')
+  t.markGoal(planks.id, 'done')
   assert.deepStrictEqual(t.actionable(s.id).map(g => g.id), [pick.id])
   assert.throws(() => t.addGoal(s.id, { text: 'x', after: ['g99'] }), /not a sibling/)
-})
-
-test('a subgoal repeating an ancestor check is rejected as a cycle', () => {
-  const { t, mine } = pickaxeTree()
-  assert.throws(() => t.addGoal(mine.id, { text: 'ingots again', check: 'have:iron_ingot:3' }), /cycle/)
 })
 
 test('focus is the newest open root', () => {

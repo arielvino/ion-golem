@@ -9,35 +9,17 @@
 // strategy → next actionable subgoal → …) is what the bot is working on, and is
 // what the legacy flat task stack becomes a view of.
 //
-// Completion checks: a goal is judged either by the model (`check: 'model'`) or
-// by code (`check: 'have:<item>:<n>'`). Root goals are always model-judged —
-// only the model knows whether "give Sargon an iron pickaxe" is really done.
-// Code checks latch: once satisfied, a goal stays done even if the items are
-// later consumed by the parent's own crafting.
+// Completion is judged by the model, at every level. When a goal's strategy
+// finishes, the goal goes to `verify` and waits for the model to confirm it
+// (done) or reopen it. Handing specific checks over to code is a later step.
 //
-// Pure data + operations; no bot or fs access. The caller supplies a `world`
-// ({ count(itemName) }) to refresh() and handles persistence via toJSON/fromJSON.
+// Pure data + operations; no bot or fs access. The caller handles persistence
+// via toJSON/fromJSON.
 
 const GOAL_STATUS = ['open', 'verify', 'done', 'failed']
 const STRAT_STATUS = ['dormant', 'active', 'done', 'failed']
 
 class GoalTreeError extends Error {}
-
-function parseCheck(check) {
-  if (check == null || check === 'model') return { by: 'model' }
-  const m = /^have:([a-z0-9_]+):(\d+)$/.exec(String(check).trim())
-  if (!m) throw new GoalTreeError(`bad check "${check}" — use "model" or "have:<item>:<n>"`)
-  return { by: 'code', item: m[1], n: Number(m[2]) }
-}
-
-function checkKey(check) {
-  return check.by === 'code' ? `have:${check.item}:${check.n}` : null
-}
-
-function evalCheck(check, world) {
-  if (check.by !== 'code') return false
-  return world.count(check.item) >= check.n
-}
 
 class GoalTree {
   constructor() {
@@ -48,14 +30,11 @@ class GoalTree {
 
   // ---- construction ----
 
-  addGoal(parentStrategyId, { text, check, reason, after } = {}) {
+  addGoal(parentStrategyId, { text, reason, after } = {}) {
     if (!text) throw new GoalTreeError('goal needs text')
     const parent = parentStrategyId ? this._get(parentStrategyId, 'strategy') : null
-    const chk = parseCheck(check)
-    if (!parent && chk.by !== 'model') throw new GoalTreeError('root goals are model-judged; omit check')
-    if (parent) this._assertNoCycle(parent, chk)
     const goal = {
-      id: `g${++this.seq}`, kind: 'goal', text, check: chk, reason: reason || '',
+      id: `g${++this.seq}`, kind: 'goal', text, reason: reason || '',
       status: 'open', parent: parent ? parent.id : null,
       strategies: [], active: null, after: after || [],
     }
@@ -117,9 +96,7 @@ class GoalTree {
     strat.status = 'done'
     const goal = this.nodes.get(strat.parent)
     if (goal.status !== 'open') return strat
-    // Code-checked goals decide for themselves on the next refresh(); a
-    // model-checked goal asks the model to confirm.
-    if (goal.check.by === 'model') goal.status = 'verify'
+    goal.status = 'verify'
     return strat
   }
 
@@ -136,22 +113,6 @@ class GoalTree {
     return strat
   }
 
-  // ---- world ----
-
-  // Evaluate code checks on open goals; returns the ids that became done.
-  refresh(world) {
-    const changed = []
-    for (const node of this.nodes.values()) {
-      if (node.kind !== 'goal' || node.status !== 'open' || node.check.by !== 'code') continue
-      if (evalCheck(node.check, world)) {
-        node.status = 'done'
-        changed.push(node.id)
-      }
-    }
-    for (const id of changed) this._subgoalDone(this.nodes.get(id))
-    return changed
-  }
-
   // ---- views ----
 
   focus() {
@@ -162,12 +123,12 @@ class GoalTree {
     return null
   }
 
-  // Subgoals of a strategy that can be worked on now: open, and every `after`
-  // sibling done.
+  // Subgoals of a strategy that need attention now: open (with every `after`
+  // sibling done), or awaiting the model's verdict.
   actionable(strategyId) {
     const strat = this._get(strategyId, 'strategy')
-    return strat.goals.map(id => this.nodes.get(id)).filter(g =>
-      g.status === 'open' && g.after.every(a => this.nodes.get(a).status === 'done'))
+    return strat.goals.map(id => this.nodes.get(id)).filter(g => g.status === 'verify' ||
+      (g.status === 'open' && g.after.every(a => this.nodes.get(a).status === 'done')))
   }
 
   // [goal, strategy, goal, strategy, …] from the focus root down to the first
@@ -210,11 +171,10 @@ class GoalTree {
       const depth = this._depth(n)
       const pad = '  '.repeat(depth)
       if (n.kind === 'goal') {
-        const chk = n.check.by === 'code' ? ` check=${checkKey(n.check)}` : ''
         const why = n.reason ? ` {${n.reason}}` : ''
         const need = n.status === 'verify' ? ' ← confirm done?'
           : !n.active ? ' ← choose strategy' : ''
-        lines.push(`${pad}${n.id} GOAL ${n.text} [${n.status}]${chk}${why}${need}`)
+        lines.push(`${pad}${n.id} GOAL ${n.text} [${n.status}]${why}${need}`)
         for (const sid of n.strategies) {
           if (onPath.has(sid)) continue
           const s = this.nodes.get(sid)
@@ -264,19 +224,6 @@ class GoalTree {
     return d
   }
 
-  // Reject a subgoal whose code check repeats an ancestor's — needing the
-  // pickaxe to get the iron to make the pickaxe.
-  _assertNoCycle(parentStrategy, chk) {
-    const key = checkKey(chk)
-    if (!key) return
-    for (let id = parentStrategy.parent; id; id = this.nodes.get(id).parent) {
-      const n = this.nodes.get(id)
-      if (n.kind === 'goal' && checkKey(n.check) === key) {
-        throw new GoalTreeError(`cycle: ${key} is already required by ancestor ${n.id}`)
-      }
-    }
-  }
-
   // A subgoal finished: if it was the last one, its strategy is done.
   _subgoalDone(goal) {
     if (!goal.parent) return
@@ -304,4 +251,4 @@ function fmtEst(est) {
   return parts.length ? ` (${parts.join(' ')})` : ''
 }
 
-module.exports = { GoalTree, GoalTreeError, parseCheck, GOAL_STATUS, STRAT_STATUS }
+module.exports = { GoalTree, GoalTreeError, GOAL_STATUS, STRAT_STATUS }
