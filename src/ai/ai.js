@@ -108,23 +108,15 @@ function flattenMessages(msgs) {
   return parts.join('\n\n')
 }
 
-// --- AI Providers ---
-// `provider` (Sonnet) makes the decisions; `monitorProvider` (Haiku) handles the
-// frequent, mechanical [MONITOR] progress calls — ~3x cheaper and faster. Caches and
-// CLI sessions are model-scoped, so a cheaper model needs its own persistent process,
-// not a per-call flag on the Sonnet one. See TODO.md "Optimize the AI loop".
-const MONITOR_MODEL = 'claude-haiku-4-5'
+// --- AI Provider ---
+// One persistent Sonnet process answers every turn, [MONITOR] ticks included.
 let provider = null
-let monitorProvider = null
 
 // --- Main message handler ---
 async function handleMessage(username, message, historyAs) {
   const histKey = historyAs || username
   const isPlayerMessage = username !== 'self' && username !== 'event'
-  // Monitor ticks (engine's monitorLoop) are mechanical "still going" checks — route
-  // them to the cheaper/faster Haiku provider. Everything else stays on Sonnet.
   const isMonitorCall = username === 'self' && typeof message === 'string' && message.startsWith('[MONITOR]')
-  const activeProvider = isMonitorCall ? monitorProvider : provider
   // Autonomous turns have no requesting player, so fall back to the one the
   // current task names. Without it a "follow X" task runs blind — PLAYER= (and
   // its locator fix) is only emitted on turns where X happens to talk to us.
@@ -141,7 +133,7 @@ async function handleMessage(username, message, historyAs) {
     if (planApplied.length) console.log(color(c.magenta, `\n  [PLAN] ${planApplied.join('; ')}\n`))
 
     // [NOTE:...] — the model's running story (world/journal.js).
-    const notesApplied = applyNoteTags(rawReply, { allowCompact: !isMonitorCall })
+    const notesApplied = applyNoteTags(rawReply)
     if (notesApplied.length) console.log(color(c.magenta, `  [NOTE] ${notesApplied.join('; ')}`))
     markShown()
 
@@ -289,14 +281,14 @@ async function handleMessage(username, message, historyAs) {
       debugChat(`[query] ${toolName}`)
     }
 
-    const resp = await activeProvider.send(prompt, onDelta, onToolCall)
+    const resp = await provider.send(prompt, onDelta, onToolCall)
     const fullText = resp.text
 
     const inTok = resp.usage?.input_tokens || 0
     const outTok = resp.usage?.output_tokens || 0
     const cachRead = resp.usage?.cache_read_input_tokens || 0
     const cachCreate = resp.usage?.cache_creation_input_tokens || 0
-    console.log(color(c.gray, `  [API]${isMonitorCall ? ' [monitor/haiku]' : ''} ${resp.totalMs}ms (first token: ${resp.firstTokenMs}ms, api: ${resp.apiMs}ms) | in=${inTok}tok out=${outTok}tok | cache: read=${cachRead} create=${cachCreate}`))
+    console.log(color(c.gray, `  [API]${isMonitorCall ? ' [monitor]' : ''} ${resp.totalMs}ms (first token: ${resp.firstTokenMs}ms, api: ${resp.apiMs}ms) | in=${inTok}tok out=${outTok}tok | cache: read=${cachRead} create=${cachCreate}`))
     console.log(color(c.cyan, `  [MODEL-OUT]`) + ` ${fullText}\n`)
 
     logChat({ type: 'ai', raw: fullText, stack: [...state.taskStack], agenda: agendaTitles(), messages: msgs })
@@ -362,16 +354,9 @@ async function handleMessage(username, message, historyAs) {
       return
     }
     console.error(color(c.red, `API error: ${err.message}`))
-    // Recreate the provider that actually failed (monitor=Haiku vs decision=Sonnet).
-    if (isMonitorCall) {
-      monitorProvider.destroy()
-      monitorProvider = createProvider('claude-code', { model: MONITOR_MODEL })
-      monitorProvider.init(SYSTEM_PROMPT)
-    } else {
-      provider.destroy()
-      provider = createProvider()
-      provider.init(SYSTEM_PROMPT)
-    }
+    provider.destroy()
+    provider = createProvider()
+    provider.init(SYSTEM_PROMPT)
     state.apiFailCount++
     if (state.apiFailCount <= 1) sendChat("Brain lag, try again!")
     if (state.apiFailCount >= 3) {
@@ -380,21 +365,15 @@ async function handleMessage(username, message, historyAs) {
   }
 }
 
-// Abort current in-flight response. Only one call runs at a time (the engine
-// awaits each handleMessage), but we don't track which provider is live, so abort
-// both — the idle one's abort is a no-op.
+// Abort the current in-flight response.
 function abortResponse() {
   if (provider) provider.abort()
-  if (monitorProvider) monitorProvider.abort()
 }
 
-// Pre-spawn on load so first message is fast. Two persistent processes: Sonnet for
-// decisions, Haiku for the frequent [MONITOR] progress ticks.
+// Pre-spawn on load so the first message is fast.
 function initAI() {
   provider = createProvider()
   provider.init(SYSTEM_PROMPT)
-  monitorProvider = createProvider('claude-code', { model: MONITOR_MODEL })
-  monitorProvider.init(SYSTEM_PROMPT)
 }
 
 // Switch personality at runtime — restarts the AI provider with new system prompt
@@ -418,13 +397,10 @@ function switchPersonality(keyword) {
   SYSTEM_PROMPT = buildSystemPrompt(match)
   console.log(color(c.magenta, `  [PERSONALITY] switched to: ${match.slice(0, 80)}...`))
 
-  // Restart both AI providers with the new system prompt
+  // Restart the AI provider with the new system prompt
   if (provider) provider.destroy()
   provider = createProvider()
   provider.init(SYSTEM_PROMPT)
-  if (monitorProvider) monitorProvider.destroy()
-  monitorProvider = createProvider('claude-code', { model: MONITOR_MODEL })
-  monitorProvider.init(SYSTEM_PROMPT)
 
   return match
 }

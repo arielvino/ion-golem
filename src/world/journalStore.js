@@ -61,9 +61,8 @@ function renderNotesBlock() {
 // contain one level of [...] (the citations), so a plain [^\]]+ would cut it short.
 const NOTE_TAG = /\[NOTE:((?:[^[\]]|\[[^[\]]*\])*)\]/g
 
-// Apply every [NOTE:...] in a reply. Monitor turns (the cheap model) may add
-// notes but not compact — compaction rewrites history, which is where drift gets in.
-function applyNoteTags(rawReply, { allowCompact }) {
+// Apply every [NOTE:...] in a reply.
+function applyNoteTags(rawReply) {
   if (!state.journal) return []
   const applied = []
   for (const m of rawReply.matchAll(NOTE_TAG)) {
@@ -71,7 +70,6 @@ function applyNoteTags(rawReply, { allowCompact }) {
     try {
       const cm = /^compact:([^:]+):([\s\S]*)$/.exec(body)
       if (cm) {
-        if (!allowCompact) throw new Error('compact is not available on monitor turns')
         const { note, replaced } = state.journal.compact(cm[1], cm[2], currentNode())
         applied.push(`${note.id} ← ${replaced.join(',')}`)
       } else {
