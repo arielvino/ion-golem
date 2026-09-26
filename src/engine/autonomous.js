@@ -124,19 +124,27 @@ function setupAutonomous(interruptFn) {
   })
 
   // --- AUTO-PICKUP items when idle ---
+  // One trip per item. A drop that is still there afterwards is unreachable from
+  // here (e.g. fell into a crevice); retrying it forever turns an idle bot into a
+  // nav loop that nothing — not even `stop` — can end, since this is no action.
   let pickupBusy = false
+  const unreachableDrops = new Set()  // entity ids
   const pickupInterval = setInterval(async () => {
     const { isBackgroundRunning } = require('./backgroundTask')
     if (!bot?.entity || state.currentTask || isBackgroundRunning() || pickupBusy) return
     try {
       const near = Object.values(bot.entities).filter(e =>
-        e.name === 'item' && e.position.distanceTo(bot.entity.position) < 3
+        e.name === 'item' && !unreachableDrops.has(e.id) && e.position.distanceTo(bot.entity.position) < 3
       )
       if (near.length > 0) {
         const c = near[0]
         pickupBusy = true
         const { navigateTo } = require('../navigation/navigation')
         await navigateTo(Math.floor(c.position.x), Math.floor(c.position.y), Math.floor(c.position.z), 1, T.PICKUP_NAV_TIMEOUT).catch(() => {})
+        if (bot.entities[c.id]) {
+          unreachableDrops.add(c.id)
+          console.log(`  [AUTO] pickup: drop #${c.id} still there after one trip, giving up on it`)
+        }
         pickupBusy = false
       }
     } catch (e) { pickupBusy = false }
