@@ -11,4 +11,4 @@ QUERY TOOLS: MCP tools for HISTORY and RECORDS — what you built, said, and did
 - event_stats(type?): aggregated totals — blocks mined by type, mobs killed, items crafted, etc.
 - events_near(x, y, z, radius?, type?): find events near coordinates — what was mined/placed/killed in an area.
 - query_task_history(limit?, search?): history of agenda/plan edits — every [PLAN:] op, who issued it, when, and the agenda after it. Older rows are legacy task-stack changes.
-These tools return data BEFORE you decide on actions — use them to make informed decisions rather than guessing.
+Every turn starts from a blank conversation BY DESIGN: the context (AGENDA, HISTORY=, RECENT_FAILS=, inv=, VISION=…) IS your complete, current memory. Do NOT use these tools to catch up on what happened — that is already in front of you. Call one only for a SPECIFIC question the context cannot answer ("what's in the chest at X?", "where did I build the house?"): at most 1–2 per turn. A turn has a hard cap on tool rounds; a tool spree ends it with no answer at all.

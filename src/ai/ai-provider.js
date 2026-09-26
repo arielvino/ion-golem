@@ -83,6 +83,7 @@ function createClaudeCodeProvider(opts = {}) {
 
     // Final result
     if (event.type === 'result') {
+      if (event.subtype === 'error_max_turns') console.log(color(c.yellow, `  [AI] hit --max-turns (${event.num_turns} rounds) — tool spree cut off`))
       if (event.result && !current.text) current.text = event.result
       current.usage = event.usage || null
       current.apiMs = event.duration_api_ms || 0
@@ -127,6 +128,10 @@ function createClaudeCodeProvider(opts = {}) {
       // Both remain implemented in mcp-server.js; re-add the names here to restore them.
       '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history',
       '--no-session-persistence',
+      // Hard cap on agentic rounds per request: a deferred-tool lookup, a tool call or
+      // two, and the answer. Without it a model that decides to "catch up" chains
+      // 15+ tool calls (each re-reading the whole prompt) into the 90s timeout.
+      '--max-turns', '4',
       '--include-partial-messages',
       // '--settings', '{"hooks":{}}',  // TODO: re-enable once confirmed stable
       '--system-prompt', systemPrompt,
