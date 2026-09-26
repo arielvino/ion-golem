@@ -124,17 +124,24 @@ function setupAutonomous(interruptFn) {
   })
 
   // --- AUTO-PICKUP items when idle ---
-  // One trip per item. A drop that is still there afterwards is unreachable from
-  // here (e.g. fell into a crevice); retrying it forever turns an idle bot into a
-  // nav loop that nothing — not even `stop` — can end, since this is no action.
+  // Only drops the bot can SEE (bot.entities also lists items behind walls — using
+  // those would be x-ray) and can walk STRAIGHT to through passable blocks: this is a
+  // reflex for loose items at arm's length, not a navigation job. Anything else is
+  // left to the model. As a last resort, one trip per item: a drop still there
+  // afterwards is skipped for good — retrying it forever turns an idle bot into a nav
+  // loop that nothing, not even `stop`, can end, since this is no action.
   let pickupBusy = false
   const unreachableDrops = new Set()  // entity ids
   const pickupInterval = setInterval(async () => {
     const { isBackgroundRunning } = require('./backgroundTask')
     if (!bot?.entity || state.currentTask || isBackgroundRunning() || pickupBusy) return
     try {
+      const { hasLineOfSight, rayReachable } = require('../perception/vision')
+      const pos = bot.entity.position
+      const eye = pos.offset(0, 1.62, 0), body = pos.offset(0, 0.5, 0)
       const near = Object.values(bot.entities).filter(e =>
-        e.name === 'item' && !unreachableDrops.has(e.id) && e.position.distanceTo(bot.entity.position) < 3
+        e.name === 'item' && !unreachableDrops.has(e.id) && e.position.distanceTo(pos) < 3 &&
+        hasLineOfSight(eye, e.position, 0.25) && rayReachable(body, e.position.offset(0, 0.1, 0))
       )
       if (near.length > 0) {
         const c = near[0]
