@@ -91,3 +91,13 @@ test('compaction inherits sources as well as citations', () => {
   const { note } = j.compact('n1-n2', 'a and b [inv]')
   assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'inv']])
 })
+
+test('lookup resolves ids and ranges, and says which records are gone', () => {
+  const j = new Journal()
+  for (let i = 1; i <= 5; i++) j.record(`e${i}`, 1790444000000 + i * 1000)
+  j.records = j.records.filter(r => r.id !== 'r3')  // as if evicted
+  assert.deepStrictEqual(j.lookup('r2-r4, r5 ,r2').map(x => [x.id, x.text ?? null]),
+    [['r2', 'e2'], ['r3', null], ['r4', 'e4'], ['r5', 'e5']])
+  assert.throws(() => j.lookup('n4'), /bad record id/)
+  assert.throws(() => j.lookup('r1-r500'), /at most/)
+})

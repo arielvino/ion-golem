@@ -10,6 +10,7 @@ const { McpServer } = require(path.join(sdkBase, 'mcp.js'))
 const { StdioServerTransport } = require(path.join(sdkBase, 'stdio.js'))
 const { z } = require('zod')
 const { parseBlueprint } = require('../lib/blueprint')
+const { Journal } = require('../world/journal')
 
 // Format a world tick + day as in-game time. game_tick = world age in ticks
 // (20/sec); timeOfDay = tick % 24000. MC day starts at 0 = 6:00 AM, so
@@ -544,6 +545,29 @@ server.tool(
       : stmts.recentEvents.all(max)
     if (rows.length === 0) return { content: [{ type: 'text', text: 'No events recorded yet.' }] }
     return { content: [{ type: 'text', text: JSON.stringify(formatEventRows(rows), null, 2) }] }
+  }
+)
+
+// Tool: read_records — the full text of journal records a note cites. The bot
+// rewrites journal.json as it goes, so read it fresh on every call.
+server.tool(
+  'read_records',
+  'Get the full text of journal records by id — e.g. the r# a note is based on. Accepts ids and ranges: "r23-r25,r34".',
+  { ids: z.string().describe('Record ids and ranges, comma-separated, e.g. "r23-r25,r34"') },
+  async ({ ids }) => {
+    const file = process.env.BOT_JOURNAL_PATH
+    let journal
+    try {
+      journal = Journal.fromJSON(JSON.parse(require('fs').readFileSync(file, 'utf-8')))
+    } catch (e) {
+      return { content: [{ type: 'text', text: `Journal unavailable: ${e.message}` }] }
+    }
+    let rows
+    try { rows = journal.lookup(ids) } catch (e) { return { content: [{ type: 'text', text: e.message }] } }
+    const lines = rows.map(r => r.text == null
+      ? `${r.id} (no longer kept — nothing cited it)`
+      : `${r.id} ${new Date(r.ts).toISOString().slice(0, 19)} ${r.text}`)
+    return { content: [{ type: 'text', text: lines.join('\n') }] }
   }
 )
 

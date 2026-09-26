@@ -21,6 +21,7 @@
 
 const MAX_RECORDS = 500
 const NEW_SHOWN = 25   // most recent new records shown per turn; older ones summarized
+const MAX_LOOKUP = 50
 
 class JournalError extends Error {}
 
@@ -75,6 +76,21 @@ class Journal {
     this.notes = this.notes.filter(x => !run.includes(x))
     this.notes.splice(i, 0, n)
     return { note: n, replaced: run.map(x => x.id) }
+  }
+
+  // Records by id, for the read_records tool: "r23-r25,r34". Ids no longer kept
+  // come back without text, so the caller can say so instead of guessing.
+  lookup(spec) {
+    const ids = []
+    for (const tok of String(spec).split(',').map(s => s.trim()).filter(Boolean)) {
+      const m = /^r(\d+)(?:-r?(\d+))?$/.exec(tok)
+      if (!m) throw new JournalError(`bad record id "${tok}" — use r23 or r23-r25`)
+      const a = Number(m[1]), b = m[2] ? Number(m[2]) : a
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) ids.push(i)
+      if (ids.length > MAX_LOOKUP) throw new JournalError(`at most ${MAX_LOOKUP} records per lookup`)
+    }
+    const byId = new Map(this.records.map(r => [r.id, r]))
+    return [...new Set(ids)].sort((x, y) => x - y).map(i => byId.get(`r${i}`) || { id: `r${i}` })
   }
 
   // ---- views ----

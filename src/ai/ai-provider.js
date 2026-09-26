@@ -120,7 +120,7 @@ function createClaudeCodeProvider(opts = {}) {
         'bot-query': {
           command: 'node',
           args: [mcpServerPath],
-          env: { BOT_DB_PATH: dbPath },
+          env: { BOT_DB_PATH: dbPath, BOT_JOURNAL_PATH: path.join(state.BOT_DATA_DIR, 'journal.json') },
         },
       },
     }) : null
@@ -138,7 +138,7 @@ function createClaudeCodeProvider(opts = {}) {
       // times in a row. An in-turn tool beats a next-turn channel whenever both answer
       // the same question, so the only way to test the channel is to be the only route.
       // Both remain implemented in mcp-server.js; re-add the names here to restore them.
-      '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history',
+      '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history,mcp__bot-query__read_records',
       '--no-session-persistence',
       '--include-partial-messages',
       // '--settings', '{"hooks":{}}',  // TODO: re-enable once confirmed stable

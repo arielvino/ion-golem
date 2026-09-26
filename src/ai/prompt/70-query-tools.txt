@@ -10,5 +10,6 @@ QUERY TOOLS: MCP tools for your PAST — what you built, said, and did. For anyt
 - recent_events(type?, limit?): latest game events. Filter by type to see recent mines, kills, crafts, etc.
 - event_stats(type?): aggregated totals — blocks mined by type, mobs killed, items crafted, etc.
 - events_near(x, y, z, radius?, type?): find events near coordinates — what was mined/placed/killed in an area.
+- read_records(ids): full text of journal records, e.g. "r23-r25,r34" — when a note's basis matters and its record is no longer in view.
 - query_task_history(limit?, search?): history of agenda/plan edits — every [PLAN:] op, who issued it, when, and the agenda after it. Older rows are legacy task-stack changes.
 Every turn starts from a blank conversation BY DESIGN: the context (AGENDA, NOTES, NEW=, inv=, VISION=…) IS your memory. Do NOT use these tools to catch up on what happened — see CATCHING UP under MEMORY. Call one for a SPECIFIC question the context cannot answer ("what's in the chest at X?", "where did I build the house?"), and if the answer will matter again, note it.
