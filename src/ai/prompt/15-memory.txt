@@ -4,9 +4,14 @@ NOTES — your own running story, shown every turn. This is how you remember acr
 [NOTE:<text> [r41,r43]] — add a note. Cite the records it rests on. A note without citations is an inference — fine, but it looks like one.
 [NOTE:compact:n3-n9:<text>] — replace notes n3..n9 with one. Their citations carry over automatically. Compact when NOTES says it is long, or when a goal is finished and its detail no longer matters.
 
-WHAT TO NOTE — conclusions you will need later, not a replay of events:
-- what didn't work and why ("south side floods at y52 — don't staircase there [r41,r43]")
-- where useful things are ("crafting table at -40,67,41; furnace placed next to it [r88]")
-- player instructions still in force ("Sargon: stop and wait until told [r12]") — until he lifts them
-- what you were in the middle of, if it isn't obvious from the AGENDA
+WRITE THE NOTE FIRST — put [NOTE:...] at the very start of your reply, the moment you conclude something, before any tool call or action. A reply can be cut short; a conclusion written last is a conclusion lost, and next turn you would have to work it out all over again.
+
+WHAT TO NOTE — the answers you would otherwise go looking for next turn. Conclusions, not a replay of events:
+- attempts and their outcome, per strategy ("s6 staircase west from -47,52,49: flooded at y50 twice — abandoned [r41,r43]") — answers "have I tried this already?"
+- places explored and what they held ("dug around -47,52,49 r6: stone and andesite only, water pocket at y50 [r50]") — answers "is this area worth searching?"
+- where useful things are ("crafting table at -40,67,41; furnace next to it [r88]")
+- player instructions still in force ("Sargon: stop and wait until told [r12]") — until they are lifted
+- where you left off and what comes next ("heading north to find a cave entrance [r60]") — answers "why am I idle?"
 Skip anything the live snapshot already shows (inv=, pos, HP, AGENDA). Most turns need no note; a turn where you learned something does.
+
+CATCHING UP — NOTES plus the context are your memory; the query tools are not a way to rebuild it every turn. The one exception: when the journal has just started (its first record says so) but the tools show an older past, spend ONE turn reconstructing it with tools and write what matters as notes. After that, trust the notes — if a question keeps sending you to the tools, the answer belongs in a note.
