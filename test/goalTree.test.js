@@ -26,8 +26,8 @@ test('first strategy auto-activates; later ones stay dormant', () => {
 
 test('active path descends to the leaf strategy', () => {
   const { t } = pickaxeTree()
-  assert.deepStrictEqual(t.activePath().map(n => n.id), ['g1', 's2', 'g4', 's6', 'g7', 's8'])
-  assert.deepStrictEqual(t.stackView().map(e => e.t), ['give Sargon an iron_pickaxe', '3 iron_ingot', '3 raw_iron'])
+  assert.deepStrictEqual(t.activePath('g1').map(n => n.id), ['g1', 's2', 'g4', 's6', 'g7', 's8'])
+  assert.deepStrictEqual(t.stackView('g1').map(e => e.t), ['give Sargon an iron_pickaxe', '3 iron_ingot', '3 raw_iron'])
 })
 
 test('model verdicts on subgoals roll up; the parent goal still waits for its own', () => {
@@ -40,7 +40,7 @@ test('model verdicts on subgoals roll up; the parent goal still waits for its ow
   assert.strictEqual(root.status, 'verify')
   assert.strictEqual(smelt.status, 'active') // untouched: the model judged ingots done directly
   t.markGoal(root.id, 'done')
-  assert.strictEqual(t.focus(), null)
+  assert.strictEqual(root.status, 'done')
 })
 
 test('a finished leaf strategy never marks its goal done by itself', () => {
@@ -48,7 +48,7 @@ test('a finished leaf strategy never marks its goal done by itself', () => {
   t.completeStrategy(mine.id)
   assert.strictEqual(raw.status, 'verify')
   assert.strictEqual(smelt.status, 'active')
-  assert.match(t.render(), /g7 GOAL 3 raw_iron \[verify\] ← confirm done\?/)
+  assert.match(t.render('g1'), /g7 GOAL 3 raw_iron \[verify\] ← confirm done\?/)
 })
 
 test('switching strategy keeps the old one dormant', () => {
@@ -65,9 +65,9 @@ test('failing a strategy leaves the choice to the model while alternatives exist
   t.failStrategy(mine.id)
   assert.strictEqual(raw.status, 'open')
   assert.strictEqual(raw.active, null)
-  assert.match(t.render(), /g7 GOAL 3 raw_iron \[open\].*← choose strategy/)
+  assert.match(t.render('g1'), /g7 GOAL 3 raw_iron \[open\].*← choose strategy/)
   t.activate(cave.id)
-  assert.strictEqual(t.activePath().at(-1).id, cave.id)
+  assert.strictEqual(t.activePath('g1').at(-1).id, cave.id)
 })
 
 test('failure propagates up until a goal with a surviving alternative', () => {
@@ -95,7 +95,7 @@ test('a leaf strategy completing asks the model to verify a model-judged goal', 
   const s = t.addStrategy(r.id, { text: 'walk east' })
   t.completeStrategy(s.id)
   assert.strictEqual(r.status, 'verify')
-  assert.match(t.render(), /confirm done\?/)
+  assert.match(t.render('g1'), /confirm done\?/)
   t.markGoal(r.id, 'open') // model: not really
   assert.strictEqual(r.status, 'open')
 })
@@ -114,18 +114,9 @@ test('after: edges gate subgoal order', () => {
   assert.throws(() => t.addGoal(s.id, { text: 'x', after: ['g99'] }), /not a sibling/)
 })
 
-test('focus is the newest open root', () => {
-  const t = new GoalTree()
-  const a = t.addGoal(null, { text: 'a' })
-  const b = t.addGoal(null, { text: 'b' })
-  assert.strictEqual(t.focus().id, b.id)
-  t.markGoal(b.id, 'done')
-  assert.strictEqual(t.focus().id, a.id)
-})
-
 test('render shows the active path and one-line siblings only', () => {
   const { t } = pickaxeTree()
-  const out = t.render()
+  const out = t.render('g1')
   assert.match(out, /^g1 GOAL give Sargon an iron_pickaxe \[open\] \{Sargon asked\}/)
   assert.match(out, /s3 dormant loot a village chest \(conf 0\.3\)/)
   assert.match(out, /g5 open 2 stick/)
@@ -133,9 +124,30 @@ test('render shows the active path and one-line siblings only', () => {
   assert.match(out, /s9 dormant cave-surface ore/)
 })
 
+test('a new strategy revives a failed root, not a failed subgoal', () => {
+  const { t, root, craft, loot, raw, mine, cave } = pickaxeTree()
+  t.failStrategy(craft.id)
+  t.failStrategy(loot.id)
+  assert.strictEqual(root.status, 'failed')
+  const trade = t.addStrategy(root.id, { text: 'trade with a villager' })
+  assert.strictEqual(root.status, 'open')
+  assert.strictEqual(root.active, trade.id)
+  t.failStrategy(mine.id); t.failStrategy(cave.id)
+  t.addStrategy(raw.id, { text: 'ask a player' })
+  assert.strictEqual(raw.status, 'failed')
+})
+
+test('removeRoot deletes the whole subtree', () => {
+  const { t, root } = pickaxeTree()
+  const other = t.addGoal(null, { text: 'other' })
+  t.removeRoot(root.id)
+  assert.deepStrictEqual([...t.nodes.keys()], [other.id])
+  assert.deepStrictEqual(t.roots().map(r => r.id), [other.id])
+})
+
 test('JSON round-trip preserves structure and id sequence', () => {
   const { t } = pickaxeTree()
   const t2 = GoalTree.fromJSON(JSON.parse(JSON.stringify(t)))
-  assert.strictEqual(t2.render(), t.render())
+  assert.strictEqual(t2.render('g1'), t.render('g1'))
   assert.strictEqual(t2.addGoal(null, { text: 'next' }).id, 'g10')
 })

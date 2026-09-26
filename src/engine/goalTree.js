@@ -6,8 +6,10 @@
 //
 // Only one strategy per goal is ACTIVE; the others stay DORMANT, not discarded,
 // so a better route can be reopened later. The "active path" (root → active
-// strategy → next actionable subgoal → …) is what the bot is working on, and is
-// what the legacy flat task stack becomes a view of.
+// strategy → next actionable subgoal → …) is what the bot is working on.
+//
+// This is decomposition only. The tree holds any number of roots, unordered;
+// which root is worked on, and in what order, is the Agenda's job (agenda.js).
 //
 // Completion is judged by the model, at every level. When a goal's strategy
 // finishes, the goal goes to `verify` and waits for the model to confirm it
@@ -24,7 +26,6 @@ class GoalTreeError extends Error {}
 class GoalTree {
   constructor() {
     this.nodes = new Map() // id → node
-    this.roots = []        // goal ids, oldest first; focus = newest open root
     this.seq = 0
   }
 
@@ -43,8 +44,6 @@ class GoalTree {
         if (!parent.goals.includes(a)) throw new GoalTreeError(`after: ${a} is not a sibling subgoal of ${parent.id}`)
       }
       parent.goals.push(goal.id)
-    } else {
-      this.roots.push(goal.id)
     }
     this.nodes.set(goal.id, goal)
     return goal
@@ -57,6 +56,10 @@ class GoalTree {
       id: `s${++this.seq}`, kind: 'strategy', text, parent: goal.id,
       status: 'dormant', goals: [], est: est || null,
     }
+    // A new route revives a failed root: the model has found another way to
+    // try. A failed subgoal has already failed its parent strategy, so the fix
+    // for that belongs one level up.
+    if (goal.status === 'failed' && !goal.parent) goal.status = 'open'
     this.nodes.set(strat.id, strat)
     goal.strategies.push(strat.id)
     if (!goal.active && goal.status === 'open') this.activate(strat.id)
@@ -113,14 +116,22 @@ class GoalTree {
     return strat
   }
 
+  // Delete a root and its whole subtree.
+  removeRoot(rootId) {
+    const root = this._get(rootId, 'goal')
+    if (root.parent) throw new GoalTreeError(`${rootId} is not a root`)
+    const drop = (id) => {
+      const n = this.nodes.get(id)
+      for (const c of n.kind === 'goal' ? n.strategies : n.goals) drop(c)
+      this.nodes.delete(id)
+    }
+    drop(rootId)
+  }
+
   // ---- views ----
 
-  focus() {
-    for (let i = this.roots.length - 1; i >= 0; i--) {
-      const g = this.nodes.get(this.roots[i])
-      if (g.status === 'open' || g.status === 'verify') return g
-    }
-    return null
+  roots() {
+    return [...this.nodes.values()].filter(n => n.kind === 'goal' && !n.parent)
   }
 
   // Subgoals of a strategy that need attention now: open (with every `after`
@@ -131,12 +142,12 @@ class GoalTree {
       (g.status === 'open' && g.after.every(a => this.nodes.get(a).status === 'done')))
   }
 
-  // [goal, strategy, goal, strategy, …] from the focus root down to the first
-  // node that needs work. Ends at a goal with no active strategy (needs a
-  // decision), a goal awaiting verification, or a leaf strategy (needs actions).
-  activePath() {
+  // [goal, strategy, goal, strategy, …] from a root down to the first node that
+  // needs work. Ends at a goal with no active strategy (needs a decision), a
+  // goal awaiting verification, or a leaf strategy (needs actions).
+  activePath(rootId) {
     const path = []
-    let goal = this.focus()
+    let goal = this._get(rootId, 'goal')
     while (goal) {
       path.push(goal)
       if (goal.status === 'verify' || !goal.active) break
@@ -149,8 +160,8 @@ class GoalTree {
 
   // Legacy task-stack view: one {t,d,r} entry per goal on the active path,
   // bottom = root. Keeps existing engine code working on top of the tree.
-  stackView() {
-    const path = this.activePath()
+  stackView(rootId) {
+    const path = this.activePath(rootId)
     const out = []
     for (let i = 0; i < path.length; i++) {
       const n = path[i]
@@ -163,9 +174,9 @@ class GoalTree {
 
   // Compact text for the model: the active path at full resolution, dormant and
   // finished siblings along it as one-liners, everything else suppressed.
-  render() {
+  render(rootId) {
     const lines = []
-    const path = this.activePath()
+    const path = this.activePath(rootId)
     const onPath = new Set(path.map(n => n.id))
     for (const n of path) {
       const depth = this._depth(n)
@@ -197,14 +208,13 @@ class GoalTree {
   // ---- persistence ----
 
   toJSON() {
-    return { seq: this.seq, roots: this.roots, nodes: [...this.nodes.values()] }
+    return { seq: this.seq, nodes: [...this.nodes.values()] }
   }
 
   static fromJSON(data) {
     const t = new GoalTree()
     if (!data) return t
     t.seq = data.seq || 0
-    t.roots = data.roots || []
     for (const n of data.nodes || []) t.nodes.set(n.id, n)
     return t
   }
