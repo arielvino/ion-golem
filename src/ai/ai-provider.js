@@ -25,18 +25,18 @@ function createClaudeCodeProvider(opts = {}) {
   let responseResolve = null
   let buffer = ''
   let current = null  // { start, firstTokenMs, text, usage, apiMs, onDelta, gen }
-  let pendingAborts = 0  // # of aborted requests whose terminal `result` we must still drain
+  let pendingAborts = 0  // # of `result`s to drain unseen: aborted requests + our own /clear
   let systemPrompt = ''
-  let sessionCounter = 0
 
   function handleLine(line) {
     let event
     try { event = JSON.parse(line) } catch (e) { return }
 
-    // Init event — process is ready
+    // Init event — process is ready. Every /clear starts a new session and emits
+    // another init, so only the first one per process is news.
     if (event.type === 'system' && event.subtype === 'init') {
+      if (!ready) console.log(color(c.gray, `  [AI] persistent process ready (${model})`))
       ready = true
-      console.log(color(c.gray, `  [AI] persistent process ready (${model})`))
       return
     }
 
@@ -194,18 +194,18 @@ function createClaudeCodeProvider(opts = {}) {
         responseResolve = { resolve, reject }
       })
 
-      // Fresh session_id per request — no stale context accumulation.
-      // System prompt stays cached by the persistent process.
-      // AGENDA + context + RECENT_FAILS provide all needed continuity.
-      const sid = `s${++sessionCounter}`
-      const msg = JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: prompt },
-        session_id: sid,
-      }) + '\n'
+      // Every request starts from an empty conversation: AGENDA + context + HISTORY +
+      // RECENT_FAILS carry all the continuity the model needs. A per-message session_id
+      // does NOT do this — stream-json input ignores it and the process keeps one
+      // growing conversation (measured: +~1.3k tokens/turn, 48k → 135k in ~65 turns,
+      // then 90s timeouts). `/clear` does: it costs no API call, the system prompt stays
+      // cached, and it emits one empty `result` that handleLine drains like an abort's.
+      const line = (content) => JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n'
 
       try {
-        proc.stdin.write(msg)
+        proc.stdin.write(line('/clear'))
+        pendingAborts++
+        proc.stdin.write(line(prompt))
       } catch (err) {
         responseResolve = null; current = null
         throw new Error('Failed to write to AI process: ' + err.message)
