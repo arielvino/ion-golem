@@ -20,6 +20,7 @@ module.exports = {
   loopRunning: false,
   msgPending: false,
   noActionRounds: 0,
+  aiPaused: false,       // debug `!ai off`: engine makes no model calls
   idleAnnounced: false,  // true once the model has reported going idle; gates idle self-checks
 
   messageQueue: [],

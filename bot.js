@@ -394,6 +394,15 @@ function createBot() {
       return
     }
     console.log(color(c.bold + c.white, `\n<${username}> ${message}`))
+    // Debug-only repro hooks: `!act <action>` runs an action with no model in the loop,
+    // `!ai off|on` pauses/resumes model calls so the AI can't steer a staged scenario.
+    // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.
+    if (state.debugMode && message.startsWith('!ai ')) { state.aiPaused = message.slice(4).trim() === 'off'; console.log(`  [DEBUG] aiPaused=${state.aiPaused}`); return }
+    if (state.debugMode && message.startsWith('!act ')) {
+      state.actionQueue.push({ actionStr: message.slice(5).trim(), username })
+      require('./src/engine/engine').processActionQueue()
+      return
+    }
     logChatDB('chat', username, message)
     state.noActionRounds = 0
     // Soft interrupt: abort self-loop AI call (if running) to free the provider,

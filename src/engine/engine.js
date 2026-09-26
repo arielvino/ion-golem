@@ -258,7 +258,7 @@ async function startEngine() {
       // stack with nothing running, no chat, and nothing wrong burns zero model calls.
       const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
       const hasWork = state.taskStack.length > 0 || actionsRunning
-      const canRun = state.apiFailCount < 3 && !state.msgPending
+      const canRun = state.apiFailCount < 3 && !state.msgPending && !state.aiPaused
       if (hasWork) {
         state.idleAnnounced = false  // re-arm the one-shot idle report for when work ends
         if (canRun) {
