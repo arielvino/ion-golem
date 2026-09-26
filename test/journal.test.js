@@ -72,3 +72,22 @@ test('JSON round-trip keeps numbering and the shown cursor', () => {
   assert.strictEqual(k.record('c').id, 'r3')
   assert.strictEqual(k.note('m').id, 'n2')
 })
+
+test('a mixed basis keeps its record ids as citations and the rest as sources', () => {
+  const j = new Journal()
+  for (let i = 0; i < 36; i++) j.record(`e${i}`)
+  // Real note n20 from the 2026-09-26 run: r36 was silently dropped.
+  const n = j.note('trying north instead of west [r36,slice]')
+  assert.deepStrictEqual([n.text, n.cites, n.sources], ['trying north instead of west', ['r36'], ['slice']])
+  assert.deepStrictEqual(j.note('pivoting [pos, biome, n8]').sources, ['pos', 'biome', 'n8'])
+  assert.throws(() => j.note('made up [r99,VISION]'), /unknown record\(s\) r99/)
+  assert.strictEqual(j.renderNotes().split('\n')[1], 'n1 trying north instead of west [r36,slice]')
+})
+
+test('compaction inherits sources as well as citations', () => {
+  const j = new Journal()
+  j.record('x')
+  j.note('a [r1,slice]'); j.note('b [VISION]')
+  const { note } = j.compact('n1-n2', 'a and b [inv]')
+  assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'inv']])
+})

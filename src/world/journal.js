@@ -5,8 +5,10 @@
 //
 // RECORDS (r#) — facts, written by code: action outcomes, failures, player chat.
 //   Each is shown to the model ONCE, in NEW=, the turn after it happens.
-// NOTES (n#) — the model's running story, written with [NOTE:...]. Notes cite
-//   the records they rest on ("south floods at y52 [r41,r43]"), are shown every
+// NOTES (n#) — the model's running story, written with [NOTE:...]. Notes name
+//   what they rest on ("south floods at y52 [r41,r43,slice]"): record ids are
+//   citations — checked and kept alive — and anything else (a tool, a context
+//   field, another note) is kept verbatim as a source. Notes are shown every
 //   turn, and can be merged with [NOTE:compact:n3-n9:...]. A compacted note
 //   inherits every citation of the notes it replaces, so the story can shrink
 //   without losing its grounding. An uncited note is visibly an inference.
@@ -25,7 +27,7 @@ class JournalError extends Error {}
 class Journal {
   constructor() {
     this.records = []   // { id, ts, text }
-    this.notes = []     // { id, ts, text, cites: [r#], node }
+    this.notes = []     // { id, ts, text, cites: [r#], sources: [other basis], node }
     this.rseq = 0
     this.nseq = 0
     this.cursor = 0     // records with number <= cursor have been shown
@@ -50,9 +52,9 @@ class Journal {
   // ---- notes (model) ----
 
   note(text, node) {
-    const { body, cites } = this._parseCites(text)
+    const { body, cites, sources } = this._parseCites(text)
     if (!body) throw new JournalError('empty note')
-    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites, node: node || null }
+    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites, sources, node: node || null }
     this.notes.push(n)
     return n
   }
@@ -64,11 +66,12 @@ class Journal {
     const i = this.notes.findIndex(n => num(n.id) >= from)
     const run = this.notes.filter(n => num(n.id) >= from && num(n.id) <= to)
     if (run.length === 0) throw new JournalError(`no notes in ${range}`)
-    const { body, cites } = this._parseCites(text)
+    const { body, cites, sources } = this._parseCites(text)
     if (!body) throw new JournalError('empty compacted note')
     const inherited = run.flatMap(n => n.cites)
     const all = [...new Set([...inherited, ...cites])].sort((a, b) => num(a) - num(b))
-    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, node: node || null }
+    const allSources = [...new Set([...run.flatMap(n => n.sources || []), ...sources])]
+    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, sources: allSources, node: node || null }
     this.notes = this.notes.filter(x => !run.includes(x))
     this.notes.splice(i, 0, n)
     return { note: n, replaced: run.map(x => x.id) }
@@ -100,7 +103,8 @@ class Journal {
     const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: consider [NOTE:compact:...]' : ''}:`]
     for (const n of this.notes) {
       const at = n.node ? ` @${n.node}` : ''
-      const cite = n.cites.length ? ` [${n.cites.join(',')}]` : ''
+      const basis = [...n.cites, ...(n.sources || [])]
+      const cite = basis.length ? ` [${basis.join(',')}]` : ''
       lines.push(`${n.id}${at} ${n.text}${cite}`)
     }
     return lines.join('\n')
@@ -117,6 +121,12 @@ class Journal {
     if (!data) return j
     j.records = data.records || []
     j.notes = data.notes || []
+    // Notes saved before sources existed kept a mixed basis ("[r36,slice]") in
+    // their text, uncited. Re-parse them once; a bad basis stays as text.
+    for (const n of j.notes) {
+      if (n.sources) continue
+      try { Object.assign(n, j._reparse(n)) } catch { n.sources = [] }
+    }
     j.rseq = data.rseq || 0
     j.nseq = data.nseq || 0
     j.cursor = data.cursor || 0
@@ -125,20 +135,27 @@ class Journal {
 
   // ---- internals ----
 
-  // Citations are r# tokens inside a trailing [...] ("text [r41,r43]") — the
-  // form the prompt asks for. Every cited record must exist.
+  // The basis is a trailing [...] ("text [r41,r43,slice]"). Its r# tokens are
+  // citations, and every cited record must exist; the rest are sources.
   _parseCites(text) {
     let body = String(text || '').trim()
-    let cites = []
-    const m = /\s*\[((?:\s*r\d+\s*,?)+)\]\s*$/.exec(body)
+    let basis = []
+    const m = /\s*\[([^[\]]+)\]\s*$/.exec(body)
     if (m) {
-      cites = m[1].split(',').map(s => s.trim()).filter(Boolean)
+      basis = [...new Set(m[1].split(',').map(s => s.trim()).filter(Boolean))]
       body = body.slice(0, m.index).trim()
     }
+    const cites = basis.filter(t => /^r\d+$/.test(t))
+    const sources = basis.filter(t => !/^r\d+$/.test(t))
     const known = new Set(this.records.map(r => r.id))
     const missing = cites.filter(c => !known.has(c))
     if (missing.length) throw new JournalError(`unknown record(s) ${missing.join(',')} — cite ids from NEW=`)
-    return { body, cites: [...new Set(cites)] }
+    return { body, cites, sources }
+  }
+
+  _reparse(n) {
+    const { body, cites, sources } = this._parseCites(n.text)
+    return { text: body, cites: [...new Set([...n.cites, ...cites])], sources }
   }
 
   _evict() {
