@@ -1,6 +1,6 @@
 // [ACTION:eval:TIMEOUT_MS:CODE] — debug-only sandbox runtime JS execution.
 // The AI can write short async JS that runs with access to bot/state/mcData.
-// Result (return value, thrown error, or console output) is pushed to eventLog
+// Result (return value, thrown error, or console output) is logged to the journal
 // so it appears as an event line on the next AI turn.
 
 const state = require('../core/state')
@@ -78,7 +78,7 @@ async function doEval(target) {
     console.log = origLog; console.warn = origWarn; console.error = origError
   }
 
-  // Build single-line report for eventLog.
+  // Build single-line report for the journal.
   let report
   if (timedOut) {
     report = `eval TIMEOUT ${timeoutMs}ms`

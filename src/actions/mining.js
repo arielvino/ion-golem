@@ -190,7 +190,7 @@ async function doMine(targetName, opts = {}) {
         mined++
         console.log(color(c.green, `\n  mined ${target.name}${batchCount > 1 ? ` (${mined}/${batchCount})` : ''}`))
         // Harvest succeeded by hand, but a tool would be much faster — note it once
-        // (HISTORY=, not a failure) so the AI can choose to craft one for the batch.
+        // (NEW=, not a failure) so the AI can choose to craft one for the batch.
         if (res.warn && !speedWarned) {
           speedWarned = true
           const { tool, factor } = res.warn

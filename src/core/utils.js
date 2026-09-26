@@ -61,11 +61,9 @@ function debugChat(text) {
   if (state.debugMode) sendChat(text, true)
 }
 
-/** Log a concise event to the rolling history (shown to AI as HISTORY=) */
+/** Record a concise event in the journal (shown to AI once, as NEW=) */
 function logEvent(msg) {
-  state.eventLog.push({ ts: Date.now(), msg })
   state.journal?.record(msg)
-  if (state.eventLog.length > state.MAX_EVENT_LOG) state.eventLog.shift()
 }
 
 /** Normalize a user/AI-supplied item or block name to canonical form ("Oak Log" -> "oak_log") */

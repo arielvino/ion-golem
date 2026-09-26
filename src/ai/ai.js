@@ -352,7 +352,7 @@ async function handleMessage(username, message, historyAs) {
   try {
     state.lastModelCheck = Date.now()
     // Each request uses a fresh session — no model-side history.
-    // HISTORY= provides rolling log of recent actions/events/chat.
+    // NOTES and NEW= (the journal) carry memory across requests.
     const latestMsg = { role: 'user', content: `${context}\n${username}: ${message}` }
     await streamAndProcess([latestMsg])
     state.apiFailCount = 0

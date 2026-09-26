@@ -42,9 +42,6 @@ module.exports = {
   // Chat
   chatHistory: new Map(),
   MAX_HISTORY: 20,
-  // Rolling event log — concise history of what happened (actions, chat, outcomes)
-  eventLog: [],       // [{ ts, msg }]
-  MAX_EVENT_LOG: 15,
   // Claude client (claude -p child process)
   claudeChild: null,
   // Config (set by bot.js)

@@ -37,5 +37,4 @@ WHEN A ROUTE STALLS: [PLAN:fail:<s#>] it and [PLAN:use:] a dormant alternative o
 OWNERSHIP: an agenda goal belongs to the player who asked (or to you, "self"). A player's goal is never dropped by you — if it fails, say WHY, try a new strategy, or ask the player. Only the player can cancel it. You may cancel, fail and restructure your own goals and any subgoal.
 Ongoing requests (protect/guard/follow) stay on the agenda until the player says stop — never mark them done.
 When the focus has work, EVERY response MUST have [ACTION:...] or a [PLAN:...] edit. Chain multiple actions for efficiency.
-HISTORY= shows recent actions and chat — use it to recall what you did/said. Each request is fresh, HISTORY is your memory.
 RECENT_FAILS= shows recent errors — don't repeat same failed actions.

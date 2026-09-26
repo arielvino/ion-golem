@@ -209,8 +209,8 @@ function createClaudeCodeProvider(opts = {}) {
         responseResolve = { resolve, reject }
       })
 
-      // Every request starts from an empty conversation: AGENDA + context + HISTORY +
-      // RECENT_FAILS carry all the continuity the model needs. A per-message session_id
+      // Every request starts from an empty conversation: AGENDA + context + NOTES +
+      // NEW= + RECENT_FAILS carry all the continuity the model needs. A per-message session_id
       // does NOT do this — stream-json input ignores it and the process keeps one
       // growing conversation (measured: +~1.3k tokens/turn, 48k → 135k in ~65 turns,
       // then 90s timeouts). `/clear` does: it costs no API call, the system prompt stays

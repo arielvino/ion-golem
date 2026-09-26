@@ -1,4 +1,4 @@
-QUERY TOOLS: MCP tools for HISTORY and RECORDS — what you built, said, and did. For anything about the world AROUND you right now (terrain, what is under you, where a material is), use [CTX:...] above instead; there is no tool for those.
+QUERY TOOLS: MCP tools for your PAST — what you built, said, and did. For anything about the world AROUND you right now (terrain, what is under you, where a material is), use [CTX:...] above instead; there is no tool for those.
 - query_structures: list all structures you've built (names, locations, block counts). Use before navigating to or resuming a build.
 - query_structure_detail(structure_id): get full details about a specific structure — blueprint, placed blocks, missing blocks, completion %. Use when resuming construction or checking build status.
 - list_biomes: list all biomes explored so far, with section counts and coordinate ranges.

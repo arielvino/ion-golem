@@ -144,7 +144,6 @@ function getBotContext(chatUsername) {
   const obsInfo = obs && (Date.now() - obs.ts < 20000) ? ` LOOKED=[${obs.text}]` : ''
 
   const failInfo = state.lastFailures.length > 0 ? ` RECENT_FAILS=[${state.lastFailures.join(', ')}]` : ''
-  const historyInfo = state.eventLog.length > 0 ? ` HISTORY=[${state.eventLog.map(e => e.msg).join(', ')}]` : ''
   const newRecords = renderNew()
   const newInfo = newRecords ? ` NEW=[${newRecords}]` : ''
   // Report mineflayer's real bot.vehicle state, which is driven purely by the
@@ -242,7 +241,7 @@ function getBotContext(chatUsername) {
   // provider table so a new view becomes askable the moment it is registered.
   const ctxAvail = ` CTX_AVAIL=[${providerNames().join(',')}]`
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${historyInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
   // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
