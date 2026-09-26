@@ -77,6 +77,12 @@ function createClaudeCodeProvider(opts = {}) {
     // Non-streaming fallback: full assistant message
     if (event.type === 'assistant' && event.message?.content) {
       for (const block of event.message.content) {
+        // Full tool call with its arguments — the streamed start event only has the
+        // name, and "why did it query that?" needs the what.
+        if (block.type === 'tool_use') {
+          const short = (block.name || '').replace(/^mcp__bot-query__/, '')
+          console.log(color(c.gray, `  [AI] tool args: ${short} ${JSON.stringify(block.input || {}).slice(0, 300)}`))
+        }
         if (block.type === 'text' && block.text) current.text = block.text
       }
     }
