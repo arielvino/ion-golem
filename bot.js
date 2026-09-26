@@ -470,6 +470,7 @@ function createBot() {
   })
 
   bot.on('end', () => {
+    require('./src/core/utils').clearChatQueue()
     if (shuttingDown) return
     stopEngine()
     reconnectAttempts++
