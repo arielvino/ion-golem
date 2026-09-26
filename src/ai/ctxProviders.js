@@ -10,6 +10,9 @@
 // Adding a view is one entry in PROVIDERS — the tag parser, the validator and the
 // context builder are all driven off this table and need no edits.
 //
+// The views of the bot's past (builds, chat, events, journal records) live in
+// ctxPast.js and join this table below.
+//
 // Every provider reads the block DB, never bot.world. The DB is what the bot has
 // actually observed, so a cell with no record renders as unknown rather than as
 // terrain the bot was never in a position to see. That keeps these views on the
@@ -20,6 +23,7 @@ const { Vec3 } = require('vec3')
 const { queryRegion, queryBlockMemoryFuzzy, searchContainersFor } = require('../world/memory')
 const { getLastSurvey } = require('../perception/visibility')
 const { HAZARDS, RESOURCES, WATER_BLOCKS } = require('../config/blocks')
+const { PAST_PROVIDERS } = require('./ctxPast')
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 const intArg = (v, def) => {
@@ -281,6 +285,7 @@ const PROVIDERS = {
     usage: 'find:<name>[:limit]       one material across inventory/view/containers/memory',
     render: find,
   },
+  ...PAST_PROVIDERS,
 }
 
 function providerNames() { return Object.keys(PROVIDERS) }

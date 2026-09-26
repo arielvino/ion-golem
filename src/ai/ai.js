@@ -60,8 +60,8 @@ function parseBlueprint(raw) {
 const PERSONALITIES = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'personalities.json'), 'utf8'))
 // The prompt is assembled from scoped files in prompt/ rather than one flat document.
 // ORDER is load-bearing, not cosmetic: a capability described 30 lines below a rival
-// mechanism loses to it. [CTX:...] originally sat below the MCP tool list and the model
-// narrated using it while actually calling inspect_blocks — so views now follow the
+// mechanism loses to it. [CTX:...] originally sat below a list of MCP query tools and the
+// model narrated using it while actually calling inspect_blocks — so views now follow the
 // action list directly, where the model is already in "tags I emit" mode.
 const PROMPT_ORDER = [
   '00-core.txt',
@@ -72,8 +72,8 @@ const PROMPT_ORDER = [
   '40-autonomous.txt',
   '50-actions.txt',
   '55-views.txt',
+  '57-past-views.txt',
   '60-building.txt',
-  '70-query-tools.txt',
 ]
 const PROMPT_DIR = path.join(__dirname, 'prompt')
 const SYSTEM_PROMPT_TEMPLATE = PROMPT_ORDER

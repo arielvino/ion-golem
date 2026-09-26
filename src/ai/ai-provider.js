@@ -12,7 +12,6 @@
 // To add a new backend: implement the 4 methods and register in PROVIDERS below.
 
 const { spawn } = require('child_process')
-const path = require('path')
 const state = require('../core/state')
 const { c, color } = require('../lib/colors')
 
@@ -57,7 +56,7 @@ function createClaudeCodeProvider(opts = {}) {
     // Streaming text deltas
     if (event.type === 'stream_event' && event.event) {
       const ev = event.event
-      // A turn that calls MCP tools spans several assistant messages; keep their text
+      // A turn that calls tools spans several assistant messages; keep their text
       // blocks apart so a tag at the end of one can't fuse with prose opening the next.
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'text' && current.text) {
         current.text += '\n'
@@ -67,11 +66,9 @@ function createClaudeCodeProvider(opts = {}) {
         current.text += ev.delta.text
         if (current.onDelta) current.onDelta(ev.delta.text, current.text)
       }
-      // Detect MCP tool calls — announce in chat
+      // Detect tool calls (web search/fetch) — announce in chat
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
-        const toolName = ev.content_block.name || ''
-        // Strip mcp__bot-query__ prefix for readability
-        const short = toolName.replace(/^mcp__bot-query__/, '')
+        const short = ev.content_block.name || ''
         if (short) {
           console.log(color(c.gray, `  [AI] tool call: ${short}`))
           if (current.onToolCall) current.onToolCall(short)
@@ -85,7 +82,7 @@ function createClaudeCodeProvider(opts = {}) {
         // Full tool call with its arguments — the streamed start event only has the
         // name, and "why did it query that?" needs the what.
         if (block.type === 'tool_use') {
-          const short = (block.name || '').replace(/^mcp__bot-query__/, '')
+          const short = block.name || ''
           console.log(color(c.gray, `  [AI] tool args: ${short} ${JSON.stringify(block.input || {}).slice(0, 300)}`))
         }
         // Only when nothing streamed: each assistant event carries just ITS message's
@@ -112,19 +109,6 @@ function createClaudeCodeProvider(opts = {}) {
     const env = { ...process.env }
     delete env.CLAUDECODE
 
-    // MCP config for bot query tools
-    const dbPath = state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'blocks.db') : null
-    const mcpServerPath = path.join(__dirname, 'mcp-server.js')
-    const mcpConfig = dbPath ? JSON.stringify({
-      mcpServers: {
-        'bot-query': {
-          command: 'node',
-          args: [mcpServerPath],
-          env: { BOT_DB_PATH: dbPath, BOT_JOURNAL_PATH: path.join(state.BOT_DATA_DIR, 'journal.json') },
-        },
-      },
-    }) : null
-
     const args = [
       '-p',
       '--input-format', 'stream-json',
@@ -132,23 +116,19 @@ function createClaudeCodeProvider(opts = {}) {
       '--verbose',
       '--model', model,
       '--tools', 'WebSearch,WebFetch',
-      // find_items and inspect_blocks are deliberately NOT listed: they duplicate
-      // [CTX:find] and [CTX:slice], and while both routes existed the model always took
-      // the tool — narrating "terrain views inbound" while calling inspect_blocks three
-      // times in a row. An in-turn tool beats a next-turn channel whenever both answer
-      // the same question, so the only way to test the channel is to be the only route.
-      // Both remain implemented in mcp-server.js; re-add the names here to restore them.
-      '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history,mcp__bot-query__read_records',
+      // The bot's own queries (builds, chat, events, records) are [CTX:...] views
+      // answered in the next turn, not MCP tools: an in-turn tool always beats a
+      // next-turn channel, and the model spent whole turns in query sprees. Only
+      // the web tools stay in-turn.
+      '--allowedTools', 'WebSearch,WebFetch',
       '--no-session-persistence',
       '--include-partial-messages',
       // '--settings', '{"hooks":{}}',  // TODO: re-enable once confirmed stable
       '--system-prompt', systemPrompt,
+      // No --mcp-config, so this means no MCP servers at all. Without it the CLI
+      // loads the user's account-level servers, and the model wandered into those.
+      '--strict-mcp-config',
     ]
-    // --strict-mcp-config: only bot-query. Without it the CLI also loads the user's
-    // account-level MCP servers, and the model wandered into those mid-game.
-    if (mcpConfig) {
-      args.push('--mcp-config', mcpConfig, '--strict-mcp-config')
-    }
 
     console.log(color(c.gray, `  [AI] spawning persistent process (${model})...`))
     const thisProc = spawn('claude', args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
@@ -271,9 +251,9 @@ function createClaudeCodeProvider(opts = {}) {
 // Placeholder for a direct Anthropic API backend (@anthropic-ai/sdk + ANTHROPIC_API_KEY).
 // The provider interface at the top of this file is deliberately backend-agnostic:
 // implement init/send/abort/destroy with client.messages.stream() for an API-auth
-// alternative to the CLI. Note the claude-code backend gets WebSearch/WebFetch + the
-// bot-query MCP tools for free via `claude -p`; an API build must add its own tool-use
-// loop (dispatch bot-query calls into mcp-server.js in-process) for parity. PRs welcome.
+// alternative to the CLI. Note the claude-code backend gets WebSearch/WebFetch for free
+// via `claude -p`; an API build must add the server-side web tools for parity (the
+// bot's own queries are [CTX:...] tags, so they need nothing). PRs welcome.
 function createAnthropicApiProvider() {
   throw new Error(
     'AI provider "anthropic-api" is not implemented — this build ships CLI-only ' +

@@ -11,12 +11,13 @@ actions — mining, building, crafting, combat, navigation, and more.
 - A pluggable **AI provider** (`ai-provider.js`) turns game context into decisions. This build
   ships **CLI-only**: it spawns the `claude` CLI (`claude -p`) as a persistent streaming
   subprocess, so it runs on your existing Claude subscription / browser login — **no API key
-  required**. The CLI backend also gets `WebSearch`, `WebFetch`, and the bot's own query tools
-  (via the bundled MCP server, `mcp-server.js`) for free.
+  required**. The CLI backend also gets `WebSearch` and `WebFetch` for free. The bot's own
+  queries — terrain views, builds, chat, events, journal records — are `[CTX:...]` tags whose
+  answers arrive in the next turn's context (`ctxProviders.js`, `ctxPast.js`), not tools.
 - The provider interface is deliberately backend-agnostic (`init` / `send` / `abort` /
   `destroy`). A direct **Anthropic API** backend is stubbed in `ai-provider.js` for anyone who
   prefers API-key auth — implementing it is a contained, welcome contribution (see the note in
-  that file about wiring the bot-query tools through a tool-use loop for parity).
+  that file).
 
 ## Requirements
 
@@ -97,7 +98,7 @@ bot.js               entry point — Mineflayer setup, runtime dir, shutdown
 src/
   core/              state, tick (abort/timing), shared utils
   ai/                AI message handling, provider (claude-code CLI; anthropic-api
-                     stub), MCP server, per-turn context, system prompt/personalities
+                     stub), per-turn context and [CTX:...] views, system prompt/personalities
   engine/            main decision loop, autonomous behaviour, background tasks,
                      safety guard, task stack
   navigation/        pathfinding & movement, planner, low-level step primitives,

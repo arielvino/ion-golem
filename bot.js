@@ -12,7 +12,7 @@ const state = require('./src/core/state')
 const { c, color } = require('./src/lib/colors')
 const { initDB } = require('./src/world/memory')
 const { loadAgenda, agendaTitles } = require('./src/engine/tasks')
-const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, syncInventory, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
+const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
 const { initChatLogs, initAI } = require('./src/ai/ai')
 const { setupAutonomous } = require('./src/engine/autonomous')
 const { startEngine, stopEngine, interrupt, softInterrupt } = require('./src/engine/engine')
@@ -271,7 +271,6 @@ function createBot() {
       visionBusy = false
     }, 3000)
     // Nearby blocks updated via vision system only — no direct bot.blockAt (x-ray rule)
-    bot.inventory.on('updateSlot', () => { try { syncInventory() } catch (e) { console.warn('  [INV] sync err:', e.message) } })
 
     // Log item pickups
     bot.on('playerCollect', (collector, collected) => {

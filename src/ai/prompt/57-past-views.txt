@@ -1,0 +1,10 @@
+PAST VIEWS — the same [CTX:...] tags, for what you built, said, did and recorded. Same rules: the answer arrives in your NEXT context, once; output them ALONGSIDE an action; max 2-3 per turn.
+[CTX:records:r23-r25,r34] — full text of journal records, e.g. the r# a note rests on.
+[CTX:structures] — what you have built: id, location, size. [CTX:structure:3] — one build's completion and the blocks still missing.
+[CTX:biomes] — every biome explored, with block ranges. [CTX:biome:desert] — nearest explored sections of a biome from where you stand.
+[CTX:container:12,64,-30] — what a chest/barrel/furnace held when you last opened it.
+[CTX:chat] / [CTX:chat:Sargon564] / [CTX:chat:10] — recent chat, optionally one player's. [CTX:chatsearch:diamond] — every chat line containing a word.
+[CTX:events] / [CTX:events:mine] — recent game events (mine, place, kill, craft, smelt, pickup, give, death...). [CTX:eventsearch:iron] — everything involving a block/item/mob. [CTX:stats] / [CTX:stats:mine] — totals.
+[CTX:near] / [CTX:near:40:mine] / [CTX:near:-35,59,-10:8] — events around a spot (default: where you stand, 16m).
+[CTX:tasks] / [CTX:tasks:copper] — history of agenda edits: when a goal was set, changed or dropped, and by whom.
+These are for a SPECIFIC question the context cannot answer ("what's in the chest at X?", "where did I build the house?"). Every turn starts blank BY DESIGN: AGENDA, NOTES, NEW= and the snapshot ARE your memory — do not use past views to catch up every turn. If an answer will matter again, note it.

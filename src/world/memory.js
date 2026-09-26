@@ -55,12 +55,6 @@ function initDB() {
       PRIMARY KEY (chunk_x, chunk_y, chunk_z, biome)
     );
     CREATE INDEX IF NOT EXISTS idx_chunk_biomes_biome ON chunk_biomes(biome);
-    CREATE TABLE IF NOT EXISTS bot_inventory (
-      slot INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      count INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS chat_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       game_tick INTEGER NOT NULL,
@@ -169,10 +163,6 @@ function initDB() {
       ON CONFLICT(chunk_x, chunk_y, chunk_z, biome) DO UPDATE SET seen_at=excluded.seen_at`),
     // Chat log
     insertChatLog: db.prepare(`INSERT INTO chat_log (game_tick, game_day, type, username, message) VALUES (?, ?, ?, ?, ?)`),
-    // Inventory sync
-    clearInventory: db.prepare(`DELETE FROM bot_inventory`),
-    upsertInventory: db.prepare(`INSERT INTO bot_inventory (slot, name, count, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(slot) DO UPDATE SET name=excluded.name, count=excluded.count, updated_at=excluded.updated_at`),
     // Task log
     insertTaskLog: db.prepare(`INSERT INTO task_log (game_tick, game_day, action, task, detail, stack_after) VALUES (?, ?, ?, ?, ?, ?)`),
     // Events
@@ -525,28 +515,11 @@ function logGameEvent(type, target, count, x, y, z, detail) {
   } catch (e) { console.log(`  [MEMORY] event err: ${e.message}`) }
 }
 
-// --- Inventory sync to DB ---
-// Writes current bot inventory to SQLite so MCP tools can query it.
-function syncInventory() {
-  const bot = state.bot
-  if (!bot) return
-  try {
-    const now = gameTick()
-    const items = bot.inventory.items()
-    state.db.transaction(() => {
-      state.stmts.clearInventory.run()
-      for (const item of items) {
-        state.stmts.upsertInventory.run(item.slot, item.name, item.count, now)
-      }
-    })()
-  } catch (e) { console.warn('  [MEMORY] syncInventory err:', e.message) }
-}
-
 module.exports = {
   initDB, updateBlockMemoryReach, queryBlockMemory, queryBlockMemoryFuzzy,
   trackPlacedBlock, createStructure, getStructures, removeBlock, queryUtilityBlocks,
   saveContainerState, removeContainerState, getNearbyContainers, searchContainersFor,
   queryRegion,
   trackPathBlock, isPathBlock, clearOldPathBlocks, countNearbyPathBlocks,
-  updateChunkBiomes, syncInventory, logChatDB, logGameEvent, logTaskAction, upsertVisionChunked,
+  updateChunkBiomes, logChatDB, logGameEvent, logTaskAction, upsertVisionChunked,
 }
