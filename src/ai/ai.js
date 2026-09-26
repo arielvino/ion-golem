@@ -4,6 +4,7 @@ const path = require('path')
 const state = require('../core/state')
 const { getBotContext } = require('./context')
 const { applyPlanTags, agendaTitles } = require('../engine/tasks')
+const { applyNoteTags, markShown } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, isPseudoUsername, resolvePlayerName } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
@@ -65,6 +66,7 @@ const PERSONALITIES = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'con
 const PROMPT_ORDER = [
   '00-core.txt',
   '10-tasks.txt',
+  '15-memory.txt',
   '20-crafting-mining.txt',
   '30-navigation.txt',
   '40-autonomous.txt',
@@ -137,6 +139,11 @@ async function handleMessage(username, message, historyAs) {
     // follows the speaker: a player's turn acts as that player, anything else as 'self'.
     const planApplied = applyPlanTags(rawReply, isPlayerMessage ? username : 'self')
     if (planApplied.length) console.log(color(c.magenta, `\n  [PLAN] ${planApplied.join('; ')}\n`))
+
+    // [NOTE:...] — the model's running story (world/journal.js).
+    const notesApplied = applyNoteTags(rawReply, { allowCompact: !isMonitorCall })
+    if (notesApplied.length) console.log(color(c.magenta, `  [NOTE] ${notesApplied.join('; ')}`))
+    markShown()
 
     // [CTX:name] / [CTX:name:arg:arg] — ask for a high-resolution view in the NEXT
     // turn's context. An unknown name is queued rather than dropped: the renderer
@@ -214,7 +221,7 @@ async function handleMessage(username, message, historyAs) {
     function onDelta(_delta, fullText) {
       // Early chat send: before first tag
       if (!chatSent) {
-        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|BLUEPRINT|CTX):?/)
+        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX):?/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
@@ -254,6 +261,7 @@ async function handleMessage(username, message, historyAs) {
     if (!chatSent) {
       chatText = fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '')
         .replace(/\s*\[PLAN:[^\]]+\]/g, '')
+        .replace(/\s*\[NOTE:(?:[^[\]]|\[[^[\]]*\])*\]/g, '')
         .replace(/\s*\[CTX:[^\]]+\]/g, '')
         .replace(/\s*\[BLUEPRINT:[\s\S]*?\]/g, '').trim()
 

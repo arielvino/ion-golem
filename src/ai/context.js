@@ -7,6 +7,7 @@ const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
 const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
 const { renderAgenda } = require('../engine/tasks')
+const { renderNew, renderNotesBlock } = require('../world/journalStore')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending } = require('./ctxProviders')
@@ -144,6 +145,8 @@ function getBotContext(chatUsername) {
 
   const failInfo = state.lastFailures.length > 0 ? ` RECENT_FAILS=[${state.lastFailures.join(', ')}]` : ''
   const historyInfo = state.eventLog.length > 0 ? ` HISTORY=[${state.eventLog.map(e => e.msg).join(', ')}]` : ''
+  const newRecords = renderNew()
+  const newInfo = newRecords ? ` NEW=[${newRecords}]` : ''
   // Report mineflayer's real bot.vehicle state, which is driven purely by the
   // server's set_passengers/attach_entity packets (no client-side guessing).
   // Always emit an affirmative RIDING/ON_FOOT token so the model never has to
@@ -239,11 +242,11 @@ function getBotContext(chatUsername) {
   // provider table so a new view becomes askable the moment it is registered.
   const ctxAvail = ` CTX_AVAIL=[${providerNames().join(',')}]`
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${historyInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${historyInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
   // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
-  return [blob, renderAgenda(), renderPending()].filter(Boolean).join('\n')
+  return [blob, renderAgenda(), renderNotesBlock(), renderPending()].filter(Boolean).join('\n')
 }
 
 module.exports = { getBotContext }

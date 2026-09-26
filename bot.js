@@ -243,6 +243,7 @@ function createBot() {
     bot.pathfinder.setMovements(mv)
 
     loadAgenda()
+    require('./src/world/journalStore').loadJournal()
     clearOldPathBlocks()
     // Vision + DB updates run in small async batches to avoid blocking the event loop.
     // Blocking causes physics freezes visible as teleporting/floating every 2s.

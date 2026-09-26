@@ -64,6 +64,7 @@ function debugChat(text) {
 /** Log a concise event to the rolling history (shown to AI as HISTORY=) */
 function logEvent(msg) {
   state.eventLog.push({ ts: Date.now(), msg })
+  state.journal?.record(msg)
   if (state.eventLog.length > state.MAX_EVENT_LOG) state.eventLog.shift()
 }
 
@@ -122,6 +123,7 @@ const MAX_FAILURES = 5
 /** Record a recent failure reason (shown to AI as RECENT_FAILS=), keeping the last few */
 function recordFailure(msg) {
   state.lastFailures.push(msg)
+  state.journal?.record(`✗ ${msg}`)
   if (state.lastFailures.length > MAX_FAILURES) state.lastFailures.shift()
 }
 
