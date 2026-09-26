@@ -3,11 +3,15 @@
 // physically reachable, and if not, which block is in the way to dig out.
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
-const { rayReachable, isDiagBlocked, PASSABLE, voxelCells } = require('../perception/vision')
+const { isDiagBlocked, PASSABLE, voxelCells } = require('../perception/vision')
 
 // Find first non-passable block on ray from → to. Returns Vec3 or null.
 // Shares the voxel stepping with vision._rayClear via voxelCells.
-function findBlockingBlock(from, to) {
+// stopCell: the block being reached. Entering it ends the ray clear — the target is
+// the destination, not an obstacle. Without this a solid target (a log to mine)
+// blocks every ray that ends inside it, and the last-meter dig mines the target
+// itself out from under the caller.
+function findBlockingBlock(from, to, stopCell = null) {
   const bot = state.bot
   for (const [bx, by, bz, lastBx, lastBy, lastBz] of voxelCells(from, to)) {
     // Diagonal corner check — return one of the solid corner blocks if passage is blocked
@@ -25,6 +29,7 @@ function findBlockingBlock(from, to) {
         } catch (e) { console.warn('  [NAV] LoS corner check err:', e.message) }
       }
     }
+    if (stopCell && bx === stopCell.x && by === stopCell.y && bz === stopCell.z) return null
     try {
       const b = bot.blockAt(new Vec3(bx, by, bz))
       if (!b) return null
@@ -43,7 +48,9 @@ function _getReachVec(opts, fallback) {
   return fallback
 }
 
-// Reachability check — returns true if target point is physically reachable
+// Reachability check — returns true if target point is physically reachable.
+// Same ray walk as _digToward (findBlockingBlock), so "unreachable" always comes
+// with the exact blocker the dig would clear.
 function _reachCheck(bot, tpVec) {
   const eye = bot.entity.position.offset(0, 1.62, 0)
   const cx = Math.floor(tpVec.x) + 0.5
@@ -54,7 +61,8 @@ function _reachCheck(bot, tpVec) {
     new Vec3(cx, cy + 0.9, cz),
     new Vec3(cx, cy + 1.62, cz),
   ]
-  return checkPoints.some(cp => rayReachable(eye, cp))
+  const cell = tpVec.floored()
+  return checkPoints.some(cp => !findBlockingBlock(eye, cp, cell))
 }
 
 // Dig toward target — finds and digs first blocking block on ray.
@@ -67,9 +75,10 @@ async function _digToward(bot, tpVec) {
   const cx = Math.floor(tpVec.x) + 0.5
   const cy = tpVec.y
   const cz = Math.floor(tpVec.z) + 0.5
-  const blocking = findBlockingBlock(eye, new Vec3(cx, cy + 0.9, cz))
-      || findBlockingBlock(eye, new Vec3(cx, cy + 0.1, cz))
-      || findBlockingBlock(eye, new Vec3(cx, cy + 1.62, cz))
+  const cell = tpVec.floored()
+  const blocking = findBlockingBlock(eye, new Vec3(cx, cy + 0.9, cz), cell)
+      || findBlockingBlock(eye, new Vec3(cx, cy + 0.1, cz), cell)
+      || findBlockingBlock(eye, new Vec3(cx, cy + 1.62, cz), cell)
   if (blocking) {
     console.log(`  nav: blocked, digging at ${blocking}`)
     // Uses the running nav op's intent (state.navIntent) — a tool-gated blocker
