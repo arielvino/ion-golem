@@ -26,12 +26,14 @@ const TRAVEL_ACTIONS = new Set(['goto', 'goto~', 'goto!', 'digto', 'come', 'swim
 let wdBaseline = null               // { task, x, y, z, alt, t }
 
 // --- Hard interrupt: full stop (used for kicks, disconnects, etc.) ---
-function interrupt() {
+// keepResponse: a streamed [ACTION:stop] fires this mid-reply — the reply that asked
+// for the stop must keep streaming (its later actions are the requeue).
+function interrupt({ keepResponse = false } = {}) {
   state.abortSignal = true
   state.interrupted = true
   state.actionQueue = []
   stopAll()
-  abortResponse()  // cancel in-flight AI response (keeps persistent process alive)
+  if (!keepResponse) abortResponse()  // cancel in-flight AI response (keeps persistent process alive)
   try { state.bot.pathfinder.setGoal(null) } catch(e) {}
   try { state.bot.clearControlStates() } catch(e) {}
   // Do NOT fake the bg task's status here. The coroutine is still unwinding; let it report
@@ -161,15 +163,16 @@ async function mainLoop(wasInterrupted) {
     const top = stackTop()
     const taskDesc = top.d ? `"${top.t}" (${top.d})` : `"${top.t}"`
     console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
-    const beforeQLen = state.actionQueue.length
+    const beforeActionOps = state.actionOpCount
     const beforePlanOps = state.planOpCount
     await handleMessage('self',
       `[SELF-CHECK] task=${taskDesc}`,
       username)
 
-    // Progress = queued actions or a plan edit. A turn that only decomposes a
-    // goal or picks a strategy is real work, not a stall.
-    if (state.actionQueue.length === beforeQLen && state.planOpCount === beforePlanOps) {
+    // Progress = emitted actions or a plan edit. A turn that only decomposes a
+    // goal or picks a strategy is real work, not a stall. Counted, not measured off
+    // the queue length: streamed actions launch (and leave the queue) mid-reply.
+    if (state.actionOpCount === beforeActionOps && state.planOpCount === beforePlanOps) {
       state.noActionRounds++
       console.log(color(c.yellow, `\n  [LOOP] no actions or plan edits (round ${state.noActionRounds}/${MAX_NO_ACTION})`))
       state.loopRunning = false
@@ -194,7 +197,6 @@ async function monitorLoop() {
     const summary = getBackgroundSummary() || 'running'
     const queueLen = state.actionQueue.length
     console.log(color(c.white, `\n  [MONITOR] actions active: ${summary}, queue: ${queueLen}`))
-    const beforeQLen = state.actionQueue.length
     await handleMessage('self',
       `[MONITOR] task=${summary} queue=${queueLen}`,
       username)

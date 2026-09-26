@@ -57,6 +57,11 @@ function createClaudeCodeProvider(opts = {}) {
     // Streaming text deltas
     if (event.type === 'stream_event' && event.event) {
       const ev = event.event
+      // A turn that calls MCP tools spans several assistant messages; keep their text
+      // blocks apart so a tag at the end of one can't fuse with prose opening the next.
+      if (ev.type === 'content_block_start' && ev.content_block?.type === 'text' && current.text) {
+        current.text += '\n'
+      }
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
         if (!current.firstTokenMs) current.firstTokenMs = Date.now() - current.start
         current.text += ev.delta.text
@@ -83,7 +88,9 @@ function createClaudeCodeProvider(opts = {}) {
           const short = (block.name || '').replace(/^mcp__bot-query__/, '')
           console.log(color(c.gray, `  [AI] tool args: ${short} ${JSON.stringify(block.input || {}).slice(0, 300)}`))
         }
-        if (block.type === 'text' && block.text) current.text = block.text
+        // Only when nothing streamed: each assistant event carries just ITS message's
+        // text, so overwriting would drop every earlier message of a tool-using turn.
+        if (block.type === 'text' && block.text && !current.firstTokenMs) current.text = block.text
       }
     }
 

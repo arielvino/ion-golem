@@ -217,11 +217,48 @@ async function handleMessage(username, message, historyAs) {
     let chatSent = false
     let chatText = ''
     const pendingActions = []
+    let dispatched = 0      // pendingActions[0..dispatched) already handed to the engine
+    let deferred = false    // hit an action that must wait for the end of the reply
+    let queueReplaced = false
+    let logsShown = 0
+
+    // Actions run the moment their tag closes, not when the reply ends — a turn that
+    // makes a tool call or writes a long NOTE/PLAN after its first action used to sit
+    // idle for all of it. The queue semantics are unchanged: a reply's actions REPLACE
+    // the queue (on its first action), and a `stop` is a preemption, fired here at the
+    // earliest point stop-intent exists so it bypasses the queue gate that would
+    // otherwise schedule it behind the very bg task it's meant to kill. Actions after
+    // the stop are the requeue: they wait for the killed task's real settle
+    // (interrupt() leaves it truthfully 'running'; processActionQueue gates on that).
+    function dispatchAction(actionStr) {
+      const engine = require('../engine/engine')
+      state.actionOpCount++
+      if (!queueReplaced) { state.lastFailures = []; state.actionQueue = []; queueReplaced = true }
+      if (actionStr.split(':')[0] === 'stop') {
+        console.log(color(c.yellow, `\n  -> stop: preempting current work`))
+        engine.interrupt({ keepResponse: true })  // clears queue + sets abortSignal
+        return
+      }
+      state.actionQueue.push({ actionStr, username: histKey })
+      console.log(color(c.green, `\n  -> action: ${actionStr}`))
+      engine.processActionQueue()
+    }
+
+    // `build` reads the [BLUEPRINT] and the focused goal, which are applied only once
+    // the whole reply is in (processTags) — it and everything after it wait for that.
+    const DEFER_TO_END = new Set(['build'])
+    function dispatchReady(final) {
+      for (; dispatched < pendingActions.length; dispatched++) {
+        const a = pendingActions[dispatched]
+        if (!final && (deferred || DEFER_TO_END.has(a.split(':')[0]))) { deferred = true; return }
+        dispatchAction(a)
+      }
+    }
 
     function onDelta(_delta, fullText) {
       // Early chat send: before first tag
       if (!chatSent) {
-        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX):?/)
+        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX|LOG):?/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
@@ -231,12 +268,20 @@ async function handleMessage(username, message, historyAs) {
         }
       }
 
-      // Collect actions as they appear
+      // [LOG:...] — the model's one-line "why", printed as soon as it closes so the
+      // console shows the reasoning next to the action it explains.
+      const logs = [...fullText.matchAll(/\[LOG:([^\]]+)\]/g)]
+      for (; logsShown < logs.length; logsShown++) {
+        console.log(color(c.yellow, `  [LOG] ${logs[logsShown][1].trim()}`))
+      }
+
+      // Collect actions as they appear, and start each one right away
       const newActions = [...fullText.matchAll(/\[ACTION:([^\]]+)\]/g)]
       if (newActions.length > pendingActions.length) {
         for (let i = pendingActions.length; i < newActions.length; i++) {
           pendingActions.push(newActions[i][1])
         }
+        dispatchReady(false)
       }
     }
 
@@ -260,6 +305,7 @@ async function handleMessage(username, message, historyAs) {
 
     if (!chatSent) {
       chatText = fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '')
+        .replace(/\s*\[LOG:[^\]]+\]/g, '')
         .replace(/\s*\[PLAN:[^\]]+\]/g, '')
         .replace(/\s*\[NOTE:(?:[^[\]]|\[[^[\]]*\])*\]/g, '')
         .replace(/\s*\[CTX:[^\]]+\]/g, '')
@@ -291,25 +337,12 @@ async function handleMessage(username, message, historyAs) {
     // Always record an assistant turn to prevent consecutive user messages
     addToHistory(histKey, 'assistant', chatText || '(working...)')
 
-    // Populate action queue — engine will process it.
-    // A `stop` is a PREEMPTION, not a queued action: fire interrupt() synchronously here
-    // (the earliest point stop-intent exists) so it bypasses the queue gate that would
-    // otherwise schedule it behind the very bg task it's meant to kill. Actions the model
-    // queued *after* the stop are kept and run once the killed task settles (interrupt()
-    // leaves the task truthfully 'running'; processActionQueue waits for the real settle).
+    // Whatever the stream held back (a deferred `build` and its followers) runs now
+    // that processTags has applied the blueprint and plan edits.
+    const streamed = dispatched
+    dispatchReady(true)
     if (pendingActions.length > 0) {
-      state.lastFailures = []
-      const stopIdx = pendingActions.findIndex(a => a.split(':')[0] === 'stop')
-      if (stopIdx !== -1) {
-        console.log(color(c.yellow, `\n  -> stop: preempting current work`))
-        require('../engine/engine').interrupt()  // clears queue + sets abortSignal
-      }
-      const queued = stopIdx === -1 ? pendingActions : pendingActions.slice(stopIdx + 1)
-      const actions = queued.map(a => ({ actionStr: a, username: histKey }))
-      if (actions.length > 0) {
-        console.log(color(c.green, `\n  -> ${actions.length} action(s): ${actions.map(a => a.actionStr).join(' → ')}`))
-      }
-      state.actionQueue = actions  // assign AFTER interrupt() (which cleared it) = the requeue
+      console.log(color(c.green, `\n  -> ${pendingActions.length} action(s): ${pendingActions.join(' → ')}${streamed ? ` (${streamed} started mid-reply)` : ''}`))
     }
   }
 
