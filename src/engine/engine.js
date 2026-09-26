@@ -4,7 +4,7 @@ const state = require('../core/state')
 const { sleep, stopAll, AbortError } = require('../core/tick')
 const { handleMessage, abortResponse } = require('../ai/ai')
 const { executeAction } = require('../actions')
-const { stackTopTitle, stackTop, stackTitles, saveStack } = require('./tasks')
+const { stackTopTitle, stackTop } = require('./tasks')
 const { launchBackground, isBackgroundRunning, consumeBackgroundResult } = require('./backgroundTask')
 const { preCheck } = require('./guard')
 const { FOOD_STARVING } = require('../config/safety')
@@ -117,9 +117,8 @@ function idleWakeReason(bgResult) {
   return null
 }
 
-// --- Main autonomous loop (work on task stack) ---
+// --- Main autonomous loop (work on the focused agenda goal) ---
 async function mainLoop(wasInterrupted) {
-  const bot = state.bot
   state.loopRunning = true
 
   // Back off on repeated API failures
@@ -134,27 +133,13 @@ async function mainLoop(wasInterrupted) {
   try {
     const username = state.lastActionUsername || 'self'
 
-    // Auto-pop time-sensitive tasks when conditions change
-    const isDay = bot.time.timeOfDay < 12000
-    while (state.taskStack.length > 0) {
-      const top = state.taskStack[state.taskStack.length - 1]
-      const nightTask = /survive.*night|shelter.*night|hide.*night|wait.*morning|night.*safe/i.test(top.t)
-      if (nightTask && isDay) {
-        state.taskStack.pop()
-        saveStack()
-        const { logTaskAction } = require('../world/memory')
-        logTaskAction('auto-pop', top.t, 'daytime', state.taskStack.map(e => e.t).join(' > ') || '(empty)')
-        console.log(`  [STACK] auto-popped "${top.t}" (it's daytime now)`)
-      } else break
-    }
-
     const topTitle = stackTopTitle()
 
-    // If stack is empty, report and go idle
+    // Nothing in focus: report and go idle
     if (!topTitle) {
-      console.log(color(c.yellow, '\n  [LOOP] stack empty, reporting and going idle'))
+      console.log(color(c.yellow, '\n  [LOOP] agenda idle, reporting and going idle'))
       await handleMessage('self',
-        `[SELF-CHECK] stack=empty`,
+        `[SELF-CHECK] agenda=idle`,
         username)
       state.loopRunning = false
       return
@@ -175,16 +160,18 @@ async function mainLoop(wasInterrupted) {
 
     const top = stackTop()
     const taskDesc = top.d ? `"${top.t}" (${top.d})` : `"${top.t}"`
-    console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (stack depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
+    console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
     const beforeQLen = state.actionQueue.length
+    const beforePlanOps = state.planOpCount
     await handleMessage('self',
       `[SELF-CHECK] task=${taskDesc}`,
       username)
 
-    // Check if Claude actually produced actions
-    if (state.actionQueue.length === beforeQLen) {
+    // Progress = queued actions or a plan edit. A turn that only decomposes a
+    // goal or picks a strategy is real work, not a stall.
+    if (state.actionQueue.length === beforeQLen && state.planOpCount === beforePlanOps) {
       state.noActionRounds++
-      console.log(color(c.yellow, `\n  [LOOP] no actions produced (round ${state.noActionRounds}/${MAX_NO_ACTION})`))
+      console.log(color(c.yellow, `\n  [LOOP] no actions or plan edits (round ${state.noActionRounds}/${MAX_NO_ACTION})`))
       state.loopRunning = false
       return
     }

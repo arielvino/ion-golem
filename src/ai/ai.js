@@ -3,11 +3,11 @@ const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
 const { getBotContext } = require('./context')
-const { saveStack, stackTitles, stackTop, stackPop } = require('../engine/tasks')
+const { applyPlanTags, agendaTitles } = require('../engine/tasks')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, isPseudoUsername, resolvePlayerName } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
-const { logChatDB, logTaskAction } = require('../world/memory')
+const { logChatDB } = require('../world/memory')
 const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
 const { isProvider, providerNames } = require('./ctxProviders')
 
@@ -133,43 +133,10 @@ async function handleMessage(username, message, historyAs) {
   logChat({ type: 'user', username, message, context })
 
   function processTags(rawReply) {
-    const stackMatch = rawReply.match(/\[STACK:([^\]]+)\]/)
-    if (stackMatch) {
-      const raw = stackMatch[1].trim()
-      if (raw.toLowerCase() === 'done' || raw.toLowerCase() === 'clear') {
-        if (isPlayerMessage) {
-          state.taskStack.length = 0; saveStack()
-          logTaskAction('clear', null, 'player requested', '(empty)')
-          console.log(color(c.magenta, '\n  [STACK] cleared all goals (player requested)\n'))
-        } else {
-          const popped = stackPop()
-          if (popped) console.log(color(c.magenta, `\n  [STACK] AI completed "${popped.t}", popped (${state.taskStack.length} remaining)\n`))
-        }
-      } else {
-        const existingByTitle = {}
-        for (const e of state.taskStack) {
-          existingByTitle[e.t.toLowerCase().trim()] = e
-        }
-        const newStack = raw.split('|').map(s => {
-          s = s.trim()
-          s = s.replace(/\s*\[reason:[^\]]*\]\s*/gi, '').replace(/^!/, '')
-          const rm = s.match(/^(.*?)\{(.+)\}\s*$/)
-          let reason = ''
-          if (rm) { s = rm[1].trim(); reason = rm[2].trim() }
-          const m = s.match(/^([^(]+?)(?:\((.+)\))?$/)
-          const title = m ? m[1].trim() : s.trim()
-          const details = m ? (m[2] || '').trim() : ''
-          const existing = existingByTitle[title.toLowerCase().trim()]
-          if (!reason && existing?.r) reason = existing.r
-          if (!reason && isPlayerMessage) reason = `${username} asked`
-          return { t: title, d: details, r: reason }
-        }).filter(e => e.t)
-        state.taskStack = newStack; saveStack()
-        logTaskAction('replace', stackTitles(), JSON.stringify(newStack.map(e => e.t)), stackTitles())
-        console.log(color(c.magenta, `\n  [STACK] set: ${stackTitles()}\n`))
-      }
-    }
-    if (rawReply.includes('[POP]')) stackPop()
+    // [PLAN:op:...] — agenda and goal-tree edits (engine/planOps.js). Ownership
+    // follows the speaker: a player's turn acts as that player, anything else as 'self'.
+    const planApplied = applyPlanTags(rawReply, isPlayerMessage ? username : 'self')
+    if (planApplied.length) console.log(color(c.magenta, `\n  [PLAN] ${planApplied.join('; ')}\n`))
 
     // [CTX:name] / [CTX:name:arg:arg] — ask for a high-resolution view in the NEXT
     // turn's context. An unknown name is queued rather than dropped: the renderer
@@ -193,7 +160,7 @@ async function handleMessage(username, message, historyAs) {
       }
     }
 
-    return stackMatch
+    return planApplied
   }
 
   async function streamAndProcess(msgs) {
@@ -247,7 +214,7 @@ async function handleMessage(username, message, historyAs) {
     function onDelta(_delta, fullText) {
       // Early chat send: before first tag
       if (!chatSent) {
-        const tagIdx = fullText.search(/\[(?:ACTION|STACK|POP|PUSH|GOAL|BLUEPRINT|CTX):?/)
+        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|BLUEPRINT|CTX):?/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
@@ -280,28 +247,23 @@ async function handleMessage(username, message, historyAs) {
     console.log(color(c.gray, `  [API]${isMonitorCall ? ' [monitor/haiku]' : ''} ${resp.totalMs}ms (first token: ${resp.firstTokenMs}ms, api: ${resp.apiMs}ms) | in=${inTok}tok out=${outTok}tok | cache: read=${cachRead} create=${cachCreate}`))
     console.log(color(c.cyan, `  [MODEL-OUT]`) + ` ${fullText}\n`)
 
-    logChat({ type: 'ai', raw: fullText, stack: [...state.taskStack], messages: msgs })
+    logChat({ type: 'ai', raw: fullText, stack: [...state.taskStack], agenda: agendaTitles(), messages: msgs })
 
-    const stackMatch = processTags(fullText)
+    const planApplied = processTags(fullText)
 
     if (!chatSent) {
       chatText = fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '')
-        .replace(/\s*\[STACK:[^\]]+\]/g, '')
-        .replace(/\s*\[PUSH:[^\]]+\]/g, '')
-        .replace(/\s*\[GOAL:[^\]]+\]/g, '')
-        .replace(/\s*\[POP\]/g, '')
+        .replace(/\s*\[PLAN:[^\]]+\]/g, '')
         .replace(/\s*\[CTX:[^\]]+\]/g, '')
         .replace(/\s*\[BLUEPRINT:[\s\S]*?\]/g, '').trim()
 
-      const playerAskedStack = isPlayerMessage && /stack|status|what.*doing|task/i.test(message)
+      const playerAskedStatus = isPlayerMessage && /agenda|stack|status|what.*doing|task/i.test(message)
       if (!chatText) {
-        if (playerAskedStack || (isPlayerMessage && stackMatch && pendingActions.length === 0)) {
+        if (playerAskedStatus || (isPlayerMessage && planApplied.length > 0 && pendingActions.length === 0)) {
           if (state.taskStack.length > 0) {
-            const top = stackTop()
-            const topInfo = top.d ? ` (${top.d})` : ''
-            chatText = `Stack: ${state.taskStack.map(e => e.t).join(' → ')}. Working on: ${top.t}${topInfo}`
+            chatText = `Agenda: ${agendaTitles()}. Working on: ${state.taskStack.map(e => e.t).join(' → ')}`
           } else {
-            chatText = 'Stack is empty, no tasks!'
+            chatText = 'Nothing on my agenda!'
           }
         } else if (pendingActions.length > 0) {
           chatText = pendingActions.map(a => a.split(':')[0]).join(', ')

@@ -196,7 +196,7 @@ function createClaudeCodeProvider(opts = {}) {
 
       // Fresh session_id per request — no stale context accumulation.
       // System prompt stays cached by the persistent process.
-      // STACK + context + RECENT_FAILS provide all needed continuity.
+      // AGENDA + context + RECENT_FAILS provide all needed continuity.
       const sid = `s${++sessionCounter}`
       const msg = JSON.stringify({
         type: 'user',

@@ -589,10 +589,10 @@ server.tool(
   }
 )
 
-// Tool: query_task_history — task stack changes over time
+// Tool: query_task_history — agenda/plan edits over time
 server.tool(
   'query_task_history',
-  'Get history of task stack changes (push, pop, replace, clear, auto-pop) with game time. Shows what tasks were active, when they changed, and why. Use to recall what you were working on or why a task was abandoned.',
+  'Get history of agenda/plan edits (each [PLAN:] op, who issued it, the agenda after it) with game time; older rows are legacy task-stack changes. Use to recall what you were working on or why a goal or strategy was dropped.',
   {
     limit: z.number().optional().describe('Max entries (default 20)'),
     search: z.string().optional().describe('Search term to filter tasks by name/detail'),

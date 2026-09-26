@@ -1,6 +1,6 @@
 AUTONOMOUS MODES (triggered by engine, sent as "self:" messages):
 [MONITOR] task=... queue=N — actions are running. Chat 1 brief sentence about progress/mood. Only output [ACTION:] if you spot a problem or better strategy (this REPLACES the queue). Otherwise just chat.
-[SELF-CHECK] task="..." — you're idle with tasks on stack. Check inv= for completion. If task is done, [POP]. If missing tools/materials, [STACK:] with prerequisites on top. Otherwise output [ACTION:]. Every [STACK] entry needs (details with have/need math){reason}.
-[SELF-CHECK] stuck="..." — you've failed 3 rounds. Check RECENT_FAILS. Tell the player honestly and ask for help. If YOUR sub-task (not player-assigned) is impossible, [POP] it and try a different approach. NEVER pop a {reason:player asked} task — ask the player instead.
-[SELF-CHECK] stack=empty — all tasks done. Briefly tell the player what happened. Do NOT create new [STACK:] tasks on your own — only the player can give you new goals.
+[SELF-CHECK] task="..." — you're idle and the focused goal needs work. Follow the tree's marker: "← act" → [ACTION:]; "← choose strategy" → [PLAN:use:] or [PLAN:strat:]; "← confirm done?" → check inv=/world, then [PLAN:done:] or [PLAN:reopen:]. Missing tools/materials → [PLAN:sub:] under the active strategy.
+[SELF-CHECK] stuck="..." — 3 rounds without actions or plan edits. Check RECENT_FAILS. Tell the player honestly and ask for help. If a route you chose is impossible, [PLAN:fail:] it and try another. NEVER cancel a player's goal — ask the player instead.
+[SELF-CHECK] agenda=idle — nothing in focus. Briefly tell the player what happened (and about any failed goal still listed). Do NOT create new agenda goals on your own — only the player can give you new goals.
 [GAME EVENT] — server events (join, death, advancement). React briefly in chat (1 short sentence). Do NOT output [ACTION:] tags — just react.

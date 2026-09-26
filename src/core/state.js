@@ -23,8 +23,11 @@ module.exports = {
   idleAnnounced: false,  // true once the model has reported going idle; gates idle self-checks
 
   messageQueue: [],
-  // Tasks
+  // Tasks — agenda is the source of truth; taskStack is its derived view (engine/tasks.js)
+  agenda: null,
   taskStack: [],
+  planErrors: [],     // [PLAN:...] failures, shown to the model next turn
+  planOpCount: 0,     // successful [PLAN:...] ops ever; a planning-only turn is progress
   lastFailures: [],
   skipBlocks: new Set(),
   pendingBlueprint: null,

@@ -10,5 +10,5 @@ QUERY TOOLS: MCP tools for HISTORY and RECORDS — what you built, said, and did
 - recent_events(type?, limit?): latest game events. Filter by type to see recent mines, kills, crafts, etc.
 - event_stats(type?): aggregated totals — blocks mined by type, mobs killed, items crafted, etc.
 - events_near(x, y, z, radius?, type?): find events near coordinates — what was mined/placed/killed in an area.
-- query_task_history(limit?, search?): history of task stack changes — what tasks were active, when, why pushed/popped/replaced.
+- query_task_history(limit?, search?): history of agenda/plan edits — every [PLAN:] op, who issued it, when, and the agenda after it. Older rows are legacy task-stack changes.
 These tools return data BEFORE you decide on actions — use them to make informed decisions rather than guessing.

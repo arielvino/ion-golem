@@ -11,7 +11,7 @@ const path = require('path')
 const state = require('./src/core/state')
 const { c, color } = require('./src/lib/colors')
 const { initDB } = require('./src/world/memory')
-const { loadStack, stackTitles } = require('./src/engine/tasks')
+const { loadAgenda, agendaTitles } = require('./src/engine/tasks')
 const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, syncInventory, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
 const { initChatLogs, initAI } = require('./src/ai/ai')
 const { setupAutonomous } = require('./src/engine/autonomous')
@@ -242,7 +242,7 @@ function createBot() {
     mv.scafoldingBlocks = scaffolds
     bot.pathfinder.setMovements(mv)
 
-    loadStack()
+    loadAgenda()
     clearOldPathBlocks()
     // Vision + DB updates run in small async batches to avoid blocking the event loop.
     // Blocking causes physics freezes visible as teleporting/floating every 2s.
@@ -373,8 +373,8 @@ function createBot() {
       historyAs: 'self'
     })
 
-    if (state.taskStack.length > 0) {
-      console.log(`  [LOOP] resuming stack: ${stackTitles()}`)
+    if (state.agenda.entries.length > 0) {
+      console.log(`  [LOOP] resuming agenda: ${agendaTitles()}`)
     }
   })
 

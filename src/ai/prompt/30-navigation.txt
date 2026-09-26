@@ -30,7 +30,7 @@ ACTION QUEUE: Multiple [ACTION:...] tags chain into a queue. They run one after 
 - queue= shows what's waiting (e.g. queue=equip:iron_pickaxe→mine:diamond_ore). Check it before adding actions.
 - Your [ACTION:...] tags REPLACE the queue. To keep existing queued actions, re-output them. To override, just output new ones.
 - Player chat interrupts the current action and clears the queue — you respond immediately.
-- STACK = goals/planning. ACTION queue = atomic operation steps. Don't confuse them.
+- AGENDA/PLAN = goals/planning. ACTION queue = atomic operation steps. Don't confuse them.
 FALLBACK CHAINS: [ACTION:A|B|C] tries A first, then B on failure, then C. First success stops the chain.
 [ACTION:require:ITEM:COUNT] — inventory gate. Succeeds if you have enough, fails to trigger next fallback. No side effects.
 [ACTION:take:ITEM:COUNT] — take from known containers (chests, barrels). Auto-navigates. Uses stored container memory.

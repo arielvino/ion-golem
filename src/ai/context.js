@@ -6,7 +6,7 @@ const { getLastSurvey } = require('../perception/visibility')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
 const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
-const { stackTitlesWithSrc, stackTop } = require('../engine/tasks')
+const { renderAgenda } = require('../engine/tasks')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending } = require('./ctxProviders')
@@ -112,9 +112,6 @@ function getBotContext(chatUsername) {
     structParts.push(`"${s.name}"@${cx},${cy},${cz}(${d}m,${s.block_count}blk)`)
   }
   const structInfo = structParts.length > 0 ? ` MY_BUILDS=[${structParts.join(', ')}]` : ''
-  const stackInfo = state.taskStack.length > 0 ? ` STACK=[${stackTitlesWithSrc()}]` : ''
-  const topEntry = stackTop()
-  const topDetails = topEntry && topEntry.d ? ` TASK_DETAILS="${topEntry.d}"` : ''
 
   const invItems = bot.inventory.items()
   const countItem = (filter) => invItems.filter(i => filter(i.name)).reduce((s, i) => s + i.count, 0)
@@ -242,12 +239,11 @@ function getBotContext(chatUsername) {
   // provider table so a new view becomes askable the moment it is registered.
   const ctxAvail = ` CTX_AVAIL=[${providerNames().join(',')}]`
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${stackInfo}${topDetails}${historyInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${historyInfo}${failInfo}${ctxAvail}]`
 
-  // Requested views hang OUTSIDE the blob: they are multi-line grids, and the blob is
-  // parsed elsewhere by splitting on top-level keys, which would mangle them.
-  const views = renderPending()
-  return views ? `${blob}\n${views}` : blob
+  // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
+  // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
+  return [blob, renderAgenda(), renderPending()].filter(Boolean).join('\n')
 }
 
 module.exports = { getBotContext }
