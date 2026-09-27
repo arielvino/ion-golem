@@ -14,6 +14,7 @@ const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
 const { entityTag } = require('../perception/entityTag')
+const { entityClass } = require('../perception/entityClass')
 
 // --- Main context builder ---
 function getBotContext() {
@@ -43,10 +44,21 @@ function getBotContext() {
     return parts.length > 0 ? `,${parts.join(',')}` : ''
   }
   // Every visible non-player entity, nearest first. Players have PLAYERS= below.
+  // Background mobs (fish, squid, bats) are summarized per type after the tagged
+  // list; drops only show within pickup range.
+  const background = {}  // name → { n, near }
   const nearby = Object.values(bot.entities)
     .filter(e => e !== bot.entity && !e.username && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
     .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
+    .filter(e => {
+      const kind = entityClass(e)
+      if (kind === 'drop') return e.position.distanceTo(pos) < ranges.sight.nearbyDrops
+      if (kind !== 'background') return true
+      const b = background[e.name] || (background[e.name] = { n: 0, near: Math.round(e.position.distanceTo(pos)) })
+      b.n++
+      return false
+    })
     .map(e => {
       const tag = entityTag(e)
       const ep = e.position
@@ -58,7 +70,12 @@ function getBotContext() {
       }
       nearbyNames.push(tag)
       return `${tag}${coord}(${dist}${count}${equipOf(e)})`
-    }).join(', ') || 'none'
+    })
+    .concat(Object.entries(background).map(([name, b]) => {
+      nearbyNames.push(name)
+      return `${name}×${b.n}(${b.near}m+)`
+    }))
+    .join(', ') || 'none'
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
   const facingDirs = ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE']

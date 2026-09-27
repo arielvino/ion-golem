@@ -3,6 +3,7 @@
   "sight": {
     "playerVisibility": "chunkLoad",
     "nearbyEntities": "chunkLoad",
+    "nearbyDrops": 32,
     "ambientSurveyBlocks": 64,
     "ambientFovDegrees": 120,
     "ambientSurveyCap": 60000,
@@ -18,6 +19,7 @@
   "_fields": {
     "sight.playerVisibility": "Max range to LOS-test the named chat player for PLAYER=...(visible/NOT_VISIBLE). chunkLoad = see them as far as chunks load.",
     "sight.nearbyEntities": "Range for the nearby= mob/entity list (LOS-gated). chunkLoad = full loaded range.",
+    "sight.nearbyDrops": "Range for dropped items in nearby= (LOS-gated). Drops farther than this are omitted — they matter only for pickup.",
     "sight.ambientSurveyBlocks": "Range of the standing-context survey (exposure-culled chunk scan + LOS) that feeds VISION= see=. Per-tick cost; exposure cull keeps candidate count low so range can be larger. Profile before pushing past ~64.",
     "sight.ambientFovDegrees": "Field-of-view cone (full angle) for the standing survey. (FOV-vs-omni still under discussion.)",
     "sight.ambientSurveyCap": "Memory ceiling on exposed candidates per ambient survey (nearest-first), NOT a range limiter and NOT the LOS budget. Keep well above the in-range exposed-shell size (open ocean at r64 can be >8000) or distant types get clipped. LOS cost is bounded separately by ambientVisibleCap in surveyVisible.",
