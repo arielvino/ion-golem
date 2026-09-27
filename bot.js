@@ -31,7 +31,7 @@ state.debugMode = DEBUG_MODE
 // Override via env for a remote/online server (e.g. MC_HOST=play.example.net MC_PORT=25565).
 const BOT_HOST = process.env.MC_HOST || 'localhost'
 const BOT_PORT = parseInt(process.env.MC_PORT || '25565', 10)
-const BOT_VERSION = process.env.MC_VERSION || '1.21.11'
+const BOT_VERSION = process.env.MC_VERSION || '26.1'
 const BOT_OPTIONS = { host: BOT_HOST, port: BOT_PORT, username: BOT_NAME, version: BOT_VERSION }
 // Auth mode ('offline' | 'microsoft'). Only set when provided, so default local offline play is unchanged.
 if (process.env.MC_AUTH) BOT_OPTIONS.auth = process.env.MC_AUTH

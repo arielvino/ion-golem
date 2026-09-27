@@ -3,7 +3,7 @@ const assert = require('node:assert')
 const state = require('../src/core/state')
 const { entityClass } = require('../src/perception/entityClass')
 
-state.bot = { registry: require('prismarine-registry')('1.21.11') }
+state.bot = { registry: require('prismarine-registry')('26.1') }
 
 test('entityClass: fish, squid and bats are background', () => {
   for (const name of ['cod', 'tropical_fish', 'squid', 'glow_squid', 'dolphin', 'bat']) {

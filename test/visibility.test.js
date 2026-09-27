@@ -4,7 +4,7 @@ const assert = require('node:assert')
 const { Vec3 } = require('vec3')
 
 const state = require('../src/core/state')
-const mcData = require('minecraft-data')('1.21.11')
+const mcData = require('minecraft-data')('26.1')
 const { viewVector, inFov, blockVisible, surveyVisible, formatSurvey } = require('../src/perception/visibility')
 
 const MIN_Y = -64, NUM_SECTIONS = 24
@@ -43,7 +43,7 @@ function buildColumns(worldMap) {
 function makeBot(worldMap, { pos = new Vec3(0.5, 0.5, 0.5), yaw = 0, pitch = 0, entities = {} } = {}) {
   const blockAt = (v) => ({ name: worldMap.get(`${v.x},${v.y},${v.z}`) || 'air', position: v })
   return {
-    version: '1.21.11',
+    version: '26.1',
     entity: { position: pos, yaw, pitch },
     entities,
     blockAt,

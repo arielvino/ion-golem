@@ -21,7 +21,7 @@ const state = require('../src/core/state')
 const SAMPLE = parseInt(process.argv[2] || '4000', 10)
 const HOST = process.env.MC_HOST || 'localhost'
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
-const VERSION = process.env.MC_VERSION || '1.21.11'
+const VERSION = process.env.MC_VERSION || '26.1'
 const BOT = process.env.AUDIT_BOT || 'BroDev'
 
 const DB_PATH = path.join(os.homedir(), '.local', 'share', 'iongolem', BOT, 'blocks.db')

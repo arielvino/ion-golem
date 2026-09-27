@@ -18,7 +18,7 @@ const state = require('../src/core/state')
 const ITER = parseInt(process.argv[2] || '15', 10)
 const HOST = process.env.MC_HOST || 'localhost'
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
-const VERSION = process.env.MC_VERSION || '1.21.11'
+const VERSION = process.env.MC_VERSION || '26.1'
 
 // Scratch runtime dir so the benchmark never touches a real character's memory.
 const DATA_DIR = process.env.BENCH_DATA_DIR || path.join(__dirname, '..', '..', '.bench-runtime')
