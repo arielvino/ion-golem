@@ -2,7 +2,9 @@
 // (eat/sleep live in ./vitals, bucket fill lives in ./interaction)
 const state = require('../core/state')
 const { navigateTo } = require('../navigation/navigation')
-const { sendChat, debugChat, normalizeItemName, recordFailure, fuzzyMatch } = require('../core/utils')
+const { isAborted } = require('../core/tick')
+const { doCome } = require('./movement')
+const { sendChat, debugChat, normalizeItemName, recordFailure, fuzzyMatch, resolvePlayerName, logEvent } = require('../core/utils')
 const { searchContainersFor, saveContainerState, removeContainerState, logGameEvent } = require('../world/memory')
 const { getFurnaceState, saveContainerItems } = require('./containers')
 
@@ -61,25 +63,61 @@ async function doUnequip(targetName) {
   }
 }
 
-async function doGive(targetName, username) {
+// [ACTION:give:ITEM[:COUNT][:PLAYER]] — walk to the player and toss them the item.
+// The recipient is the named player, else whoever asked, else the player the
+// current task names (autonomous turns run as 'self', which is nobody). Every
+// refusal is recorded with its reason, so the model can act on it.
+async function doGive(arg, username) {
   const bot = state.bot
-  state.currentTask = `giving ${targetName}`
-  const normalized = normalizeItemName(targetName)
-  const matching = bot.inventory.items().filter(i => fuzzyMatch(i.name, normalized))
-  if (matching.length === 0) { sendChat(`Don't have ${targetName}!`); state.currentTask = null; return false }
-  const player = bot.players[username]
-  if (player?.entity) {
-    const p = player.entity.position
-    await navigateTo(p.x, p.y, p.z, 2, 45000, {
-      reachTarget: () => bot.players[username]?.entity?.position
-    })
-    try { await bot.lookAt(player.entity.position.offset(0, player.entity.height, 0)) } catch (e) {}
+  const parts = String(arg || '').split(':').map(s => s.trim()).filter(Boolean)
+  const others = Object.keys(bot.players).filter(n => n !== bot.username)
+  const isPlayer = (s) => others.some(n => n.toLowerCase() === String(s).toLowerCase())
+  const invNames = [...new Set(bot.inventory.items().map(i => i.name))]
+
+  let [itemArg, second, third] = parts
+  if (!itemArg) { recordFailure('give: name an item — give:ITEM[:COUNT][:PLAYER]'); return false }
+  if (isPlayer(itemArg) && !invNames.some(n => fuzzyMatch(n, normalizeItemName(itemArg)))) {
+    recordFailure(`give:${itemArg}: that's a player, not an item — use give:ITEM:${itemArg} (you carry: ${invNames.join(', ') || 'nothing'})`)
+    return false
   }
+  let count = null, playerArg = null
+  if (/^\d+$/.test(second || '')) { count = Number(second); playerArg = third || null } else playerArg = second || null
+
+  const item = normalizeItemName(itemArg)
+  const matching = bot.inventory.items().filter(i => fuzzyMatch(i.name, item))
+  if (matching.length === 0) {
+    recordFailure(`give:${itemArg}: I don't have any ${itemArg} (you carry: ${invNames.join(', ') || 'nothing'})`)
+    return false
+  }
+  const to = resolvePlayerName(playerArg, username)
+  if (!to) {
+    recordFailure(`give:${arg}: who to? ${playerArg ? `${playerArg} is not online` : 'name the player — give:ITEM:PLAYER'}`)
+    return false
+  }
+
+  state.currentTask = `giving ${itemArg} to ${to}`
+  await doCome(to)
+  if (isAborted()) { state.currentTask = null; return }
+  const target = bot.players[to]?.entity
+  const dist = target ? bot.entity.position.distanceTo(target.position) : Infinity
+  if (!target || dist > 3.5) {
+    state.currentTask = null
+    recordFailure(`give:${itemArg}:${to}: couldn't get close enough to toss it (${target ? `${dist.toFixed(1)}m away` : `can't see ${to}`})`)
+    return false
+  }
+  try { await bot.lookAt(target.position.offset(0, target.height ?? 1.6, 0)) } catch (e) { /* toss anyway */ }
+
+  let left = count ?? Infinity, given = 0
   for (const i of matching) {
-    await bot.tossStack(i)
-    logGameEvent('give', i.name, i.count, null, null, null, { to: username })
+    if (left <= 0) break
+    const n = Math.min(i.count, left)
+    if (n === i.count) await bot.tossStack(i)
+    else await bot.toss(i.type, i.metadata, n)
+    given += n; left -= n
+    logGameEvent('give', i.name, n, null, null, null, { to })
   }
-  console.log(`  gave ${targetName} to ${username}`)
+  console.log(`  gave ${given} ${itemArg} to ${to} (${dist.toFixed(1)}m)`)
+  logEvent(`give: tossed ${given} ${matching[0].name} to ${to} from ${dist.toFixed(1)}m`)
   state.currentTask = null
   return true
 }

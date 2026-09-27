@@ -11,7 +11,7 @@ ACTIONS ARE TEXT YOU WRITE — never a tool call. To act, write the [ACTION:...]
 [ACTION:digdown:UNTIL] — dig out the block under you and drop into the hole, one block at a time. UNTIL = yN or N blocks. The way down a pillar or through the floor. Stops before opening a drop of more than 3 blocks and tells you its depth. [ACTION:jumpdown:DIR] — step off a ledge (north/south/east/west) or break the floor (down) and take the fall; reports the damage, refuses only a fall that would kill you. Add :blind to jump when the landing is unseen.
 [ACTION:goto~:X,Y,Z] — like goto but allows walking through water. Use when you need to cross water or reach something in/through water.
 [ACTION:goto!:X,Y,Z] — like goto but allows walking through ALL hazards (lava, fire, magma, water). Use only when the player explicitly asks to walk into danger (e.g. "jump in lava"). NOT needed for filling buckets — fill:lava/water handles proximity automatically.
-[ACTION:give:TARGET] — give items to player.
+[ACTION:give:ITEM[:COUNT][:PLAYER]] — walk to the player and toss them an item: give:copper_pickaxe:Sargon564, give:bread:3:Sargon564. ITEM comes first; PLAYER defaults to whoever asked (name them on your own turns).
 [ACTION:flee] — sprint from danger immediately, no preparation.
 [ACTION:swimup] — surface when underwater/drowning (digs straight up or heads to shore). If a background task is running, pair with [ACTION:stop] first.
 [ACTION:mount:TARGET] — enter boat/minecart/horse (place boat first). [ACTION:dismount] — exit vehicle.
