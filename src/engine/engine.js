@@ -100,8 +100,6 @@ function checkWatchdog() {
 function idleWakeReason(bgResult) {
   // A background task just finished — let the model see the outcome and decide what's next.
   if (bgResult) return 'task-finished'
-  // First idle tick after work ended (or on spawn): announce once, then go quiet.
-  if (!state.idleAnnounced) return 'going-idle'
   // A [CTX:...] view the model asked for is still queued. renderPending() only runs
   // while building a turn's context, so with an empty stack there is no next turn to
   // deliver it on — the bot promises to look, goes quiet, and the request sits
@@ -189,10 +187,6 @@ async function startEngine() {
       if (!messages.length && !own) continue  // nothing to say: no model call
       const batch = own ? [...messages, { username: 'self', message: own.line }] : messages
       const fromPlayer = messages.some(m => m.username !== 'self' && m.username !== 'event')
-
-      // Working → re-arm the one-shot idle report for when work ends; idle → this
-      // turn is where the bot tells the player where things stand.
-      state.idleAnnounced = !own || own.kind === 'idle'
 
       const beforeActionOps = state.actionOpCount
       const beforePlanOps = state.planOpCount
