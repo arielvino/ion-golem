@@ -2,7 +2,7 @@
   "_doc": "How the nearby= list treats each entity kind. Mirrors vanilla despawn rules: anything not listed here is tracked individually (tag + coords), which is the safe default for new or unknown mobs. Read via perception/entityClass.js.",
   "background": [
     "cod", "salmon", "pufferfish", "tropical_fish", "tadpole",
-    "squid", "glow_squid", "dolphin", "bat"
+    "squid", "glow_squid", "dolphin", "nautilus", "bat"
   ],
   "threats": [
     "ghast", "magma_cube", "phantom", "shulker", "slime", "ender_dragon", "hoglin"

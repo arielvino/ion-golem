@@ -12,6 +12,11 @@
 //   fail:<g#|s#>          goal or strategy is dead
 //   reopen:<g#>           goal was not really done
 //
+// In place of an id, `new` names a node this same reply created, whose id the
+// model can't know yet: the last goal for ops that take a goal, the last
+// strategy for sub/use, and the last node of either kind for done/fail.
+// So [PLAN:push:X][PLAN:strat:new:Y] builds a goal and its route in one turn.
+//
 // Free text is always the last field, so it may contain ':'. A {reason} at the
 // end of a push/queue text overrides the default reason.
 //
@@ -56,30 +61,39 @@ function parse(body) {
   return out
 }
 
+const NEW_KIND = { strat: 'goal', move: 'goal', cancel: 'goal', reopen: 'goal', sub: 'strat', use: 'strat', done: 'last', fail: 'last' }
+
 // Run an op. `by` is who is speaking this turn: a player name, or 'self'.
+// `made` is shared across one reply's ops: what they created, for `new`.
 // Returns a short description for logging.
-function apply(agenda, op, by) {
+function apply(agenda, op, by, made = {}) {
   const t = agenda.tree
   const node = (id) => {
     const n = t.nodes.get(id)
     if (!n) throw new GoalTreeError(`no node ${id}`)
     return n
   }
+  if (op.id === 'new') {
+    const kind = NEW_KIND[op.op]
+    if (!made[kind]) throw new GoalTreeError(`"new" means a ${kind === 'strat' ? 'strategy' : kind === 'goal' ? 'goal' : 'node'} created earlier in this same reply — there is none`)
+    op = { ...op, id: made[kind] }
+  }
+  const made1 = (n, kind) => { made[kind] = n.id; made.last = n.id; return n }
   switch (op.op) {
     case 'push':
     case 'queue': {
       const reason = op.reason || (by === 'self' ? '' : `${by} asked`)
-      const g = agenda[op.op](op.text, { owner: by, reason })
+      const g = made1(agenda[op.op](op.text, { owner: by, reason }), 'goal')
       return `${op.op} ${g.id} "${g.text}"`
     }
     case 'move': agenda.move(op.id, op.index); return `move ${op.id} → ${op.index}`
     case 'cancel': agenda.cancel(op.id, by); return `cancel ${op.id}`
     case 'strat': {
-      const s = t.addStrategy(op.id, { text: op.text })
+      const s = made1(t.addStrategy(op.id, { text: op.text }), 'strat')
       return `strat ${s.id} "${s.text}" for ${op.id}${s.status === 'active' ? ' (active)' : ''}`
     }
     case 'sub': {
-      const g = t.addGoal(op.id, { text: op.text, after: op.after })
+      const g = made1(t.addGoal(op.id, { text: op.text, after: op.after }), 'goal')
       return `sub ${g.id} "${g.text}" under ${op.id}`
     }
     case 'use': t.activate(op.id); return `use ${op.id}`

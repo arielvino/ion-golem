@@ -44,9 +44,10 @@ function stackTopTitle() { const top = stackTop(); return top ? top.t : null }
 // Failures are kept in state.planErrors and shown to the model next turn.
 function applyPlanTags(rawReply, by) {
   const applied = []
+  const made = {}
   for (const m of rawReply.matchAll(/\[PLAN:([^\]]+)\]/g)) {
     try {
-      const desc = planOps.apply(state.agenda, planOps.parse(m[1]), by)
+      const desc = planOps.apply(state.agenda, planOps.parse(m[1]), by, made)
       applied.push(desc)
       state.planOpCount++
       logTaskAction('plan', desc, by, agendaTitles() || '(empty)')

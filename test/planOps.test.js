@@ -78,3 +78,20 @@ test('apply: reopen only takes goals; unknown ids are reported', () => {
   assert.throws(() => run(a, 'reopen:s2'), /reopen takes a goal/)
   assert.throws(() => run(a, 'done:g9'), /no node g9/)
 })
+
+test('apply: "new" names what this reply created, so a goal and its route fit one turn', () => {
+  const a = new Agenda()
+  const made = {}
+  const reply = (body) => apply(a, parse(body), 'Sargon', made)
+  reply('push:give Sargon a stone_pickaxe')
+  assert.match(reply('strat:new:craft it'), /^strat s2 .* for g1 \(active\)$/)
+  assert.match(reply('sub:new:wooden_pickaxe'), /^sub g3 .* under s2$/)
+  assert.match(reply('strat:new:craft it from planks'), /for g3/)
+  assert.strictEqual(reply('fail:new'), 'fail s4')
+})
+
+test('apply: "new" with nothing created this reply is reported, not guessed', () => {
+  const a = new Agenda()
+  run(a, 'push:dig a hole')
+  assert.throws(() => run(a, 'strat:new:shovel it'), /"new" means a goal created earlier in this same reply — there is none/)
+})

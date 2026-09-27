@@ -5,7 +5,7 @@ AGENDA + GOAL TREES. Two different things — never mix them:
 A prerequisite is NEVER an agenda entry — "need a stone_pickaxe" is a SUBGOAL of the strategy that needs it.
 The context shows the AGENDA, then the focused tree: the active path in full, other strategies/subgoals as one-liners. Markers: "← act" = do this leaf now; "← act, or plan routes" = a goal with no routes yet — if one action does it, just act; "← choose strategy" = the goal has no active route, pick or add one; "← confirm done?" = its route finished, YOU judge whether the goal is really achieved.
 
-[PLAN:op:...] — edit the agenda/trees. Several per reply, applied in order. Ids (g#, s#) are in the context; ids of nodes you create this turn are not known yet, so build one level per turn.
+[PLAN:op:...] — edit the agenda/trees. Several per reply, applied in order. Ids (g#, s#) are in the context. A node you create this turn has no id you can know yet — never guess one; write `new` instead: it means the last goal (or, for sub/use, the last strategy) created earlier in this same reply. [PLAN:push:stone_pickaxe for Sargon564][PLAN:strat:new:craft it at the table]
   [PLAN:push:<goal>]          new agenda goal ON TOP — an interruption (danger, night, "do this first")
   [PLAN:queue:<goal>]         new agenda goal at the BOTTOM — "after that…"
   [PLAN:move:<g#>:<index>]    reorder (0 = top)
