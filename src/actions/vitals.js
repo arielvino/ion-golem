@@ -3,7 +3,8 @@ const state = require('../core/state')
 const { sleep, waitForEventOrTimeout } = require('../core/tick')
 const { navigateTo } = require('../navigation/navigation')
 const { sendChat, recordFailure } = require('../core/utils')
-const { logGameEvent } = require('../world/memory')
+const { Vec3 } = require('vec3')
+const { logGameEvent, queryBlockMemory } = require('../world/memory')
 const { FOOD_FULL } = require('../config/safety')
 
 async function doEat() {
@@ -24,33 +25,34 @@ async function doEat() {
   }
 }
 
+// Beds come from the block DB (beds the bot has actually seen), not a
+// bot.findBlocks scan, which would find beds behind walls.
 async function doSleep() {
   const bot = state.bot
-  const mcData = require('minecraft-data')(bot.version)
-  const bedIds = Object.values(mcData.blocksByName)
-    .filter(b => b.name.endsWith('_bed') || b.name === 'bed')
-    .map(b => b.id)
-  const bedPositions = bot.findBlocks({ matching: bedIds, maxDistance: 32, count: 5 })
-  if (bedPositions.length === 0) {
-    sendChat("Can't find a bed nearby!")
-    recordFailure('sleep - no bed found')
-    return
+  const bedNames = Object.keys(bot.registry.blocksByName).filter(n => n.endsWith('_bed'))
+  const beds = queryBlockMemory(bedNames, bot.entity.position).filter(b => b.dist <= 32).slice(0, 5)
+  if (beds.length === 0) {
+    recordFailure('sleep: no bed seen within 32 blocks — craft and place one (3 wool + 3 planks)')
+    return false
   }
-  for (const pos of bedPositions) {
+  const errors = []
+  for (const { x, y, z } of beds) {
     try {
-      const bedBlock = bot.blockAt(pos)
-      if (!bedBlock) continue
-      await navigateTo(pos.x, pos.y, pos.z, 3, 10000)
+      await navigateTo(x, y, z, 3, 10000)
+      const bedBlock = bot.blockAt(new Vec3(x, y, z))
+      if (!bedBlock || !bedBlock.name.endsWith('_bed')) { errors.push(`${x},${y},${z}: no bed there any more`); continue }
       await bot.sleep(bedBlock)
       console.log('  sleeping in bed')
       await waitForEventOrTimeout(bot, 'wake', 60000)
       console.log('  woke up')
-      return
+      return true
     } catch (e) {
-      console.log(`  sleep failed at ${pos}: ${e.message}`)
+      console.log(`  sleep failed at ${x},${y},${z}: ${e.message}`)
+      errors.push(`${x},${y},${z}: ${e.message}`)
     }
   }
-  sendChat("Couldn't sleep in any nearby bed.")
+  recordFailure(`sleep: couldn't sleep in any nearby bed (${errors.join('; ')})`)
+  return false
 }
 
 module.exports = { doEat, doSleep }
