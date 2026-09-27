@@ -34,6 +34,7 @@ module.exports = {
   journalShownUpTo: 0,
   noteErrors: [],     // [NOTE:...] failures, shown to the model next turn
   lastFailures: [],
+  pickupPausedUntil: 0,  // auto-pickup holds off until then (after a give)
   skipBlocks: new Set(),
   pendingBlueprint: null,
   consecutivePlaceFails: 0,

@@ -135,6 +135,7 @@ function setupAutonomous(interruptFn) {
   const pickupInterval = setInterval(async () => {
     const { isBackgroundRunning } = require('./backgroundTask')
     if (!bot?.entity || state.currentTask || isBackgroundRunning() || pickupBusy) return
+    if (Date.now() < (state.pickupPausedUntil || 0)) return  // just gave something away
     try {
       const { hasLineOfSight, rayReachable } = require('../perception/vision')
       const pos = bot.entity.position

@@ -116,6 +116,9 @@ async function doGive(arg, username) {
     given += n; left -= n
     logGameEvent('give', i.name, n, null, null, null, { to })
   }
+  // The gift lands within the pickup reflex's reach: keep it from racing the
+  // recipient for it (thrown items are grabbable by anyone after 2s).
+  state.pickupPausedUntil = Date.now() + 10000
   console.log(`  gave ${given} ${itemArg} to ${to} (${dist.toFixed(1)}m)`)
   logEvent(`give: tossed ${given} ${matching[0].name} to ${to} from ${dist.toFixed(1)}m`)
   state.currentTask = null
