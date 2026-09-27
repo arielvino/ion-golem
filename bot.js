@@ -378,8 +378,7 @@ function createBot() {
     logChatDB('event', bot.username, `${bot.username} joined the game`)
     state.messageQueue.push({
       username: 'event',
-      message: `[GAME EVENT] [BOOT] You (${bot.username}) just started up and joined the server.`,
-      historyAs: 'self'
+      message: `[GAME EVENT] [BOOT] You (${bot.username}) just started up and joined the server.`
     })
 
     if (state.agenda.entries.length > 0) {
@@ -417,7 +416,7 @@ function createBot() {
     // zero the timer so engine processes this message immediately.
     // Don't abort if already handling a player message (msgPending).
     if (!state.msgPending) softInterrupt()
-    state.messageQueue.push({ username, message, historyAs: undefined })
+    state.messageQueue.push({ username, message })
   })
 
   // System/game events
@@ -450,8 +449,7 @@ function createBot() {
         if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
         state.messageQueue.push({
           username: 'event',
-          message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`,
-          historyAs: 'self'
+          message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`
         })
       }
       return
@@ -462,12 +460,10 @@ function createBot() {
     }
     console.log(color(c.yellow, `\n  [EVENT] ${msg}`))
     logChatDB('event', eventPlayer || null, msg)
-    const histKey = state.lastActionUsername || 'self'
     if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
     state.messageQueue.push({
       username: 'event',
-      message: `[GAME EVENT] ${msg}`,
-      historyAs: histKey
+      message: `[GAME EVENT] ${msg}`
     })
   })
 

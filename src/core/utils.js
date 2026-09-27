@@ -86,34 +86,13 @@ function isPseudoUsername(name) {
   return PSEUDO_USERNAMES.has(name)
 }
 
-/**
- * Resolve an action's intended player from whatever names it has to work with
- * (an explicit action target, then the requesting username), returning a real
- * key of bot.players or null.
- *
- * With no usable candidate, fall back to a player named in the current task
- * title. Autonomous turns arrive as 'self', and the requesting username is
- * in-memory only while the task stack is persisted — so after a restart a
- * restored "follow Sargon564" task has the name in its title and nowhere else.
- * A candidate that IS a real name but isn't online returns null instead: the
- * caller asked for someone specific and deserves an honest miss.
- */
-function resolvePlayerName(...candidates) {
+// The online player an action names (exact, then case-insensitive), as a real key
+// of bot.players — or null when no name was given or that player isn't online.
+function resolvePlayerName(name) {
   const bot = state.bot
-  if (!bot) return null
+  if (!bot || !name || isPseudoUsername(name)) return null
   const names = Object.keys(bot.players).filter(n => n !== bot.username)
-  let asked = false
-  for (const cand of candidates) {
-    if (!cand || isPseudoUsername(cand)) continue
-    asked = true
-    const hit = names.find(n => n === cand) ||
-      names.find(n => n.toLowerCase() === cand.toLowerCase())
-    if (hit) return hit
-  }
-  if (asked) return null
-  const title = state.taskStack.length ? state.taskStack[state.taskStack.length - 1].t : ''
-  if (!title) return null
-  return names.find(n => title.toLowerCase().includes(n.toLowerCase())) || null
+  return names.find(n => n === name) || names.find(n => n.toLowerCase() === name.toLowerCase()) || null
 }
 
 const MAX_FAILURES = 5

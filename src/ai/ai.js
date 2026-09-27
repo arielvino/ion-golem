@@ -26,20 +26,6 @@ function initChatLogs() {
   try { fs.mkdirSync(CHAT_LOG_DIR(), { recursive: true }) } catch (e) { console.warn('  [AI] chatLog dir err:', e.message) }
 }
 
-// --- Chat history ---
-const MAX_HISTORY_USERS = 20
-function getHistory(u) { if (!state.chatHistory.has(u)) state.chatHistory.set(u, []); return state.chatHistory.get(u) }
-function addToHistory(u, role, content) {
-  const h = getHistory(u); h.push({ role, content })
-  if (state.chatHistory.size > MAX_HISTORY_USERS) {
-    const keys = [...state.chatHistory.keys()]
-    for (let i = 0; i < keys.length - MAX_HISTORY_USERS; i++) {
-      if (keys[i] !== u && keys[i] !== 'self') state.chatHistory.delete(keys[i])
-    }
-  }
-  if (h.length > state.MAX_HISTORY) h.splice(0, h.length - state.MAX_HISTORY)
-}
-
 // --- Blueprint parser ---
 // Thin wrapper over lib/blueprint's pure parser, preserving the debug logging.
 function parseBlueprint(raw) {
@@ -120,7 +106,6 @@ async function handleMessages(batch) {
   const isPlayer = (u) => u !== 'self' && u !== 'event'
   const player = [...batch].reverse().find(m => isPlayer(m.username))
   const username = player ? player.username : 'self'
-  const histKey = player ? (player.historyAs || username) : (state.lastActionUsername || 'self')
   const isPlayerMessage = !!player
   const message = batch.filter(m => isPlayer(m.username)).map(m => m.message).join('\n')
   const isMonitorCall = !player && batch.some(m => m.username === 'self' && m.message.startsWith('[MONITOR]'))
@@ -134,7 +119,6 @@ async function handleMessages(batch) {
   })
   const context = getBotContext()
   const input = `${context}\n${lines.join('\n')}`
-  addToHistory(histKey, 'user', input)
   for (const m of batch) logChat({ type: 'user', username: m.username, message: m.message, context })
 
   function processTags(rawReply) {
@@ -243,7 +227,7 @@ async function handleMessages(batch) {
         engine.interrupt({ keepResponse: true })  // clears queue + sets abortSignal
         return
       }
-      state.actionQueue.push({ actionStr, username: histKey })
+      state.actionQueue.push({ actionStr, username })
       console.log(color(c.green, `\n  -> action: ${actionStr}`))
       engine.processActionQueue()
     }
@@ -337,9 +321,6 @@ async function handleMessages(batch) {
       console.log(color(c.blue, `\n[Bot] ${chatText}\n`))
       logChatDB('bot', state.BOT_NAME || 'Bot', chatText)
     }
-
-    // Always record an assistant turn to prevent consecutive user messages
-    addToHistory(histKey, 'assistant', chatText || '(working...)')
 
     // Whatever the stream held back (a deferred `build` and its followers) runs now
     // that processTags has applied the blueprint and plan edits.

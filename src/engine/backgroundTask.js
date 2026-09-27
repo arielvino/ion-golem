@@ -9,7 +9,6 @@ let executeFnRef = null  // stored on first launch so chaining can call it
 function drainNext() {
   if (state.abortSignal || state.actionQueue.length === 0) return
   const next = state.actionQueue.shift()
-  state.lastActionUsername = next.username
   launchBackground(next.actionStr, next.username, executeFnRef)
 }
 

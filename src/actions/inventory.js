@@ -63,11 +63,11 @@ async function doUnequip(targetName) {
   }
 }
 
-// [ACTION:give:ITEM[:COUNT][:PLAYER]] — walk to the player and toss them the item.
+// [ACTION:give:ITEM[:COUNT]:PLAYER] — walk to the player and toss them the item.
 // The recipient is the named player, else whoever asked, else the player the
 // current task names (autonomous turns run as 'self', which is nobody). Every
 // refusal is recorded with its reason, so the model can act on it.
-async function doGive(arg, username) {
+async function doGive(arg) {
   const bot = state.bot
   const parts = String(arg || '').split(':').map(s => s.trim()).filter(Boolean)
   const others = Object.keys(bot.players).filter(n => n !== bot.username)
@@ -75,7 +75,7 @@ async function doGive(arg, username) {
   const invNames = [...new Set(bot.inventory.items().map(i => i.name))]
 
   let [itemArg, second, third] = parts
-  if (!itemArg) { recordFailure('give: name an item — give:ITEM[:COUNT][:PLAYER]'); return false }
+  if (!itemArg) { recordFailure('give: name an item — give:ITEM[:COUNT]:PLAYER'); return false }
   if (isPlayer(itemArg) && !invNames.some(n => fuzzyMatch(n, normalizeItemName(itemArg)))) {
     recordFailure(`give:${itemArg}: that's a player, not an item — use give:ITEM:${itemArg} (you carry: ${invNames.join(', ') || 'nothing'})`)
     return false
@@ -89,7 +89,7 @@ async function doGive(arg, username) {
     recordFailure(`give:${itemArg}: I don't have any ${itemArg} (you carry: ${invNames.join(', ') || 'nothing'})`)
     return false
   }
-  const to = resolvePlayerName(playerArg, username)
+  const to = resolvePlayerName(playerArg)
   if (!to) {
     recordFailure(`give:${arg}: who to? ${playerArg ? `${playerArg} is not online` : 'name the player — give:ITEM:PLAYER'}`)
     return false

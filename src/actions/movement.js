@@ -43,12 +43,13 @@ function resolvePlayerTarget(bot, username) {
 }
 
 function doFollow(requested) {
+  if (!requested) { recordFailure('follow: name the player — follow:PLAYER'); return false }
   stopAll()
   const bot = state.bot
   const username = resolvePlayerName(requested)
   if (!username || !resolvePlayerTarget(bot, username)) {
     sendChat("Can't see you and no locator fix on you!")
-    recordFailure(`follow:${requested || '?'} failed (no such player online, or no position/locator fix)`)
+    recordFailure(`follow:${requested} failed (no such player online, or no position/locator fix)`)
     return false
   }
   state.currentTask = `following ${username}`
@@ -81,13 +82,14 @@ function doFollow(requested) {
 }
 
 async function doCome(requested, opts = {}) {
+  if (!requested) { recordFailure('come: name the player — come:PLAYER'); return false }
   stopAll()
   const bot = state.bot
   const username = resolvePlayerName(requested)
   let tgt = username ? resolvePlayerTarget(bot, username) : null
   if (!tgt) {
     sendChat("Can't see you and no locator fix on you!")
-    recordFailure(`come:${requested || '?'} failed (no such player online, or no position/locator fix)`)
+    recordFailure(`come:${requested} failed (no such player online, or no position/locator fix)`)
     return false
   }
 

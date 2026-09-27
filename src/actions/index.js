@@ -54,15 +54,13 @@ async function executeAction(actionStr, username, opts = {}) {
   let result
   try {
     switch (action) {
-      // follow/come default to the requester, but accept an explicit player so a
-      // task the autonomous loop re-issues (username 'self') can still name them.
-      case 'follow': result = doFollow(target || username); break
+      case 'follow': result = doFollow(target); break
       case 'stop': {
         const engine = require('../engine/engine')
         engine.interrupt()
         break
       }
-      case 'come': result = await doCome(target || username, { skipTool }); break
+      case 'come': result = await doCome(target, { skipTool }); break
       case 'attack': result = await doAttack(target); break
       case 'mine': result = await doMine(target, { skipTool }); break
       case 'collect': result = await doCollect(); break
@@ -87,7 +85,7 @@ async function executeAction(actionStr, username, opts = {}) {
       case 'staircase': result = await doStaircase(target, { skipTool }); break
       case 'move': result = await doMove(target); break
       case 'tunnel': result = await doTunnel(target, { skipTool }); break
-      case 'give': result = await doGive(target, username); break
+      case 'give': result = await doGive(target); break
       case 'wiki': result = await doWiki(target); break
       case 'flee': result = await doFlee(); break
       case 'mount': result = await doMount(target); break

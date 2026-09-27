@@ -68,7 +68,6 @@ function processActionQueue() {
   if (isBackgroundRunning() || state.actionQueue.length === 0) return
   state.abortSignal = false  // clear abort from previous interrupt — new work starts fresh
   const next = state.actionQueue.shift()
-  state.lastActionUsername = next.username
   state.consecutivePlaceFails = 0
   console.log(color(c.white, `  [BG] launching: ${next.actionStr}`))
   launchBackground(next.actionStr, next.username, executeAction)

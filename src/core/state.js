@@ -16,7 +16,6 @@ module.exports = {
   // AI state
   apiFailCount: 0,
   lastModelCheck: Date.now(),
-  lastActionUsername: null,
   msgPending: false,
   noActionRounds: 0,
   aiPaused: false,       // debug `!ai off`: engine makes no model calls
@@ -42,8 +41,6 @@ module.exports = {
   // Crafting
   portableCraftingTable: null,  // {x,y,z} of table WE placed, null if we didn't
   // Chat
-  chatHistory: new Map(),
-  MAX_HISTORY: 20,
   // Claude client (claude -p child process)
   claudeChild: null,
   // Config (set by bot.js)
