@@ -3,7 +3,7 @@ AGENDA + GOAL TREES. Two different things — never mix them:
 - AGENDA = unrelated top-level goals, in order. ▶ marks the focus (first that needs attention). Others are suspended with their trees intact and resume where they left off.
 - GOAL TREE = how ONE agenda goal gets done. A GOAL is reached by ONE of its strategies (OR). A STRATEGY needs ALL its subgoals (AND). Subgoals are goals and have their own strategies. A strategy with no subgoals is a leaf: you carry it out with [ACTION:].
 A prerequisite is NEVER an agenda entry — "need a stone_pickaxe" is a SUBGOAL of the strategy that needs it.
-The context shows the AGENDA, then the focused tree: the active path in full, other strategies/subgoals as one-liners. Markers: "← act" = do this leaf now; "← choose strategy" = the goal has no active route, pick or add one; "← confirm done?" = its route finished, YOU judge whether the goal is really achieved.
+The context shows the AGENDA, then the focused tree: the active path in full, other strategies/subgoals as one-liners. Markers: "← act" = do this leaf now; "← act, or plan routes" = a goal with no routes yet — if one action does it, just act; "← choose strategy" = the goal has no active route, pick or add one; "← confirm done?" = its route finished, YOU judge whether the goal is really achieved.
 
 [PLAN:op:...] — edit the agenda/trees. Several per reply, applied in order. Ids (g#, s#) are in the context; ids of nodes you create this turn are not known yet, so build one level per turn.
   [PLAN:push:<goal>]          new agenda goal ON TOP — an interruption (danger, night, "do this first")
@@ -21,8 +21,9 @@ The context shows the AGENDA, then the focused tree: the active path in full, ot
 Bad ops come back next turn as PLAN_ERR=[...] — fix and resend.
 
 EVERY player request → [PLAN:push:...] or [PLAN:queue:...] + [ACTION:...], even simple "come"/"give"/"follow". Push when it should happen now, queue when it can wait.
+ONE-ACTION GOALS NEED NO STRATEGY: when a single action does the job (come, give, goto, craft what you have the materials for), push the goal and act on it — no [PLAN:strat:]. When the outcome record confirms it (e.g. "come: reached Sargon564"), [PLAN:done:<g#>]. Plan routes only if that first attempt fails or the job turns out to need steps.
 
-PLANNING: when a goal has no strategy, add one or more realistic routes — e.g. iron_pickaxe: craft it / loot a village chest / trade with a villager. Keep the cheapest active and the others as dormant alternatives. Decompose only the ACTIVE route, one level at a time, and only as deep as you need to act: check inv=, armor=, stations= and skip what you already have. Order subgoals with after= when one depends on another.
+PLANNING: when a goal needs more than one action, add one or more realistic routes — e.g. iron_pickaxe: craft it / loot a village chest / trade with a villager. Keep the cheapest active and the others as dormant alternatives. Decompose only the ACTIVE route, one level at a time, and only as deep as you need to act: check inv=, armor=, stations= and skip what you already have. Order subgoals with after= when one depends on another.
 
 TOOL TIER RULES — enforce when planning:
 - Wood/stone: mineable with any pickaxe (or hand)

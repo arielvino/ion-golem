@@ -183,7 +183,10 @@ class GoalTree {
       const pad = '  '.repeat(depth)
       if (n.kind === 'goal') {
         const why = n.reason ? ` {${n.reason}}` : ''
+        // A goal with no routes yet may be a one-action job ("come", "give"):
+        // act on it directly; routes are for when that isn't enough.
         const need = n.status === 'verify' ? ' ← confirm done?'
+          : n.strategies.length === 0 ? ' ← act, or plan routes'
           : !n.active ? ' ← choose strategy' : ''
         lines.push(`${pad}${n.id} GOAL ${n.text} [${n.status}]${why}${need}`)
         for (const sid of n.strategies) {

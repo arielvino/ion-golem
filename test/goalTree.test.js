@@ -151,3 +151,9 @@ test('JSON round-trip preserves structure and id sequence', () => {
   assert.strictEqual(t2.render('g1'), t.render('g1'))
   assert.strictEqual(t2.addGoal(null, { text: 'next' }).id, 'g10')
 })
+
+test('a goal with no routes yet offers acting directly', () => {
+  const t = new GoalTree()
+  const g = t.addGoal(null, { text: 'come to Sargon564' })
+  assert.match(t.render(g.id), /GOAL come to Sargon564 \[open\] ← act, or plan routes$/)
+})
