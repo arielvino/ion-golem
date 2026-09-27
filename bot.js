@@ -370,7 +370,7 @@ function createBot() {
     logChatDB('event', bot.username, `${bot.username} joined the game`)
     state.messageQueue.push({
       username: 'event',
-      message: `[GAME EVENT] You (${bot.username}) just joined the server.`,
+      message: `[GAME EVENT] [BOOT] You (${bot.username}) just started up and joined the server.`,
       historyAs: 'self'
     })
 
