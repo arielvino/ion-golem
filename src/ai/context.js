@@ -13,6 +13,7 @@ const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
+const { entityTag } = require('../perception/entityTag')
 
 // --- Main context builder ---
 function getBotContext() {
@@ -27,6 +28,7 @@ function getBotContext() {
   const armorStr = armorSlots.length > 0 ? ` armor=[${armorSlots.join(',')}]` : ' armor=none'
   const eyePos = pos.offset(0, 1.62, 0)
   const nearbyNames = []
+  const drops = {}  // drop tag → stack size, so DELTA can report a pile growing
   // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
   const equipOf = (e) => {
     const parts = []
@@ -45,18 +47,16 @@ function getBotContext() {
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
     .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
     .map(e => {
-      let n = e.name || '?'
+      const tag = entityTag(e)
       const ep = e.position
       const coord = `@${Math.round(ep.x)},${Math.round(ep.y)},${Math.round(ep.z)}`
       const dist = `${Math.round(ep.distanceTo(pos))}m`
-      if (n === 'item' || n === 'Item' || n === 'item_stack') {
-        try {
-          const drop = e.getDroppedItem()
-          if (drop) n = `drop:${drop.name}x${drop.count}`
-        } catch (_) { /* entity may lack drop data */ }
+      let count = ''
+      if (tag.startsWith('drop:')) {
+        try { drops[tag] = e.getDroppedItem().count; count = `,x${drops[tag]}` } catch (_) { /* no drop data */ }
       }
-      nearbyNames.push(n)
-      return `${n}${coord}(${dist}${equipOf(e)})`
+      nearbyNames.push(tag)
+      return `${tag}${coord}(${dist}${count}${equipOf(e)})`
     }).join(', ') || 'none'
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
@@ -254,7 +254,7 @@ function getBotContext() {
   const invCounts = {}
   for (const i of bot.inventory.items()) invCounts[i.name] = (invCounts[i.name] || 0) + i.count
   const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, inv: invCounts, armor: armorSlots,
-    vehicle: vehicleStr.trim(), task, seen: nearbyNames })
+    vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops })
   const delta = renderDelta(state.prevSnapshot, snap)
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''

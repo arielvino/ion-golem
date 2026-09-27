@@ -4,14 +4,14 @@
 // is simply stated. Pure: snapshot in, one line out.
 
 // The fields worth diffing, from values context.js already computes.
-function snapshot({ pos, hp, food, held, inv, armor, vehicle, task, seen, now = Date.now() }) {
+function snapshot({ pos, hp, food, held, inv, armor, vehicle, task, seen, drops = {}, now = Date.now() }) {
   return {
     t: now,
     pos: { x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) },
     // A running task shows its elapsed time ('bg:goto:… (13s, walking)'); drop it,
     // or the same task reads as changed every turn.
     hp: Math.round(hp), food: Math.round(food), held, task: String(task).replace(/\(\d+s,\s*/, '('), vehicle,
-    inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(),
+    inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(), drops: { ...drops },
   }
 }
 
@@ -41,12 +41,27 @@ function renderDelta(prev, cur) {
   if (cur.vehicle !== prev.vehicle) parts.push(`${prev.vehicle}→${cur.vehicle}`)
   if (cur.task !== prev.task) parts.push(`task ${prev.task}→${cur.task}`)
 
+  // seen holds entity tags (cow#a3f9) and player names, so one cow leaving while
+  // another arrives reads as both. A crowd of one kind collapses to a count.
   const came = cur.seen.filter(n => !prev.seen.includes(n))
   const went = prev.seen.filter(n => !cur.seen.includes(n))
-  if (came.length) parts.push(`new nearby: ${came.join(', ')}`)
-  if (went.length) parts.push(`gone from nearby: ${went.join(', ')}`)
+  if (came.length) parts.push(`new nearby: ${groupTags(came)}`)
+  if (went.length) parts.push(`gone from nearby: ${groupTags(went)}`)
+  const grew = Object.keys(cur.drops).filter(t => t in prev.drops && prev.drops[t] !== cur.drops[t])
+  if (grew.length) parts.push(grew.map(t => `${t} x${prev.drops[t]}→x${cur.drops[t]}`).join(', '))
 
   return parts.length ? `since last turn (${secs}s): ${parts.join(' | ')}` : `nothing changed in ${secs}s`
+}
+
+// ['cow#a3f9', 'cod#1b2c', 'cod#77d0', 'cod#9e01'] → 'cow#a3f9, cod×3'
+function groupTags(tags) {
+  const byBase = new Map()
+  for (const t of tags) {
+    const base = t.split('#')[0]
+    if (!byBase.has(base)) byBase.set(base, [])
+    byBase.get(base).push(t)
+  }
+  return [...byBase].map(([base, ts]) => ts.length > 2 ? `${base}×${ts.length}` : ts.join(', ')).join(', ')
 }
 
 module.exports = { snapshot, renderDelta }

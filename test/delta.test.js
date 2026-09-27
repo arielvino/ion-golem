@@ -28,3 +28,11 @@ test('a running task is the same task while only its timer moves', () => {
   const c = snapshot({ ...base, task: 'bg:goto:1,2,3 (22s, tunneling toward 1,2,3)', now: 23000 })
   assert.match(renderDelta(b, c), /task bg:goto:1,2,3 \(cardinal walking toward 1,2,3\)→bg:goto:1,2,3 \(tunneling toward 1,2,3\)/)
 })
+
+test('entities are told apart by tag; a crowd collapses; a drop pile growing is reported', () => {
+  const a = snapshot({ ...base, seen: ['cow#a3f9', 'drop:cobblestone#0c1d'], drops: { 'drop:cobblestone#0c1d': 2 } })
+  const b = snapshot({ ...base, seen: ['cow#77e2', 'cod#1b2c', 'cod#2d3e', 'cod#9e01', 'drop:cobblestone#0c1d'],
+    drops: { 'drop:cobblestone#0c1d': 5 }, now: 6000 })
+  assert.strictEqual(renderDelta(a, b),
+    'since last turn (5s): new nearby: cod×3, cow#77e2 | gone from nearby: cow#a3f9 | drop:cobblestone#0c1d x2→x5')
+})

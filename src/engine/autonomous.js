@@ -5,6 +5,7 @@ const { sendChat } = require('../core/utils')
 const { HEALTH_AUTOEAT, OXYGEN_DROWNING, OXYGEN_FALL_SAFE } = require('../config/safety')
 const { WATER_BLOCKS, FIRE_BLOCKS } = require('../config/blocks')
 const T = require('../config/timings')
+const { entityTag } = require('../perception/entityTag')
 
 function setupAutonomous(interruptFn) {
   const bot = state.bot
@@ -63,7 +64,7 @@ function setupAutonomous(interruptFn) {
       interruptFn()
       // Prepend attack to front of queue instead of replacing
       setTimeout(() => {
-        state.actionQueue.unshift({ actionStr: `attack:${attacker.name}`, username: 'auto' })
+        state.actionQueue.unshift({ actionStr: `attack:${entityTag(attacker)}`, username: 'auto' })
       }, T.QUEUE_PREPEND_DELAY)
       return
     }

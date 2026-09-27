@@ -17,6 +17,7 @@ const { doEval } = require('./eval')
 const { doDigDown, doJumpDown } = require('./descend')
 const { switchPersonality } = require('../ai/ai')
 const ranges = require('../config/ranges')
+const { entityTag } = require('../perception/entityTag')
 
 // Actions worth logging to event history (skip noisy/trivial ones)
 const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit'])
@@ -129,7 +130,7 @@ async function executeAction(actionStr, username, opts = {}) {
           const dist = lookBot.entity.position.distanceTo(e.position)
           if (dist > ranges.sight.lookEntities) continue
           const visible = hasLineOfSight(eyePos, e.position, e.height || 1.8)
-          found.push({ name: e.username || e.name, type: 'entity', x: Math.floor(e.position.x), y: Math.floor(e.position.y), z: Math.floor(e.position.z), dist: Math.round(dist), visible })
+          found.push({ name: entityTag(e), type: 'entity', x: Math.floor(e.position.x), y: Math.floor(e.position.y), z: Math.floor(e.position.z), dist: Math.round(dist), visible })
         }
 
         // Search blocks: palette-skip scan of loaded chunks (cheap to full range),

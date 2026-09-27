@@ -1,8 +1,9 @@
 // Combat actions — attack
 const state = require('../core/state')
 const { raceAbort, AbortError, stopAll, waitForEventOrTimeout } = require('../core/tick')
-const { sendChat, fuzzyMatch } = require('../core/utils')
+const { sendChat, fuzzyMatch, logEvent } = require('../core/utils')
 const { logGameEvent } = require('../world/memory')
+const { entityTag, tagOf, findTagged } = require('../perception/entityTag')
 
 async function doAttack(targetName) {
   stopAll()
@@ -10,7 +11,8 @@ async function doAttack(targetName) {
   const normalized = targetName.toLowerCase().replace(/s$/, '')
   state.currentTask = `attacking ${targetName}`
 
-  const entity = bot.nearestEntity(e => {
+  // 'cow#a3f9' names one animal; a bare 'cow' means the nearest one.
+  const entity = tagOf(targetName) ? findTagged(targetName) : bot.nearestEntity(e => {
     const eName = (e.name || '').toLowerCase()
     const eUser = (e.username || '').toLowerCase()
     return (eName && (fuzzyMatch(eName, normalized))) ||
@@ -18,7 +20,7 @@ async function doAttack(targetName) {
   })
 
   if (!entity) { sendChat(`No ${targetName} nearby!`); state.currentTask = null; return false }
-  const label = entity.username || entity.name
+  const label = entityTag(entity)
   console.log(`  found ${label} dist=${Math.round(bot.entity.position.distanceTo(entity.position))}`)
 
   let killed = false
@@ -30,8 +32,8 @@ async function doAttack(targetName) {
     await raceAbort(waiter, 30000)
     if (!entity.isValid) {
       const pos = entity.position
-      logGameEvent('kill', entity.name || entity.username, 1, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), { weapon: bot.heldItem?.name || 'hand' })
-      console.log('  killed!'); sendChat('Got it!')
+      logGameEvent('kill', entity.name || entity.username, 1, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), { weapon: bot.heldItem?.name || 'hand', tag: label, uuid: entity.uuid })
+      console.log('  killed!'); logEvent(`attack: killed ${label}`); sendChat('Got it!')
       killed = true
     }
     else console.log('  stopped attacking')

@@ -1,7 +1,7 @@
 ACTIONS:
 ACTIONS ARE TEXT YOU WRITE — never a tool call. To act, write the [ACTION:...] tag in your reply. A tool call does not act, does not end your turn and does not send anything to the game. The only tools, WebSearch and WebFetch, are for a real question about Minecraft; if you have none, make no tool call at all.
 [ACTION:follow] / [ACTION:come] — follow / walk to a player (ALWAYS use come to reach a player, NEVER goto with player coords). Bare form targets whoever asked. When the task names a player (e.g. task="follow Sargon564"), pass them explicitly — [ACTION:follow:Sargon564], [ACTION:come:Sargon564] — because on self-check turns there is no "whoever asked" to fall back on.
-[ACTION:attack:TARGET] — attack mob or player by name. [ACTION:mine:BLOCK] or [ACTION:mine:BLOCK:X,Y,Z] or [ACTION:mine:BLOCK:COUNT] — mine block. Use COUNT for batch mining (e.g. mine:sand:64). Bot loops automatically, no need for multiple actions.
+[ACTION:attack:TARGET] — attack mob or player by name, or one exact mob by its nearby= tag (attack:zombie#4f1a). [ACTION:mine:BLOCK] or [ACTION:mine:BLOCK:X,Y,Z] or [ACTION:mine:BLOCK:COUNT] — mine block. Use COUNT for batch mining (e.g. mine:sand:64). Bot loops automatically, no need for multiple actions.
 [ACTION:collect] — pick up drops. [ACTION:drop:TARGET] — toss items. [ACTION:eat] — eat food from inv.
 [ACTION:sleep] — find bed, sleep til morning. [ACTION:equip:TARGET] — equip item/armor. [ACTION:unequip:TARGET] — remove gear ("all" for everything).
 [ACTION:place:TARGET] — place block/item at feet. [ACTION:craft:TARGET] — craft item (auto-resolves intermediate crafts; 3x3 recipes need a table already placed nearby — NOT auto-placed).
@@ -14,7 +14,7 @@ ACTIONS ARE TEXT YOU WRITE — never a tool call. To act, write the [ACTION:...]
 [ACTION:give:ITEM[:COUNT][:PLAYER]] — walk to the player and toss them an item: give:copper_pickaxe:Sargon564, give:bread:3:Sargon564. ITEM comes first; PLAYER defaults to whoever asked (name them on your own turns).
 [ACTION:flee] — sprint from danger immediately, no preparation.
 [ACTION:swimup] — surface when underwater/drowning (digs straight up or heads to shore). If a background task is running, pair with [ACTION:stop] first.
-[ACTION:mount:TARGET] — enter boat/minecart/horse (place boat first). [ACTION:dismount] — exit vehicle.
+[ACTION:mount:TARGET] — enter boat/minecart/horse (place boat first); a nearby= tag picks that exact one. [ACTION:dismount] — exit vehicle.
 [ACTION:sail:TARGET] — steer boat: coords, direction (north/south/east/west), or "north 500". Use instead of goto in boats.
 [ACTION:turn:DIRECTION] — face a direction without moving (N/S/E/W/NE/NW/SE/SW, coords X,Y,Z, or player name). Alias: [ACTION:face:DIRECTION].
 [ACTION:build] — execute designed blueprint. [ACTION:smelt:INPUT] — all furnace ops (load raw material + fuel, wait, collect output).

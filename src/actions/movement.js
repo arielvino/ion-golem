@@ -6,6 +6,7 @@ const { navigateTo, digHeading, until } = require('../navigation/navigation')
 const { castVisionRays } = require('../perception/vision')
 const { sendChat, recordFailure, logEvent, fuzzyMatch, resolvePlayerName } = require('../core/utils')
 const { logGameEvent } = require('../world/memory')
+const { tagOf, findTagged } = require('../perception/entityTag')
 const { OXYGEN_SURFACED } = require('../config/safety')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 
@@ -188,7 +189,7 @@ async function doMount(targetName) {
   const bot = state.bot
   state.currentTask = 'mounting'
   const normalized = (targetName || '').toLowerCase()
-  const entity = bot.nearestEntity(e => {
+  const entity = tagOf(targetName) ? findTagged(targetName) : bot.nearestEntity(e => {
     const n = (e.name || '').toLowerCase()
     if (normalized && normalized !== 'any') return fuzzyMatch(n, normalized)
     return n.includes('boat') || n.includes('minecart') || n.includes('horse') ||
