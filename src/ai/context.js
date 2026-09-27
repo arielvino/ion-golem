@@ -15,7 +15,7 @@ const { providerNames, renderPending } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
 
 // --- Main context builder ---
-function getBotContext(chatUsername) {
+function getBotContext() {
   const bot = state.bot
   const pos = bot.entity.position
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
@@ -26,18 +26,26 @@ function getBotContext(chatUsername) {
   ].filter(Boolean).map(s => s.name)
   const armorStr = armorSlots.length > 0 ? ` armor=[${armorSlots.join(',')}]` : ' armor=none'
   const eyePos = pos.offset(0, 1.62, 0)
-  const visibleUsernames = new Set()
   const nearbyNames = []
+  // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
+  const equipOf = (e) => {
+    const parts = []
+    if (e.equipment) {
+      const labels = ['hand', 'off', 'head', 'chest', 'legs', 'feet']
+      for (let i = 0; i < labels.length; i++) {
+        const item = e.equipment[i]
+        if (item && item.name) parts.push(`${labels[i]}:${item.name}`)
+      }
+    }
+    return parts.length > 0 ? `,${parts.join(',')}` : ''
+  }
+  // Every visible non-player entity, nearest first. Players have PLAYERS= below.
   const nearby = Object.values(bot.entities)
-    .filter(e => e !== bot.entity && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
+    .filter(e => e !== bot.entity && !e.username && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
-    // Players first, then nearest: the cap below must never drop the player or
-    // a close mob in favour of a far horse.
-    .sort((a, b) => (!!b.username - !!a.username) || (a.position.distanceTo(pos) - b.position.distanceTo(pos)))
-    .slice(0, 15)
+    .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
     .map(e => {
-      let n = e.username || e.name || '?'
-      if (e.username) visibleUsernames.add(e.username)
+      let n = e.name || '?'
       const ep = e.position
       const coord = `@${Math.round(ep.x)},${Math.round(ep.y)},${Math.round(ep.z)}`
       const dist = `${Math.round(ep.distanceTo(pos))}m`
@@ -48,17 +56,7 @@ function getBotContext(chatUsername) {
         } catch (_) { /* entity may lack drop data */ }
       }
       nearbyNames.push(n)
-      // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
-      const equipParts = []
-      if (e.equipment) {
-        const labels = ['hand', 'off', 'head', 'chest', 'legs', 'feet']
-        for (let i = 0; i < labels.length; i++) {
-          const item = e.equipment[i]
-          if (item && item.name) equipParts.push(`${labels[i]}:${item.name}`)
-        }
-      }
-      const equipStr = equipParts.length > 0 ? `,${equipParts.join(',')}` : ''
-      return `${n}${coord}(${dist}${equipStr})`
+      return `${n}${coord}(${dist}${equipOf(e)})`
     }).join(', ') || 'none'
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
@@ -171,9 +169,11 @@ function getBotContext(chatUsername) {
     vehicleStr = ` RIDING=${bot.vehicle.name || 'vehicle'}${seatStr}`
   }
 
-  let playerPosStr = ''
-  if (chatUsername) {
-    const pl = bot.players[chatUsername]
+  // Every online player, each with the best position the bot has: the tracked
+  // entity when in render range, else the Locator Bar fix. Which one matters is
+  // for the model to judge from the event and the agenda.
+  const describePlayer = (name) => {
+    const pl = bot.players[name]
     if (pl && pl.entity) {
       const pp = pl.entity.position
       const pdist = Math.round(pp.distanceTo(pos))
@@ -181,6 +181,7 @@ function getBotContext(chatUsername) {
       // (shorter) nearby= list range, so "can you see me?" works at distance.
       const canSee = pdist <= ranges.sight.playerVisibility &&
         hasLineOfSight(eyePos, pp, pl.entity.height || 1.8)
+      if (canSee) nearbyNames.push(name)
       // Player's own facing (yaw), like a human reading another player's head
       // orientation. Only available while the entity is tracked, same as a
       // vanilla client only rendering orientation for players in render range.
@@ -189,34 +190,33 @@ function getBotContext(chatUsername) {
         const pyaw = (((pl.entity.yaw + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
         pfacingStr = `,facing=${facingDirs[Math.round(pyaw / (Math.PI / 4)) % 8]}`
       }
-      playerPosStr = ` PLAYER=${chatUsername}@${Math.floor(pp.x)},${Math.floor(pp.y)},${Math.floor(pp.z)}(${pdist}m,${canSee ? 'visible' : 'NOT_VISIBLE'}${pfacingStr})`
-    } else {
-      // No tracked entity (out of render range). Fall back to the Locator Bar:
-      // the server's tracked_waypoint gives a heading — and usually a rough
-      // position — toward the player, enough to start walking the right way.
-      // Bearing yaw uses mineflayer's lookAt convention: atan2(-dx, -dz).
-      const wp = pl && pl.uuid ? bot._waypoints?.get(pl.uuid) : null
-      const fresh = wp && (Date.now() - wp.t) < 30000
-      if (fresh && (wp.type === 'vec3i' || wp.type === 'chunk')) {
-        const tx = wp.type === 'vec3i' ? wp.x : wp.chunkX * 16 + 8
-        const tz = wp.type === 'vec3i' ? wp.z : wp.chunkZ * 16 + 8
-        const dir = yawToDir(Math.atan2(-(tx - pos.x), -(tz - pos.z)))
-        const dist = Math.round(Math.hypot(tx - pos.x, tz - pos.z))
-        if (wp.type === 'vec3i') {
-          playerPosStr = ` PLAYER=${chatUsername}@${Math.floor(tx)},${wp.y},${Math.floor(tz)}(out_of_range,locator,head=${dir},~${dist}m)`
-        } else {
-          playerPosStr = ` PLAYER=${chatUsername}@~${Math.floor(tx)},~${Math.floor(tz)}(out_of_range,locator_chunk,head=${dir},~${dist}m)`
-        }
-      } else if (fresh && wp.type === 'azimuth') {
-        // Very distant: only a world-frame bearing, no distance. Rebuild a unit
-        // delta from the azimuth (atan2(dz,dx)) and reuse the same heading math.
-        const dir = yawToDir(Math.atan2(-Math.cos(wp.azimuth), -Math.sin(wp.azimuth)))
-        playerPosStr = ` PLAYER=${chatUsername}@UNKNOWN(out_of_range,locator,head=${dir},far)`
-      } else {
-        playerPosStr = ` PLAYER=${chatUsername}@UNKNOWN(not_in_range)`
-      }
+      return `${name}@${Math.floor(pp.x)},${Math.floor(pp.y)},${Math.floor(pp.z)}(${pdist}m,${canSee ? 'visible' : 'NOT_VISIBLE'}${pfacingStr}${equipOf(pl.entity)})`
     }
+    // No tracked entity (out of render range). Fall back to the Locator Bar:
+    // the server's tracked_waypoint gives a heading — and usually a rough
+    // position — toward the player, enough to start walking the right way.
+    // Bearing yaw uses mineflayer's lookAt convention: atan2(-dx, -dz).
+    const wp = pl && pl.uuid ? bot._waypoints?.get(pl.uuid) : null
+    const fresh = wp && (Date.now() - wp.t) < 30000
+    if (fresh && (wp.type === 'vec3i' || wp.type === 'chunk')) {
+      const tx = wp.type === 'vec3i' ? wp.x : wp.chunkX * 16 + 8
+      const tz = wp.type === 'vec3i' ? wp.z : wp.chunkZ * 16 + 8
+      const dir = yawToDir(Math.atan2(-(tx - pos.x), -(tz - pos.z)))
+      const dist = Math.round(Math.hypot(tx - pos.x, tz - pos.z))
+      return wp.type === 'vec3i'
+        ? `${name}@${Math.floor(tx)},${wp.y},${Math.floor(tz)}(out_of_range,locator,head=${dir},~${dist}m)`
+        : `${name}@~${Math.floor(tx)},~${Math.floor(tz)}(out_of_range,locator_chunk,head=${dir},~${dist}m)`
+    }
+    if (fresh && wp.type === 'azimuth') {
+      // Very distant: only a world-frame bearing, no distance. Rebuild a unit
+      // delta from the azimuth (atan2(dz,dx)) and reuse the same heading math.
+      const dir = yawToDir(Math.atan2(-Math.cos(wp.azimuth), -Math.sin(wp.azimuth)))
+      return `${name}@UNKNOWN(out_of_range,locator,head=${dir},far)`
+    }
+    return `${name}@UNKNOWN(not_in_range)`
   }
+  const others = Object.keys(bot.players).filter(n => n !== bot.username).sort()
+  const playerPosStr = ` PLAYERS=[${others.map(describePlayer).join(', ') || 'none online'}]`
 
   // Context "see=" comes purely from the find+LOS survey (the new view) — no ray vision.
   const visionInfo = formatVision(null, { survey: getLastSurvey() })
