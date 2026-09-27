@@ -57,6 +57,18 @@ function renderNotesBlock() {
   return out.join('\n')
 }
 
+// Notes render as `n3 @g1 text`, so the model tends to open its own notes with
+// `@g1` too — which then showed twice. A leading @node is read as the model's
+// choice of where the note belongs and taken out of the text.
+function splitNode(text) {
+  let node = null
+  const body = text.replace(/^(?:@([gs]\d+)\s+)+/, (lead) => {
+    for (const [, id] of lead.matchAll(/@([gs]\d+)/g)) if (!node && state.agenda?.tree?.nodes.has(id)) node = id
+    return ''
+  })
+  return { body, node: node || currentNode() }
+}
+
 // `[NOTE:text [r1,r2]]` and `[NOTE:compact:n3-n9:text [r4]]`. The body may itself
 // contain one level of [...] (the citations), so a plain [^\]]+ would cut it short.
 const NOTE_TAG = /\[NOTE:((?:[^[\]]|\[[^[\]]*\])*)\]/g
@@ -70,10 +82,12 @@ function applyNoteTags(rawReply) {
     try {
       const cm = /^compact:([^:]+):([\s\S]*)$/.exec(body)
       if (cm) {
-        const { note, replaced } = state.journal.compact(cm[1], cm[2], currentNode())
+        const t = splitNode(cm[2])
+        const { note, replaced } = state.journal.compact(cm[1], t.body, t.node)
         applied.push(`${note.id} ← ${replaced.join(',')}`)
       } else {
-        applied.push(state.journal.note(body, currentNode()).id)
+        const t = splitNode(body)
+        applied.push(state.journal.note(t.body, t.node).id)
       }
     } catch (e) {
       state.noteErrors.push(`${body.slice(0, 60)} → ${e.message}`)

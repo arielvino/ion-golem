@@ -137,3 +137,23 @@ test('loading drops note references that no longer resolve', () => {
     notes: [{ id: 'n9', ts: 0, text: 'old', cites: ['r1'], sources: ['n3', 'n4-n7', 'slice', 'n9'] }] })
   assert.deepStrictEqual(k.notes[0].sources, ['slice', 'n9'])
 })
+
+test('a leading @node in a note is the attachment, not text', () => {
+  const state = require('../src/core/state')
+  const { applyNoteTags } = require('../src/world/journalStore')
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.BOT_DATA_DIR }
+  state.BOT_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jnode-'))
+  state.journal = new Journal()
+  state.journal.record('x')
+  const nodes = new Map([['g1', {}], ['s3', {}]])
+  // Working on s3 (under g1).
+  state.agenda = { tree: { nodes, activePath: () => [{ id: 'g1' }, { id: 's3' }] }, focus: () => ({ id: 'g1' }) }
+  applyNoteTags('[NOTE:@g1 third attempt [r1]] [NOTE:@s3 @s3 probe again] [NOTE:plain] [NOTE:@g9 unknown node]')
+  const [a, b, c, d] = state.journal.notes
+  assert.deepStrictEqual([a.node, a.text], ['g1', 'third attempt'])
+  assert.deepStrictEqual([b.node, b.text], ['s3', 'probe again'])
+  assert.deepStrictEqual([c.node, c.text], ['s3', 'plain'])
+  assert.deepStrictEqual([d.node, d.text], ['s3', 'unknown node'])
+  assert.match(state.journal.renderNotes(), /^n1 @g1 third attempt \[r1\]$/m)
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, BOT_DATA_DIR: saved.dir })
+})
