@@ -29,6 +29,7 @@ function getBotContext() {
   const eyePos = pos.offset(0, 1.62, 0)
   const nearbyNames = []
   const drops = {}  // drop tag → stack size, so DELTA can report a pile growing
+  const playerDist = {}  // tracked player → distance; staying in view isn't staying put
   // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
   const equipOf = (e) => {
     const parts = []
@@ -182,6 +183,7 @@ function getBotContext() {
       const canSee = pdist <= ranges.sight.playerVisibility &&
         hasLineOfSight(eyePos, pp, pl.entity.height || 1.8)
       if (canSee) nearbyNames.push(name)
+      playerDist[name] = pdist
       // Player's own facing (yaw), like a human reading another player's head
       // orientation. Only available while the entity is tracked, same as a
       // vanilla client only rendering orientation for players in render range.
@@ -254,7 +256,7 @@ function getBotContext() {
   const invCounts = {}
   for (const i of bot.inventory.items()) invCounts[i.name] = (invCounts[i.name] || 0) + i.count
   const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, inv: invCounts, armor: armorSlots,
-    vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops })
+    vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops, players: playerDist })
   const delta = renderDelta(state.prevSnapshot, snap)
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''

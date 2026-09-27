@@ -4,16 +4,19 @@
 // is simply stated. Pure: snapshot in, one line out.
 
 // The fields worth diffing, from values context.js already computes.
-function snapshot({ pos, hp, food, held, inv, armor, vehicle, task, seen, drops = {}, now = Date.now() }) {
+function snapshot({ pos, hp, food, held, inv, armor, vehicle, task, seen, drops = {}, players = {}, now = Date.now() }) {
   return {
     t: now,
     pos: { x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) },
     // A running task shows its elapsed time ('bg:goto:… (13s, walking)'); drop it,
     // or the same task reads as changed every turn.
     hp: Math.round(hp), food: Math.round(food), held, task: String(task).replace(/\(\d+s,\s*/, '('), vehicle,
-    inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(), drops: { ...drops },
+    inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(), drops: { ...drops }, players: { ...players },
   }
 }
+
+// Smaller distance changes are walking noise and rounding.
+const PLAYER_MOVE = 3
 
 function renderDelta(prev, cur) {
   if (!prev) return ''
@@ -47,6 +50,10 @@ function renderDelta(prev, cur) {
   const went = prev.seen.filter(n => !cur.seen.includes(n))
   if (came.length) parts.push(`new nearby: ${groupTags(came)}`)
   if (went.length) parts.push(`gone from nearby: ${groupTags(went)}`)
+  // A player who stays in view can still walk off; "nothing changed" while
+  // Sargon went from 2m to 17m once made the bot think it was still beside him.
+  const walked = Object.keys(cur.players).filter(n => n in prev.players && Math.abs(cur.players[n] - prev.players[n]) >= PLAYER_MOVE)
+  if (walked.length) parts.push(walked.map(n => `${n} ${prev.players[n]}m→${cur.players[n]}m away`).join(', '))
   const grew = Object.keys(cur.drops).filter(t => t in prev.drops && prev.drops[t] !== cur.drops[t])
   if (grew.length) parts.push(grew.map(t => `${t} x${prev.drops[t]}→x${cur.drops[t]}`).join(', '))
 

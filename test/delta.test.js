@@ -36,3 +36,10 @@ test('entities are told apart by tag; a crowd collapses; a drop pile growing is 
   assert.strictEqual(renderDelta(a, b),
     'since last turn (5s): new nearby: cod×3, cow#77e2 | gone from nearby: cow#a3f9 | drop:cobblestone#0c1d x2→x5')
 })
+
+test('a player walking off while staying in view is a change', () => {
+  const a = snapshot({ ...base, players: { Sargon564: 2 } })
+  const b = snapshot({ ...base, players: { Sargon564: 17 }, now: 12000 })
+  assert.strictEqual(renderDelta(a, b), 'since last turn (11s): Sargon564 2m→17m away')
+  assert.strictEqual(renderDelta(a, snapshot({ ...base, players: { Sargon564: 4 }, now: 12000 })), 'nothing changed in 11s')
+})
