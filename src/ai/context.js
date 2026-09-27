@@ -8,6 +8,7 @@ const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
 const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
 const { renderAgenda } = require('../engine/tasks')
 const { renderNew, renderNotesBlock } = require('../world/journalStore')
+const { ago } = require('../world/journal')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending } = require('./ctxProviders')
@@ -68,6 +69,7 @@ function getBotContext(chatUsername) {
   // MC ticks: 0=6:00, 6000=12:00, 12000=18:00, 18000=0:00
   const hours = Math.floor(((t + 6000) % 24000) / 1000)
   const time = `${hours}:00(${t}t)`
+  const onlineStr = state.joinedAt ? ` online=${ago(Date.now() - state.joinedAt)}` : ''
   // Sky exposure: skyLight=0 means enclosed/underground. Mob spawning at night or underground.
   let lightStr = ''
   try {
@@ -257,7 +259,7 @@ function getBotContext(chatUsername) {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
   // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.

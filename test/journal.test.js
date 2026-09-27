@@ -47,7 +47,7 @@ test('renderNotes shows ids, nodes, citations and a size hint', () => {
   const j = new Journal()
   j.record('x')
   j.note('south floods [r1]', 's6')
-  assert.strictEqual(j.renderNotes(), 'NOTES (1):\nn1 @s6 south floods [r1]')
+  assert.strictEqual(j.renderNotes(20, j.notes[0].ts + 7 * 60000), 'NOTES (1):\nn1 @s6 (7m ago) south floods [r1]')
   assert.match(j.renderNotes(1), /← long: consider \[NOTE:compact/)
   assert.strictEqual(new Journal().renderNotes(), '')
 })
@@ -81,7 +81,7 @@ test('a mixed basis keeps its record ids as citations and the rest as sources', 
   assert.deepStrictEqual([n.text, n.cites, n.sources], ['trying north instead of west', ['r36'], ['slice']])
   assert.deepStrictEqual(j.note('pivoting [pos, biome, n1, n8]').sources, ['pos', 'biome', 'n1'])
   assert.throws(() => j.note('made up [r99,VISION]'), /unknown record\(s\) r99/)
-  assert.strictEqual(j.renderNotes().split('\n')[1], 'n1 trying north instead of west [r36,slice]')
+  assert.strictEqual(j.renderNotes().split('\n')[1], 'n1 (0s ago) trying north instead of west [r36,slice]')
 })
 
 test('compaction inherits sources as well as citations', () => {
@@ -154,6 +154,11 @@ test('a leading @node in a note is the attachment, not text', () => {
   assert.deepStrictEqual([b.node, b.text], ['s3', 'probe again'])
   assert.deepStrictEqual([c.node, c.text], ['s3', 'plain'])
   assert.deepStrictEqual([d.node, d.text], ['s3', 'unknown node'])
-  assert.match(state.journal.renderNotes(), /^n1 @g1 third attempt \[r1\]$/m)
+  assert.match(state.journal.renderNotes(), /^n1 @g1 \(0s ago\) third attempt \[r1\]$/m)
   Object.assign(state, { journal: saved.journal, agenda: saved.agenda, BOT_DATA_DIR: saved.dir })
+})
+
+test('ago reads like a person says it', () => {
+  const { ago } = require('../src/world/journal')
+  assert.deepStrictEqual([ago(40e3), ago(7 * 60e3), ago(125 * 60e3), ago(76 * 3600e3)], ['40s', '7m', '2h05m', '3d4h'])
 })

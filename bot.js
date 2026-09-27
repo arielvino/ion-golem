@@ -204,6 +204,7 @@ function createBot() {
 
   bot.once('spawn', () => {
     reconnectAttempts = 0
+    state.joinedAt = Date.now()
     console.log('Bot has joined')
 
     // --- Sound registry off-by-one fix ---

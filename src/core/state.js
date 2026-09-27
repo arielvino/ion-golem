@@ -35,6 +35,7 @@ module.exports = {
   noteErrors: [],     // [NOTE:...] failures, shown to the model next turn
   lastFailures: [],
   pickupPausedUntil: 0,  // auto-pickup holds off until then (after a give)
+  joinedAt: 0,           // when this session spawned in the world, for online=
   prevSnapshot: null,    // the previous turn's context values, for DELTA=
   skipBlocks: new Set(),
   pendingBlueprint: null,

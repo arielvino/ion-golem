@@ -24,6 +24,17 @@ const NEW_SHOWN = 25   // most recent new records shown per turn; older ones sum
 const MAX_LOOKUP = 50
 const BASIS_SHOWN = 6    // basis items shown per note; the rest are summarized
 
+// A duration as a person would say it: 40s, 7m, 2h05m, 3d4h.
+function ago(ms) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h${String(m % 60).padStart(2, '0')}m`
+  return `${Math.floor(h / 24)}d${h % 24}h`
+}
+
 class JournalError extends Error {}
 
 class Journal {
@@ -116,7 +127,7 @@ class Journal {
   }
 
   // Multi-line NOTES block, or '' with no notes.
-  renderNotes(compactHint = 20) {
+  renderNotes(compactHint = 20, now = Date.now()) {
     if (this.notes.length === 0) return ''
     const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: consider [NOTE:compact:...]' : ''}:`]
     for (const n of this.notes) {
@@ -126,7 +137,7 @@ class Journal {
       const basis = [...n.cites, ...(n.sources || [])]
       const shown = basis.length > BASIS_SHOWN ? `${basis.slice(0, BASIS_SHOWN).join(',')} +${basis.length - BASIS_SHOWN} more` : basis.join(',')
       const cite = basis.length ? ` [${shown}]` : ''
-      lines.push(`${n.id}${at} ${n.text}${cite}`)
+      lines.push(`${n.id}${at} (${ago(now - n.ts)} ago) ${n.text}${cite}`)
     }
     return lines.join('\n')
   }
@@ -212,4 +223,4 @@ function parseRange(range) {
   return a <= b ? [a, b] : [b, a]
 }
 
-module.exports = { Journal, JournalError, MAX_RECORDS }
+module.exports = { Journal, JournalError, MAX_RECORDS, ago }

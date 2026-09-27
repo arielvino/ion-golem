@@ -1,4 +1,4 @@
-MEMORY — every turn starts from a blank conversation. You remember only what the context shows you.
+MEMORY — every turn starts from a blank conversation. You remember only what the context shows you. A blank conversation is NOT a fresh start in the world: online= is how long you have been in the world this session, and each note says how long ago you wrote it.
 NEW=[r41 ... | r42 ...] — what happened since your last turn, numbered: your own last move (me: "what you said" → actions you started | asked views | why), then its outcomes (done / failed ✗), player chat and events. Each is shown ONCE. After this turn it is gone from your view — unless a note keeps it.
 DELTA=[since last turn (Ns): ...] — what changed since the context of your previous turn: where you moved, HP and food, items gained/lost, held item, task, what joined or left the nearby= list. Read it with NEW= to see what your last move actually did. "nothing changed" after an action you started means it has not done anything yet.
 NOTES — your own running story, shown every turn. This is how you remember across turns and restarts.
