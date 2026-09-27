@@ -4,7 +4,7 @@ const state = require('../core/state')
 const { tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
 const { navigateTo, digHeading, until } = require('../navigation/navigation')
 const { castVisionRays } = require('../perception/vision')
-const { sendChat, recordFailure, fuzzyMatch, resolvePlayerName } = require('../core/utils')
+const { sendChat, recordFailure, logEvent, fuzzyMatch, resolvePlayerName } = require('../core/utils')
 const { logGameEvent } = require('../world/memory')
 const { OXYGEN_SURFACED } = require('../config/safety')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
@@ -102,14 +102,22 @@ async function doCome(requested, opts = {}) {
   // precise entity tracking takes over and we do the final approach.
   const overallStart = Date.now()
   const MAX_TRIP = 180000  // hard ceiling for a long cross-terrain trek
+  const startPos = bot.entity.position.clone()
+  let ok = true
   while (!isAborted()) {
     tgt = resolvePlayerTarget(bot, username)
-    if (!tgt) { recordFailure(`come:${username} failed (lost track)`); break }
+    if (!tgt) { recordFailure(`come:${username} failed (lost track)`); ok = false; break }
     const pos = bot.entity.position
     const dist = Math.hypot(tgt.x - pos.x, tgt.y - pos.y, tgt.z - pos.z)
-    if (tgt.tracked && dist <= 3) break  // arrived — we can see them
+    if (tgt.tracked && dist <= 3) {  // arrived — we can see them
+      // Say so: a silent "done" left the model unsure it had arrived at all.
+      const walked = Math.round(pos.distanceTo(startPos))
+      logEvent(walked < 1 ? `come: already next to ${username} (${dist.toFixed(1)}m)` : `come: reached ${username} (${dist.toFixed(1)}m away, walked ${walked}m)`)
+      break
+    }
     if (Date.now() - overallStart > MAX_TRIP) {
       recordFailure(`come:${username} failed (timeout, still ${Math.round(dist)}m out)`)
+      ok = false
       break
     }
 
@@ -117,21 +125,28 @@ async function doCome(requested, opts = {}) {
     // Tracked: one sized leg straight to them. Locator: short legs, re-resolve
     // often as the fix updates and the player keeps moving.
     const legTimeout = tgt.tracked ? Math.max(30000, Math.round(dist * 2000 + yD * 3000)) : 20000
-    const ok = await navigateTo(Math.floor(tgt.x), Math.floor(tgt.y), Math.floor(tgt.z),
+    const legOk = await navigateTo(Math.floor(tgt.x), Math.floor(tgt.y), Math.floor(tgt.z),
       tgt.tracked ? 2 : 6, legTimeout,
       { ...(tgt.tracked ? { reachTarget: () => bot.players[username]?.entity?.position } : { noReachCheck: true }),
         intent: opts.skipTool ? 'clear-no-tool' : 'clear' })
 
     if (tgt.tracked) {
       // We could see them and the nav still failed — that's a real, reportable failure.
-      if (!ok && !isAborted()) {
+      if (!legOk && !isAborted()) {
         const d = bot.entity.position.distanceTo(new Vec3(tgt.x, tgt.y, tgt.z))
         const reason = state.navFailReason || 'unknown'
         console.log(`  come: couldn't reach ${username} (${d.toFixed(1)}m away) — ${reason}`)
         recordFailure(`come:${username} failed (${reason})`)
         state.navFailReason = null
+        state.currentTask = null
+        return false
       }
-      break  // tracked leg is terminal whether it succeeded or failed
+      if (isAborted()) break
+      // Tracked leg is terminal: report where it left us (they may have moved).
+      const now = bot.players[username]?.entity?.position || new Vec3(tgt.x, tgt.y, tgt.z)
+      const d = bot.entity.position.distanceTo(now)
+      logEvent(`come: reached ${username} (${d.toFixed(1)}m away, walked ${Math.round(bot.entity.position.distanceTo(startPos))}m)`)
+      break
     }
     // Locator leg finished (reached the rough fix, or timed out making progress).
     // Pause a beat so entity tracking can catch up, then loop and re-resolve.
@@ -139,6 +154,7 @@ async function doCome(requested, opts = {}) {
   }
   state.navFailReason = null
   state.currentTask = null
+  return ok
 }
 
 async function doFlee() {
