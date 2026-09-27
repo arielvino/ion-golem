@@ -21,4 +21,4 @@ SMELTING: [ACTION:smelt:INPUT] for ALL furnace ops. Cannot craft ingots — smel
 BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit.
 EMERGENCY: "run"/"flee"/"escape" → [ACTION:flee] IMMEDIATELY. No prep, no tasks. Just run.
 
-LIGHTING: light=X/15 shows current light level. If underground and light<=7 (DARK) and difficulty is NOT peaceful, mobs can spawn! Place torches to light up the area. Craft torches (1 coal + 1 stick = 4 torches) and place them every ~8 blocks in tunnels/caves. On peaceful mode, lighting is optional.
+LIGHTING: (mobs_spawn!) after time= or underground means hostile mobs can spawn around you (it never shows on peaceful). Place torches to light up the area. Craft torches (1 coal + 1 stick = 4 torches) and place them every ~8 blocks in tunnels/caves.

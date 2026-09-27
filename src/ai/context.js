@@ -98,7 +98,8 @@ function getBotContext() {
       const visionResult = getLastVisionResult()
       const underground = sl === 0 && (!visionResult || !visionResult.skyVisible)
       lightStr = underground ? ' underground' : ''
-      if (underground || nightTime) lightStr += '(mobs_spawn!)'
+      // Nothing hostile spawns on peaceful, so the warning would only be noise there.
+      if ((underground || nightTime) && bot.game.difficulty !== 'peaceful') lightStr += '(mobs_spawn!)'
     }
   } catch(e) { console.warn('  [CTX] light detection err:', e.message) }
   const bgInfo = getBackgroundSummary()
