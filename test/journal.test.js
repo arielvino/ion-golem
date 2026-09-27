@@ -79,7 +79,7 @@ test('a mixed basis keeps its record ids as citations and the rest as sources', 
   // Real note n20 from the 2026-09-26 run: r36 was silently dropped.
   const n = j.note('trying north instead of west [r36,slice]')
   assert.deepStrictEqual([n.text, n.cites, n.sources], ['trying north instead of west', ['r36'], ['slice']])
-  assert.deepStrictEqual(j.note('pivoting [pos, biome, n8]').sources, ['pos', 'biome', 'n8'])
+  assert.deepStrictEqual(j.note('pivoting [pos, biome, n1, n8]').sources, ['pos', 'biome', 'n1'])
   assert.throws(() => j.note('made up [r99,VISION]'), /unknown record\(s\) r99/)
   assert.strictEqual(j.renderNotes().split('\n')[1], 'n1 trying north instead of west [r36,slice]')
 })
@@ -112,4 +112,28 @@ test('a turn record carries what was said, set in motion, asked for, and why', (
   assert.strictEqual(formatTurn({ said: 'Still digging.' }), 'me: "Still digging."')
   assert.strictEqual(formatTurn({ actions: ['stop'] }), 'stop')
   assert.strictEqual(formatTurn({}), '')
+})
+
+test('compaction does not carry references to the notes it merges away', () => {
+  const j = new Journal()
+  j.record('x')
+  j.note('a [r1,slice]'); j.note('b [n1,VISION]'); j.note('c [n2]')
+  const { note } = j.compact('n1-n3', 'merged [inv]')
+  assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'inv']])
+  assert.deepStrictEqual(j.note('d [n4,n1,n2-n3]').sources, ['n4'])
+})
+
+test('a long basis is shortened in the view but kept in full', () => {
+  const j = new Journal()
+  for (let i = 0; i < 20; i++) j.record(`e${i}`)
+  const ids = Array.from({ length: 20 }, (_, i) => `r${i + 1}`).join(',')
+  const n = j.note(`long story [${ids},slice]`)
+  assert.strictEqual(n.cites.length, 20)
+  assert.match(j.renderNotes(), /\[r1,r2,r3,r4,r5,r6 \+15 more\]$/)
+})
+
+test('loading drops note references that no longer resolve', () => {
+  const k = Journal.fromJSON({ records: [{ id: 'r1', ts: 0, text: 'x' }], rseq: 1, nseq: 9,
+    notes: [{ id: 'n9', ts: 0, text: 'old', cites: ['r1'], sources: ['n3', 'n4-n7', 'slice', 'n9'] }] })
+  assert.deepStrictEqual(k.notes[0].sources, ['slice', 'n9'])
 })

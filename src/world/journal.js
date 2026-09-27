@@ -22,6 +22,7 @@
 const MAX_RECORDS = 500
 const NEW_SHOWN = 25   // most recent new records shown per turn; older ones summarized
 const MAX_LOOKUP = 50
+const BASIS_SHOWN = 6    // basis items shown per note; the rest are summarized
 
 class JournalError extends Error {}
 
@@ -55,7 +56,7 @@ class Journal {
   note(text, node) {
     const { body, cites, sources } = this._parseCites(text)
     if (!body) throw new JournalError('empty note')
-    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites, sources, node: node || null }
+    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites, sources: this._liveSources(sources), node: node || null }
     this.notes.push(n)
     return n
   }
@@ -72,8 +73,9 @@ class Journal {
     const inherited = run.flatMap(n => n.cites)
     const all = [...new Set([...inherited, ...cites])].sort((a, b) => num(a) - num(b))
     const allSources = [...new Set([...run.flatMap(n => n.sources || []), ...sources])]
-    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, sources: allSources, node: node || null }
     this.notes = this.notes.filter(x => !run.includes(x))
+    // A merged note absorbs the notes it replaces, so references to them go too.
+    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, sources: this._liveSources(allSources), node: node || null }
     this.notes.splice(i, 0, n)
     return { note: n, replaced: run.map(x => x.id) }
   }
@@ -119,8 +121,11 @@ class Journal {
     const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: consider [NOTE:compact:...]' : ''}:`]
     for (const n of this.notes) {
       const at = n.node ? ` @${n.node}` : ''
+      // The full basis stays stored (cited records stay protected); the view
+      // shows the first few so one long-compacted note can't flood every turn.
       const basis = [...n.cites, ...(n.sources || [])]
-      const cite = basis.length ? ` [${basis.join(',')}]` : ''
+      const shown = basis.length > BASIS_SHOWN ? `${basis.slice(0, BASIS_SHOWN).join(',')} +${basis.length - BASIS_SHOWN} more` : basis.join(',')
+      const cite = basis.length ? ` [${shown}]` : ''
       lines.push(`${n.id}${at} ${n.text}${cite}`)
     }
     return lines.join('\n')
@@ -143,6 +148,7 @@ class Journal {
       if (n.sources) continue
       try { Object.assign(n, j._reparse(n)) } catch { n.sources = [] }
     }
+    for (const n of j.notes) n.sources = j._liveSources(n.sources)
     j.rseq = data.rseq || 0
     j.nseq = data.nseq || 0
     j.cursor = data.cursor || 0
@@ -167,6 +173,18 @@ class Journal {
     const missing = cites.filter(c => !known.has(c))
     if (missing.length) throw new JournalError(`unknown record(s) ${missing.join(',')} — cite ids from NEW=`)
     return { body, cites, sources }
+  }
+
+  // Drop references to notes that no longer exist ("n8", "n3-n9"); keep the rest.
+  _liveSources(sources) {
+    const live = new Set(this.notes.map(n => num(n.id)))
+    return sources.filter(src => {
+      const m = /^n(\d+)(?:-n?(\d+))?$/.exec(src)
+      if (!m) return true
+      const a = Number(m[1]), b = m[2] ? Number(m[2]) : a
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (live.has(i)) return true
+      return false
+    })
   }
 
   _reparse(n) {
