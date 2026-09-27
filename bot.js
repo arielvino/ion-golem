@@ -447,6 +447,7 @@ function createBot() {
         const pos = bot.entity?.position
         const cause = msg.replace(bot.username + ' ', '')
         logGameEvent('death', cause, 1, pos ? Math.floor(pos.x) : null, pos ? Math.floor(pos.y) : null, pos ? Math.floor(pos.z) : null, { message: msg })
+        if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
         state.messageQueue.push({
           username: 'event',
           message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`,
@@ -462,6 +463,7 @@ function createBot() {
     console.log(color(c.yellow, `\n  [EVENT] ${msg}`))
     logChatDB('event', eventPlayer || null, msg)
     const histKey = state.lastActionUsername || 'self'
+    if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
     state.messageQueue.push({
       username: 'event',
       message: `[GAME EVENT] ${msg}`,
