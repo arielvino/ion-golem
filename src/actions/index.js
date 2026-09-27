@@ -14,6 +14,7 @@ const { doSmelt } = require('./smelting')
 const { doWiki } = require('./info')
 const { doUse, doFill } = require('./interaction')
 const { doEval } = require('./eval')
+const { doDigDown, doJumpDown } = require('./descend')
 const { switchPersonality } = require('../ai/ai')
 const ranges = require('../config/ranges')
 
@@ -22,7 +23,7 @@ const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack
 
 // Digging actions that accept a chained `:skiptool` suffix — the AI's escalation
 // to hand-mine through a tool-gated block instead of stopping to craft the tool.
-const SKIPTOOL_ACTIONS = new Set(['mine', 'goto', 'goto~', 'goto!', 'digto', 'come', 'staircase', 'tunnel', 'build', 'place'])
+const SKIPTOOL_ACTIONS = new Set(['mine', 'goto', 'goto~', 'goto!', 'digto', 'come', 'staircase', 'tunnel', 'digdown', 'build', 'place'])
 
 async function executeAction(actionStr, username, opts = {}) {
   // Pull a `skiptool` token out of the args wherever it sits (position-independent,
@@ -96,6 +97,8 @@ async function executeAction(actionStr, username, opts = {}) {
       case 'face': result = await doTurn(target); break
       case 'fill': result = await doFill(target); break
       case 'swimup': result = await doSwimUp(); break
+      case 'digdown': result = await doDigDown(target, { skipTool }); break
+      case 'jumpdown': result = await doJumpDown(target); break
       case 'use': result = await doUse(target); break
       case 'eval': result = await doEval(target); break
       case 'require': result = await doRequire(target); break
