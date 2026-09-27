@@ -30,6 +30,10 @@ function getBotContext(chatUsername) {
   const nearby = Object.values(bot.entities)
     .filter(e => e !== bot.entity && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
+    // Players first, then nearest: the cap below must never drop the player or
+    // a close mob in favour of a far horse.
+    .sort((a, b) => (!!b.username - !!a.username) || (a.position.distanceTo(pos) - b.position.distanceTo(pos)))
+    .slice(0, 15)
     .map(e => {
       let n = e.username || e.name || '?'
       if (e.username) visibleUsernames.add(e.username)
@@ -54,7 +58,7 @@ function getBotContext(chatUsername) {
       }
       const equipStr = equipParts.length > 0 ? `,${equipParts.join(',')}` : ''
       return `${n}${coord}(${dist}${equipStr})`
-    }).slice(0, 15).join(', ') || 'none'
+    }).join(', ') || 'none'
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
   const facingDirs = ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE']

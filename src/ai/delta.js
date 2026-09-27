@@ -43,8 +43,8 @@ function renderDelta(prev, cur) {
 
   const came = cur.seen.filter(n => !prev.seen.includes(n))
   const went = prev.seen.filter(n => !cur.seen.includes(n))
-  if (came.length) parts.push(`in view: ${came.join(', ')}`)
-  if (went.length) parts.push(`out of view: ${went.join(', ')}`)
+  if (came.length) parts.push(`new nearby: ${came.join(', ')}`)
+  if (went.length) parts.push(`gone from nearby: ${went.join(', ')}`)
 
   return parts.length ? `since last turn (${secs}s): ${parts.join(' | ')}` : `nothing changed in ${secs}s`
 }

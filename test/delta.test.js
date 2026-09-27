@@ -18,7 +18,7 @@ test('a fall, an item change and a mob coming into view read as one line', () =>
     held: 'copper_pickaxe', task: 'bg:goto', seen: ['cow', 'zombie'], now: 13000 })
   assert.strictEqual(renderDelta(a, b),
     'since last turn (12s): moved 108,118,108→109,101,108 (17m, -17y) | HP 19→5 | -2 dirt, +1 copper_pickaxe | ' +
-    'held stone_pickaxe→copper_pickaxe | task idle→bg:goto | in view: zombie | out of view: Sargon564')
+    'held stone_pickaxe→copper_pickaxe | task idle→bg:goto | new nearby: zombie | gone from nearby: Sargon564')
 })
 
 test('a running task is the same task while only its timer moves', () => {
