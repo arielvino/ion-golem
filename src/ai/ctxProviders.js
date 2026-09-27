@@ -24,6 +24,7 @@ const { queryRegion, queryBlockMemoryFuzzy, searchContainersFor } = require('../
 const { getLastSurvey } = require('../perception/visibility')
 const { HAZARDS, RESOURCES, WATER_BLOCKS } = require('../config/blocks')
 const { PAST_PROVIDERS } = require('./ctxPast')
+const { DIRS, measureFall, damageOf } = require('../navigation/fall')
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 const intArg = (v, def) => {
@@ -272,6 +273,80 @@ function find(args) {
   return `find "${needle}" — every source, most reliable first:\n${lines.join('\n')}`
 }
 
+// ── around ───────────────────────────────────────────────────────────────
+// The bot's immediate surroundings: a 5x5 block, 2 above the feet to 3 below, drawn
+// as six small layers, plus what each side does to someone stepping that way. This
+// is the view for "why can't I move": a pillar, a ledge, a pit or a walled-in spot
+// reads off it at a glance, where a long slice buries it in terrain.
+function around() {
+  const bot = state.bot
+  const p = bot.entity.position.floored()
+  const R = 2, UP = 2, DOWN = 3
+  const cells = new Map()
+  for (const b of queryRegion(p.x - R, p.y - DOWN, p.z - R, p.x + R, p.y + UP, p.z + R)) cells.set(`${b.x},${b.y},${b.z}`, b.name)
+  const at = (x, y, z) => cells.get(`${x},${y},${z}`) ?? null
+  const glyph = (n) => {
+    if (!n) return '?'
+    if (AIR.has(n)) return '.'
+    if (HAZARDS.has(n)) return '!'
+    if (WATER_BLOCKS.has(n)) return '~'
+    if (COVER.has(n)) return ','
+    return '#'
+  }
+
+  const layers = []
+  for (let dy = UP; dy >= -DOWN; dy--) {
+    const rows = []
+    for (let dz = -R; dz <= R; dz++) {
+      let line = ''
+      for (let dx = -R; dx <= R; dx++) {
+        const me = dx === 0 && dz === 0 && (dy === 0 || dy === 1)
+        line += me ? '@' : glyph(at(p.x + dx, p.y + dy, p.z + dz))
+      }
+      rows.push(line)
+    }
+    layers.push({ label: `y${p.y + dy}${dy === 0 ? '(feet)' : ''}`, rows })
+  }
+  const w = 11
+  const grid = [layers.map(l => l.label.padEnd(w)).join('')]
+  for (let r = 0; r < 2 * R + 1; r++) grid.push(layers.map(l => l.rows[r].padEnd(w)).join(''))
+
+  // What stepping each way does, from the DB (the same fall measure digdown uses).
+  const pass = (n) => n !== null && (AIR.has(n) || COVER.has(n))
+  const sides = []
+  let drops = 0
+  for (const [name, [dx, dz]] of Object.entries(DIRS)) {
+    const x = p.x + dx, z = p.z + dz
+    const foot = at(x, p.y, z), head = at(x, p.y + 1, z)
+    let s
+    if (foot === null || head === null) s = 'unseen'
+    else if (!pass(foot)) s = pass(head) && pass(at(x, p.y + 2, z)) ? `step up onto ${foot}` : `wall (${foot})`
+    else if (!pass(head)) s = `blocked at head height (${head})`
+    else {
+      const f = measureFall(x, p.y, z)
+      if (f.hazard) s = `drop ${f.blocks} into ${f.hazard}`
+      else if (f.unknown) s = f.blocks === 0 ? 'open, ground unseen' : `drop ≥${f.blocks}, landing unseen`
+      else if (f.blocks === 0) s = 'walkable'
+      else if (f.water) s = `drop ${f.blocks} into water`
+      else if (f.blocks <= 3) s = `step down ${f.blocks}`
+      else s = `drop ${f.blocks} → ${f.landing} y${f.at} (~${damageOf(f)} dmg)`
+      if (f.blocks > 3) drops++
+    }
+    sides.push(`${name}: ${s}`)
+  }
+  const floor = at(p.x, p.y - 1, p.z)
+  const under = measureFall(p.x, p.y, p.z, 1)
+  const below = floor === null ? 'floor unseen'
+    : `floor ${floor}; breaking it: ${under.unknown ? `drop ≥${under.blocks}, then unseen` : `drop ${under.blocks} → ${under.landing ?? '?'} y${under.at}`}`
+
+  const out = [`around ${p.x},${p.y},${p.z} — layers top→bottom, each 5x5: rows north→south, columns west→east, @ = you`, ...grid]
+  out.push(sides.join(' | '))
+  out.push(`under you: ${below}`)
+  if (drops === 4) out.push('every side drops more than 3 blocks — you are on a pillar or a peak')
+  else if (drops > 0) out.push(`${drops} of 4 sides drop more than 3 blocks`)
+  return out.join('\n')
+}
+
 const PROVIDERS = {
   heightmap: {
     usage: 'heightmap[:radius]        terrain height grid, radius 1-16 (default 8)',
@@ -284,6 +359,10 @@ const PROVIDERS = {
   find: {
     usage: 'find:<name>[:limit]       one material across inventory/view/containers/memory',
     render: find,
+  },
+  around: {
+    usage: 'around                    your 5x5 surroundings, 2 up to 3 down, and what each side does (walk, step, drop, wall)',
+    render: around,
   },
   ...PAST_PROVIDERS,
 }

@@ -429,7 +429,7 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
 
   const mode = navMode()
   const stepResult = await liveStep(bot, sx, sz, { mode })
-  if (!stepResult.ok) { console.log(`  tunnelStep: liveStep blocked (${stepResult.type})`); return false }
+  if (!stepResult.ok) { console.log(`  tunnelStep: liveStep blocked (${stepResult.type})`); ctx.why = `next step blocked (${stepResult.type})`; return false }
 
   // Record floor block as path
   const afterPos = bot.entity.position
@@ -555,6 +555,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       const placeableSlot = bot.inventory.items().find(i => isPlaceable(i.name))
       if (!placeableSlot) {
         console.log('  stairUp: no blocks for step')
+        ctx.why = 'no placeable blocks to build a step up'
         return false
       }
       const placedName = await placeBlockAt(placeableSlot, stepPos)
@@ -586,6 +587,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     const upResult = await liveStep(bot, stepX, stepZ, { mode: upMode })
     if (!upResult.ok) {
       console.log(`  stairUp: liveStep failed (${upResult.type})`)
+      ctx.why = `step up blocked (${upResult.type})`
       return false
     }
     bot.clearControlStates()
@@ -621,6 +623,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       const below2 = bot.blockAt(new Vec3(cx + stepX, curY - 2, cz + stepZ))
       if (below2 && HAZARDS.has(below2.name)) {
         console.log('  staircaseDown: hazard below, aborting')
+        ctx.why = `${below2.name} under the next step`
         return false
       }
     }
@@ -631,6 +634,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       const below3 = bot.blockAt(new Vec3(cx + stepX, curY - 3, cz + stepZ))
       if (!below3 || TRANSPARENT.has(below3.name)) {
         console.log('  staircaseDown: no floor below, too deep to drop')
+        ctx.why = 'no floor ahead — open drop of 3+ blocks, nothing to cut a step into'
         return false
       }
     }
@@ -650,7 +654,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     // Step forward into the gap — bot drops 1 block
     const downMode = navMode()
     const downStep = await liveStep(bot, stepX, stepZ, { mode: downMode })
-    if (!downStep.ok) { console.log('  staircaseDown: liveStep blocked'); return false }
+    if (!downStep.ok) { console.log('  staircaseDown: liveStep blocked'); ctx.why = `next step down blocked (${downStep.type})`; return false }
     await sleep(200) // let physics settle after drop
 
     const afterY = Math.round(bot.entity.position.y)
@@ -1200,7 +1204,7 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
     if (p > best + 0.5) { stuck = 0; best = p }
     else if (++stuck >= stuckLimit) {
       console.log(color(c.red, `  runStrategy[${name}]: stuck — ${stuckLimit} steps with no progress (${goal.desc})`))
-      return { ok: false, reason: 'stuck' }
+      return { ok: false, reason: 'stuck', why: ctx.why }
     }
   }
 }
@@ -1238,7 +1242,7 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
     const at = `at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
     state.navFailReason = res.reason === 'need_tool'
       ? `${stratName} stopped: ${res.block || 'a block'} needs a ${res.need || 'better tool'} — hand-mining it drops nothing. Craft/equip one and re-issue, or append :skiptool to hand-mine through it anyway. ${at}`
-      : `${stratName} ${res.reason} (${goal.desc}), ${at}`
+      : `${stratName} ${res.reason}${res.why ? ` — ${res.why}` : ''} (${goal.desc}), ${at}`
     console.log(color(c.red, `  nav: ${state.navFailReason}`))
   }
   return res.ok

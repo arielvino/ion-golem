@@ -1,4 +1,4 @@
-// Fall measurement for digdown/jumpdown (src/actions/descend.js), against a
+// Fall measurement for digdown/jumpdown and [CTX:around] (src/navigation/fall.js), against a
 // throwaway DB built with the real schema. Run: node --test
 const test = require('node:test')
 const assert = require('node:assert')
@@ -7,7 +7,7 @@ const os = require('os')
 const path = require('path')
 const state = require('../src/core/state')
 const memory = require('../src/world/memory')
-const { measureFall, neighbourFall, damageOf } = require('../src/actions/descend')
+const { measureFall, neighbourFall, damageOf } = require('../src/navigation/fall')
 
 state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'descend-'))
 memory.initDB()

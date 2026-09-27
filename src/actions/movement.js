@@ -478,8 +478,8 @@ async function doStaircase(arg, opts = {}) {
   state.currentTask = `staircase ${dirName} until ${u.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await digHeading('staircase', dir, { pattern, until: u.fn, untilDesc: u.desc }, { intent })
-  if (!ok && !isAborted()) pushFail(`staircase:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
+  if (!ok && !isAborted()) { pushFail(`staircase:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
 }
 
 async function doMove(arg) {
@@ -491,8 +491,8 @@ async function doMove(arg) {
   if (!u) { pushFail(`move: bad/missing condition "${untilStr}" (use wall or Nsteps)`); return }
   state.currentTask = `move ${dirName} until ${u.desc}`
   const ok = await digHeading('move', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc })
-  if (!ok && !isAborted()) pushFail(`move:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
+  if (!ok && !isAborted()) { pushFail(`move:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
 }
 
 // Directional tunnel: dig a flat (same-Y) corridor heading DIR until a runtime
@@ -513,8 +513,8 @@ async function doTunnel(arg, opts = {}) {
   state.currentTask = `tunnel ${dirName} until ${u.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await digHeading('tunnel', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc }, { intent })
-  if (!ok && !isAborted()) pushFail(`tunnel:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
+  if (!ok && !isAborted()) { pushFail(`tunnel:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
 }
 
 const COMPASS_OFFSETS = {
