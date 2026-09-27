@@ -127,11 +127,12 @@ class Journal {
   }
 
   // Multi-line NOTES block, or '' with no notes.
-  renderNotes(compactHint = 20, now = Date.now()) {
+  // nodeLabel turns a note's node id into its shown form (e.g. 'g2(done 1m ago)').
+  renderNotes(compactHint = 20, now = Date.now(), nodeLabel = id => id) {
     if (this.notes.length === 0) return ''
     const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: consider [NOTE:compact:...]' : ''}:`]
     for (const n of this.notes) {
-      const at = n.node ? ` @${n.node}` : ''
+      const at = n.node ? ` @${nodeLabel(n.node)}` : ''
       // The full basis stays stored (cited records stay protected); the view
       // shows the first few so one long-compacted note can't flood every turn.
       const basis = [...n.cites, ...(n.sources || [])]

@@ -162,3 +162,26 @@ test('ago reads like a person says it', () => {
   const { ago } = require('../src/world/journal')
   assert.deepStrictEqual([ago(40e3), ago(7 * 60e3), ago(125 * 60e3), ago(76 * 3600e3)], ['40s', '7m', '2h05m', '3d4h'])
 })
+
+test('a note written as its goal closes keeps pointing at it, and shows how it ended', () => {
+  const state = require('../src/core/state')
+  const { applyNoteTags, currentNode, renderNotesBlock } = require('../src/world/journalStore')
+  const { Agenda } = require('../src/engine/agenda')
+  const planOps = require('../src/engine/planOps')
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.BOT_DATA_DIR }
+  state.BOT_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jclosed-'))
+  state.journal = new Journal()
+  state.journal.record('come: reached Sargon564')
+  state.agenda = new Agenda()
+  const g = state.agenda.push('come to Sargon564', { owner: 'Sargon564' })
+  applyNoteTags('[NOTE:Sargon asked again]')
+  // The reply that closes the goal and notes it: plan tags apply first.
+  const before = currentNode()
+  planOps.apply(state.agenda, planOps.parse(`done:${g.id}`), 'self')
+  applyNoteTags('[NOTE:compact:n1:reached Sargon564 [r1]]', before)
+  assert.strictEqual(state.journal.notes[0].node, g.id)
+  assert.match(renderNotesBlock(), new RegExp(`^n2 @${g.id}\\(done 0s ago\\) \\(0s ago\\) reached Sargon564`, 'm'))
+  // Survives a save/load of the agenda.
+  assert.deepStrictEqual(Agenda.fromJSON(JSON.parse(JSON.stringify(state.agenda))).nodeState(g.id).status, 'done')
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, BOT_DATA_DIR: saved.dir })
+})

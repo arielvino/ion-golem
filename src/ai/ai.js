@@ -4,7 +4,7 @@ const path = require('path')
 const state = require('../core/state')
 const { getBotContext } = require('./context')
 const { applyPlanTags, agendaTitles } = require('../engine/tasks')
-const { applyNoteTags, markShown, recordTurn, logWhy } = require('../world/journalStore')
+const { applyNoteTags, markShown, recordTurn, logWhy, currentNode } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
@@ -130,11 +130,12 @@ async function handleMessage(username, message, historyAs) {
   function processTags(rawReply) {
     // [PLAN:op:...] — agenda and goal-tree edits (engine/planOps.js). Ownership
     // follows the speaker: a player's turn acts as that player, anything else as 'self'.
+    const nodeBefore = currentNode()
     const planApplied = applyPlanTags(rawReply, isPlayerMessage ? username : 'self')
     if (planApplied.length) console.log(color(c.magenta, `\n  [PLAN] ${planApplied.join('; ')}\n`))
 
     // [NOTE:...] — the model's running story (world/journal.js).
-    const notesApplied = applyNoteTags(rawReply)
+    const notesApplied = applyNoteTags(rawReply, nodeBefore)
     if (notesApplied.length) console.log(color(c.magenta, `  [NOTE] ${notesApplied.join('; ')}`))
     markShown()
 

@@ -20,11 +20,15 @@
 const { GoalTree, GoalTreeError } = require('./goalTree')
 
 const LIVE = new Set(['open', 'verify'])
+const CLOSED_KEPT = 300
 
 class Agenda {
   constructor(tree) {
     this.tree = tree || new GoalTree()
     this.entries = [] // { id: rootGoalId, owner, ongoing }
+    // Nodes of trees that have left the agenda: id → { root, status, at }. Notes
+    // keep pointing at their goal after it is gone; this says how it ended.
+    this.closed = {}
   }
 
   // ---- ordering ----
@@ -47,14 +51,14 @@ class Agenda {
     if (e.owner !== 'self' && by !== e.owner) {
       throw new GoalTreeError(`${rootId} belongs to ${e.owner}; only they can cancel it`)
     }
-    this._drop(rootId)
+    this._drop(rootId, 'cancelled')
     return e
   }
 
   // Drop entries whose root the model has confirmed done. Returns them.
   prune() {
     const done = this.entries.filter(e => this.tree.nodes.get(e.id).status === 'done')
-    for (const e of done) this._drop(e.id)
+    for (const e of done) this._drop(e.id, 'done')
     return done
   }
 
@@ -63,6 +67,14 @@ class Agenda {
   focus() {
     const e = this.entries.find(e => LIVE.has(this.tree.nodes.get(e.id).status))
     return e ? this.tree.nodes.get(e.id) : null
+  }
+
+  // How a node stands, for a note that points at it: null while it is open (or
+  // unknown), else { status, root, at } — at is when it closed, if it has left.
+  nodeState(id) {
+    const n = this.tree.nodes.get(id)
+    if (n) return ['done', 'failed'].includes(n.status) ? { status: n.status, root: id } : null
+    return this.closed[id] || null
   }
 
   // Legacy task-stack view: the active path through the focused tree.
@@ -97,12 +109,13 @@ class Agenda {
   // ---- persistence ----
 
   toJSON() {
-    return { tree: this.tree.toJSON(), entries: this.entries }
+    return { tree: this.tree.toJSON(), entries: this.entries, closed: this.closed }
   }
 
   static fromJSON(data) {
     const a = new Agenda(GoalTree.fromJSON(data?.tree))
     a.entries = (data?.entries || []).filter(e => a.tree.nodes.has(e.id))
+    a.closed = data?.closed || {}
     return a
   }
 
@@ -121,8 +134,17 @@ class Agenda {
     return i
   }
 
-  _drop(rootId) {
+  _drop(rootId, status) {
     this.entries.splice(this._index(rootId), 1)
+    const at = Date.now()
+    const mark = (id) => {
+      const n = this.tree.nodes.get(id)
+      this.closed[id] = { root: rootId, status, at }
+      for (const c of n.kind === 'goal' ? n.strategies : n.goals) mark(c)
+    }
+    mark(rootId)
+    const ids = Object.keys(this.closed)
+    for (const id of ids.slice(0, Math.max(0, ids.length - CLOSED_KEPT))) delete this.closed[id]
     this.tree.removeRoot(rootId)
   }
 }
