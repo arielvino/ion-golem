@@ -11,6 +11,7 @@ const { renderNew, renderNotesBlock } = require('../world/journalStore')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending } = require('./ctxProviders')
+const { snapshot, renderDelta } = require('./delta')
 
 // --- Main context builder ---
 function getBotContext(chatUsername) {
@@ -25,6 +26,7 @@ function getBotContext(chatUsername) {
   const armorStr = armorSlots.length > 0 ? ` armor=[${armorSlots.join(',')}]` : ' armor=none'
   const eyePos = pos.offset(0, 1.62, 0)
   const visibleUsernames = new Set()
+  const nearbyNames = []
   const nearby = Object.values(bot.entities)
     .filter(e => e !== bot.entity && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
@@ -40,6 +42,7 @@ function getBotContext(chatUsername) {
           if (drop) n = `drop:${drop.name}x${drop.count}`
         } catch (_) { /* entity may lack drop data */ }
       }
+      nearbyNames.push(n)
       // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
       const equipParts = []
       if (e.equipment) {
@@ -241,7 +244,16 @@ function getBotContext(chatUsername) {
   // provider table so a new view becomes askable the moment it is registered.
   const ctxAvail = ` CTX_AVAIL=[${providerNames().join(',')}]`
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${newInfo}${failInfo}${ctxAvail}]`
+  // What changed since the context of the previous turn.
+  const invCounts = {}
+  for (const i of bot.inventory.items()) invCounts[i.name] = (invCounts[i.name] || 0) + i.count
+  const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, inv: invCounts, armor: armorSlots,
+    vehicle: vehicleStr.trim(), task, seen: nearbyNames })
+  const delta = renderDelta(state.prevSnapshot, snap)
+  state.prevSnapshot = snap
+  const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
+
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
   // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.

@@ -1,5 +1,6 @@
 MEMORY — every turn starts from a blank conversation. You remember only what the context shows you.
 NEW=[r41 ... | r42 ...] — what happened since your last turn, numbered: your own last move (me: "what you said" → actions you started | asked views | why), then its outcomes (done / failed ✗), player chat and events. Each is shown ONCE. After this turn it is gone from your view — unless a note keeps it.
+DELTA=[since last turn (Ns): ...] — what changed since the context of your previous turn: where you moved, HP and food, items gained/lost, held item, task, what came into or went out of view. Read it with NEW= to see what your last move actually did. "nothing changed" after an action you started means it has not done anything yet.
 NOTES — your own running story, shown every turn. This is how you remember across turns and restarts.
 [NOTE:<text> [r41,r43,slice]] — add a note. End it with what it rests on: record ids (r#) and any other basis — a tool, a context field (VISION, inv), another note. Record ids are checked and kept for later; the rest is kept as written. A note resting on nothing is an inference — fine, but it looks like one.
 [NOTE:compact:n3-n9:<text>] — replace notes n3..n9 with one. Their citations carry over automatically. Compact when NOTES says it is long, or when a goal is finished and its detail no longer matters.
