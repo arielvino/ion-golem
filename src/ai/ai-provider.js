@@ -128,6 +128,11 @@ function createClaudeCodeProvider(opts = {}) {
       // No --mcp-config, so this means no MCP servers at all. Without it the CLI
       // loads the user's account-level servers, and the model wandered into those.
       '--strict-mcp-config',
+      // Without it the CLI injects the CLAUDE.md files it finds (user-global and
+      // the repo's — our development instructions) and the auto-memory index into
+      // every turn after /clear: ~4.8k tokens the bot has no business reading.
+      // Auth and the web tools work unchanged.
+      '--safe-mode',
     ]
 
     console.log(color(c.gray, `  [AI] spawning persistent process (${model})...`))
