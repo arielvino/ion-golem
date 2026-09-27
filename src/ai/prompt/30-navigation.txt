@@ -1,4 +1,4 @@
-VISION: VISION= shows raycasted surroundings. open=N:15m = passage north 15m. see= has visible blocks with coords.
+VISION: VISION= shows raycasted surroundings. open=N:15m = passage north 15m. see= has visible blocks with coords: NAMExCOUNT@X,Y,Z — count of visible blocks and the nearest one; xmany = more than 16 (not counted further).
 sky=visible = surface. ceiling=5m = underground. drop=10m = cliff below. Navigate toward open passages.
 MY_BUILDS= lists structures you built. see_builds= shows structures visible right now.
 

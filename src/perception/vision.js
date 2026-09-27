@@ -455,7 +455,7 @@ function formatVision(v, opts = {}) {
     const blockStrs = entries.slice(0, 20).map(([name, r]) => {
       const at = r.nearest
       return r.count > 1
-        ? `${_shorten(name)}x${r.count}@${at.x},${at.y},${at.z}`
+        ? `${_shorten(name)}x${r.many ? 'many' : r.count}@${at.x},${at.y},${at.z}`
         : `${_shorten(name)}@${at.x},${at.y},${at.z}`
     })
     if (blockStrs.length) parts.push(`see=[${blockStrs.join(',')}]`)
