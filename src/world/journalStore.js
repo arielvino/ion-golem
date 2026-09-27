@@ -83,6 +83,36 @@ function applyNoteTags(rawReply) {
   return applied
 }
 
+// One record per reply: what the bot said, what it set in motion and why. Its
+// outcome arrives as records of its own, so next turn the model reads the move
+// and its result side by side — and knows what it was waiting for.
+//   me: "Digging down." → mine:dirt:108,83,80 | asked slice:ns | why: pillar over a cavern
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+function formatTurn({ said, actions = [], views = [], why }) {
+  const parts = []
+  if (said) parts.push(`me: "${clip(said.replace(/\s+/g, ' ').trim(), 220)}"`)
+  if (actions.length) parts.push(`${parts.length ? '→ ' : ''}${actions.join(', ')}`)
+  const tail = []
+  if (views.length) tail.push(`asked ${views.join(', ')}`)
+  if (why) tail.push(`why: ${clip(why.trim(), 220)}`)
+  if (!parts.length && !tail.length) return ''
+  return [parts.join(' '), ...tail].filter(Boolean).join(' | ')
+}
+
+// The "why" of a [LOG:why; used=...; missing=...] tag.
+function logWhy(rawReply) {
+  const m = /\[LOG:([^\]]*)\]/.exec(rawReply)
+  return m ? m[1].split(/;\s*used=/)[0].trim() : ''
+}
+
+function recordTurn(turn) {
+  if (!state.journal) return
+  const text = formatTurn(turn)
+  if (!text) return
+  state.journal.record(text)
+  saveJournal()
+}
+
 // After a reply: the NEW= records it was shown are now seen.
 function markShown() {
   if (!state.journal || !state.journalShownUpTo) return
@@ -90,4 +120,4 @@ function markShown() {
   saveJournal()
 }
 
-module.exports = { loadJournal, saveJournal, renderNew, renderNotesBlock, applyNoteTags, markShown, NOTE_TAG }
+module.exports = { loadJournal, saveJournal, renderNew, renderNotesBlock, applyNoteTags, markShown, recordTurn, formatTurn, logWhy, NOTE_TAG }

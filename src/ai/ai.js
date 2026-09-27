@@ -4,7 +4,7 @@ const path = require('path')
 const state = require('../core/state')
 const { getBotContext } = require('./context')
 const { applyPlanTags, agendaTitles } = require('../engine/tasks')
-const { applyNoteTags, markShown } = require('../world/journalStore')
+const { applyNoteTags, markShown, recordTurn, logWhy } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, isPseudoUsername, resolvePlayerName } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
@@ -336,6 +336,13 @@ async function handleMessage(username, message, historyAs) {
     if (pendingActions.length > 0) {
       console.log(color(c.green, `\n  -> ${pendingActions.length} action(s): ${pendingActions.join(' → ')}${streamed ? ` (${streamed} started mid-reply)` : ''}`))
     }
+
+    recordTurn({
+      said: chatText && !/^[.\s…]+$/.test(chatText) ? chatText : '',
+      actions: pendingActions,
+      views: [...fullText.matchAll(/\[CTX:([^\]]+)\]/g)].map(m => m[1].trim()),
+      why: logWhy(fullText),
+    })
   }
 
   // Log player chat to event history

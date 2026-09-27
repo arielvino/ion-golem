@@ -1,17 +1,19 @@
 MEMORY — every turn starts from a blank conversation. You remember only what the context shows you.
-NEW=[r41 ... | r42 ...] — facts recorded since your last turn (action outcomes, failures ✗, player chat), numbered. Each is shown ONCE. After this turn it is gone from your view.
+NEW=[r41 ... | r42 ...] — what happened since your last turn, numbered: your own last move (me: "what you said" → actions you started | asked views | why), then its outcomes (done / failed ✗), player chat and events. Each is shown ONCE. After this turn it is gone from your view — unless a note keeps it.
 NOTES — your own running story, shown every turn. This is how you remember across turns and restarts.
 [NOTE:<text> [r41,r43,slice]] — add a note. End it with what it rests on: record ids (r#) and any other basis — a tool, a context field (VISION, inv), another note. Record ids are checked and kept for later; the rest is kept as written. A note resting on nothing is an inference — fine, but it looks like one.
 [NOTE:compact:n3-n9:<text>] — replace notes n3..n9 with one. Their citations carry over automatically. Compact when NOTES says it is long, or when a goal is finished and its detail no longer matters.
 
-WRITE THE NOTE FIRST — put [NOTE:...] at the very start of your reply, the moment you conclude something, before any tool call or action. A reply can be cut short; a conclusion written last is a conclusion lost, and next turn you would have to work it out all over again.
-
-WHAT TO NOTE — the answers you would otherwise go looking for next turn. Conclusions, not a replay of events:
+YOU DECIDE WHAT YOU CARRY FORWARD. Every record fades after one showing; what you note stays. Ask each turn: "what will future-me need to reach the goals?" — and keep that, like a person keeps things in mind while working. Not only conclusions:
+- what you are in the middle of and what comes next ("digging down the pillar at 108,84,80; once on the cavern floor, head east to the stone at 134,55,95 [r91]") — answers "why am I doing this?"
+- what you are waiting for and why you asked ("asked slice:ns to see if the shaft floods; if it does, go west instead [r95]")
 - attempts and their outcome, per strategy ("s6 staircase west from -47,52,49: flooded at y50 twice — abandoned [r41,r43]") — answers "have I tried this already?"
-- places explored and what they held ("dug around -47,52,49 r6: stone and andesite only, water pocket at y50 [r50]") — answers "is this area worth searching?"
+- places explored and what they held ("dug around -47,52,49: stone and andesite only, water pocket at y50 [r50]")
 - where useful things are ("crafting table at -40,67,41; furnace next to it [r88]")
-- player instructions still in force ("Sargon: stop and wait until told [r12]") — until they are lifted
-- where you left off and what comes next ("heading north to find a cave entrance [r60]") — answers "why am I idle?"
-Skip anything the live snapshot already shows (inv=, pos, HP, AGENDA). Most turns need no note; a turn where you learned something does.
+- what players asked, what you promised or told them, and instructions still in force ("told Sargon the pickaxe needs copper I haven't found yet [r97]"; "Sargon: stop and wait until told [r12]")
+- hunches worth testing, and assumptions you are acting on ("guessing the drop is ~17 blocks — unverified")
+Skip what the live snapshot already shows (inv=, pos, HP, AGENDA). When a note stops mattering, compact or drop it — a note that no longer helps is noise.
+
+WRITE THE NOTE FIRST — put [NOTE:...] at the very start of your reply, before any action. A reply can be cut short; a thought written last is a thought lost.
 
 CATCHING UP — NOTES plus the context are your memory; the PAST VIEWS are not a way to rebuild it every turn. The one exception: when the journal has just started (its first record says so) but the past views show an older past, spend ONE turn requesting the views that matter ([CTX:tasks], [CTX:chat], [CTX:events]) and, when they arrive, write what matters as notes. After that, trust the notes — if a question keeps sending you to the views, the answer belongs in a note.

@@ -101,3 +101,15 @@ test('lookup resolves ids and ranges, and says which records are gone', () => {
   assert.throws(() => j.lookup('n4'), /bad record id/)
   assert.throws(() => j.lookup('r1-r500'), /at most/)
 })
+
+test('a turn record carries what was said, set in motion, asked for, and why', () => {
+  const { formatTurn, logWhy } = require('../src/world/journalStore')
+  const why = logWhy('Digging. [LOG:pillar over a cavern, no wall to stair into; used=n52,pos; missing=none] [ACTION:mine:dirt]')
+  assert.strictEqual(why, 'pillar over a cavern, no wall to stair into')
+  assert.strictEqual(
+    formatTurn({ said: 'Digging  down.', actions: ['mine:dirt:108,83,80', 'goto:108,75,80'], views: ['slice:ns'], why }),
+    'me: "Digging down." → mine:dirt:108,83,80, goto:108,75,80 | asked slice:ns | why: pillar over a cavern, no wall to stair into')
+  assert.strictEqual(formatTurn({ said: 'Still digging.' }), 'me: "Still digging."')
+  assert.strictEqual(formatTurn({ actions: ['stop'] }), 'stop')
+  assert.strictEqual(formatTurn({}), '')
+})
