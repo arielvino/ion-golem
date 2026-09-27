@@ -20,3 +20,11 @@ test('a fall, an item change and a mob coming into view read as one line', () =>
     'since last turn (12s): moved 108,118,108→109,101,108 (17m, -17y) | HP 19→5 | -2 dirt, +1 copper_pickaxe | ' +
     'held stone_pickaxe→copper_pickaxe | task idle→bg:goto | in view: zombie | out of view: Sargon564')
 })
+
+test('a running task is the same task while only its timer moves', () => {
+  const a = snapshot({ ...base, task: 'bg:goto:1,2,3 (0s, cardinal walking toward 1,2,3)' })
+  const b = snapshot({ ...base, task: 'bg:goto:1,2,3 (13s, cardinal walking toward 1,2,3)', now: 14000 })
+  assert.strictEqual(renderDelta(a, b), 'nothing changed in 13s')
+  const c = snapshot({ ...base, task: 'bg:goto:1,2,3 (22s, tunneling toward 1,2,3)', now: 23000 })
+  assert.match(renderDelta(b, c), /task bg:goto:1,2,3 \(cardinal walking toward 1,2,3\)→bg:goto:1,2,3 \(tunneling toward 1,2,3\)/)
+})

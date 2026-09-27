@@ -8,7 +8,9 @@ function snapshot({ pos, hp, food, held, inv, armor, vehicle, task, seen, now = 
   return {
     t: now,
     pos: { x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) },
-    hp: Math.round(hp), food: Math.round(food), held, task, vehicle,
+    // A running task shows its elapsed time ('bg:goto:… (13s, walking)'); drop it,
+    // or the same task reads as changed every turn.
+    hp: Math.round(hp), food: Math.round(food), held, task: String(task).replace(/\(\d+s,\s*/, '('), vehicle,
     inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(),
   }
 }
