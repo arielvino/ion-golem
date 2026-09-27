@@ -6,7 +6,7 @@ const { getBotContext } = require('./context')
 const { applyPlanTags, agendaTitles } = require('../engine/tasks')
 const { applyNoteTags, markShown, recordTurn, logWhy } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
-const { sendChat, debugChat, logEvent } = require('../core/utils')
+const { sendChat, debugChat } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
 const { logChatDB } = require('../world/memory')
 const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
@@ -117,8 +117,14 @@ async function handleMessage(username, message, historyAs) {
   const histKey = historyAs || username
   const isPlayerMessage = username !== 'self' && username !== 'event'
   const isMonitorCall = username === 'self' && typeof message === 'string' && message.startsWith('[MONITOR]')
+  // A player's message becomes its record BEFORE the context is built, so it sits
+  // in this turn's NEW= with its own r# and the line below points at it. Recorded
+  // after, it showed up unnumbered now and again as a record next turn — and a
+  // repeated "come here" read as the old one echoed back.
+  const said = isPlayerMessage ? state.journal?.record(`${username}: "${message}"`) : null
   const context = getBotContext()
-  addToHistory(histKey, 'user', `${context}\n${username}: ${message}`)
+  const speaker = said ? `${username} just said (${said.id})` : username
+  addToHistory(histKey, 'user', `${context}\n${speaker}: ${message}`)
   logChat({ type: 'user', username, message, context })
 
   function processTags(rawReply) {
@@ -340,14 +346,11 @@ async function handleMessage(username, message, historyAs) {
     })
   }
 
-  // Log player chat to event history
-  if (isPlayerMessage) logEvent(`${username}: "${message}"`)
-
   try {
     state.lastModelCheck = Date.now()
     // Each request uses a fresh session — no model-side history.
     // NOTES and NEW= (the journal) carry memory across requests.
-    const latestMsg = { role: 'user', content: `${context}\n${username}: ${message}` }
+    const latestMsg = { role: 'user', content: `${context}\n${speaker}: ${message}` }
     await streamAndProcess([latestMsg])
     state.apiFailCount = 0
   } catch (err) {
