@@ -114,18 +114,32 @@ let provider = null
 
 // --- Main message handler ---
 async function handleMessage(username, message, historyAs) {
-  const histKey = historyAs || username
-  const isPlayerMessage = username !== 'self' && username !== 'event'
-  const isMonitorCall = username === 'self' && typeof message === 'string' && message.startsWith('[MONITOR]')
+  return handleMessages([{ username, message, historyAs }])
+}
+
+// One model turn for everything queued since the last one: a player's lines, game
+// events, or both. The turn acts as the last player who spoke (plan ownership,
+// action attribution); with no player in the batch, as its first speaker.
+async function handleMessages(batch) {
+  const isPlayer = (u) => u !== 'self' && u !== 'event'
+  const lead = [...batch].reverse().find(m => isPlayer(m.username)) || batch[0]
+  const username = lead.username
+  const histKey = lead.historyAs || username
+  const isPlayerMessage = isPlayer(username)
+  const message = batch.filter(m => isPlayer(m.username)).map(m => m.message).join('\n') || lead.message
+  const isMonitorCall = batch.length === 1 && username === 'self' && typeof message === 'string' && message.startsWith('[MONITOR]')
   // A player's message becomes its record BEFORE the context is built, so it sits
   // in this turn's NEW= with its own r# and the line below points at it. Recorded
   // after, it showed up unnumbered now and again as a record next turn — and a
   // repeated "come here" read as the old one echoed back.
-  const said = isPlayerMessage ? state.journal?.record(`${username}: "${message}"`) : null
+  const lines = batch.map(m => {
+    const said = isPlayer(m.username) ? state.journal?.record(`${m.username}: "${m.message}"`) : null
+    return `${said ? `${m.username} just said (${said.id})` : m.username}: ${m.message}`
+  })
   const context = getBotContext()
-  const speaker = said ? `${username} just said (${said.id})` : username
-  addToHistory(histKey, 'user', `${context}\n${speaker}: ${message}`)
-  logChat({ type: 'user', username, message, context })
+  const input = `${context}\n${lines.join('\n')}`
+  addToHistory(histKey, 'user', input)
+  for (const m of batch) logChat({ type: 'user', username: m.username, message: m.message, context })
 
   function processTags(rawReply) {
     // [PLAN:op:...] — agenda and goal-tree edits (engine/planOps.js). Ownership
@@ -351,7 +365,7 @@ async function handleMessage(username, message, historyAs) {
     state.lastModelCheck = Date.now()
     // Each request uses a fresh session — no model-side history.
     // NOTES and NEW= (the journal) carry memory across requests.
-    const latestMsg = { role: 'user', content: `${context}\n${speaker}: ${message}` }
+    const latestMsg = { role: 'user', content: input }
     await streamAndProcess([latestMsg])
     state.apiFailCount = 0
   } catch (err) {
@@ -415,4 +429,4 @@ function getPersonalities() {
   return PERSONALITIES
 }
 
-module.exports = { handleMessage, sendChat, initChatLogs, initAI, abortResponse, switchPersonality, getPersonalities }
+module.exports = { handleMessage, handleMessages, sendChat, initChatLogs, initAI, abortResponse, switchPersonality, getPersonalities }

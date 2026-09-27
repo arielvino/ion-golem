@@ -2,7 +2,7 @@
 // Long-running actions run as detached background tasks so chat is always responsive.
 const state = require('../core/state')
 const { sleep, stopAll, AbortError } = require('../core/tick')
-const { handleMessage, abortResponse } = require('../ai/ai')
+const { handleMessage, handleMessages, abortResponse } = require('../ai/ai')
 const { executeAction } = require('../actions')
 const { stackTopTitle, stackTop } = require('./tasks')
 const { launchBackground, isBackgroundRunning, consumeBackgroundResult } = require('./backgroundTask')
@@ -227,21 +227,23 @@ async function startEngine() {
     if (state.msgPending) continue
 
     try {
-      // Priority 1: Chat/event messages — process all queued messages
+      // Priority 1: Chat/event messages — everything queued since the last turn goes
+      // into ONE turn. That turn is this tick's model call: the autonomous turn below
+      // (and any finished task's result) waits for the next tick, so the bot doesn't
+      // answer and then immediately self-check or announce going idle.
+      let talked = false
       if (state.messageQueue.length > 0) {
         state.msgPending = true
         try {
-          while (state.messageQueue.length > 0) {
-            const msg = state.messageQueue.shift()
-            await handleMessage(msg.username, msg.message, msg.historyAs)
-          }
+          await handleMessages(state.messageQueue.splice(0))
+          talked = true
         } finally {
           state.msgPending = false
         }
       }
 
       // Priority 2: Harvest completed background task result
-      const bgResult = consumeBackgroundResult()
+      const bgResult = talked ? null : consumeBackgroundResult()
       if (bgResult) {
         console.log(color(c.white, `  [BG] finished: ${bgResult.actionStr} → ${bgResult.status}${bgResult.error ? ': ' + bgResult.error : ''} (${Math.round((Date.now() - bgResult.startedAt) / 1000)}s)`))
       }
@@ -259,7 +261,11 @@ async function startEngine() {
       const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
       const hasWork = state.taskStack.length > 0 || actionsRunning
       const canRun = state.apiFailCount < 3 && !state.msgPending && !state.aiPaused
-      if (hasWork) {
+      if (talked) {
+        // The reply already told the player where things stand; if it left the bot
+        // idle, that was the going-idle report.
+        if (!hasWork) state.idleAnnounced = true
+      } else if (hasWork) {
         state.idleAnnounced = false  // re-arm the one-shot idle report for when work ends
         if (canRun) {
           if (actionsRunning) {
