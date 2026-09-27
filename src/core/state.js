@@ -17,7 +17,6 @@ module.exports = {
   apiFailCount: 0,
   lastModelCheck: Date.now(),
   lastActionUsername: null,
-  loopRunning: false,
   msgPending: false,
   noActionRounds: 0,
   aiPaused: false,       // debug `!ai off`: engine makes no model calls

@@ -113,21 +113,17 @@ function flattenMessages(msgs) {
 let provider = null
 
 // --- Main message handler ---
-async function handleMessage(username, message, historyAs) {
-  return handleMessages([{ username, message, historyAs }])
-}
-
-// One model turn for everything queued since the last one: a player's lines, game
-// events, or both. The turn acts as the last player who spoke (plan ownership,
-// action attribution); with no player in the batch, as its first speaker.
+// One model turn for everything pending: player chat, game events and the bot's
+// own MONITOR/SELF-CHECK line. Goals the turn creates are owned by the last player
+// who spoke in it, and its actions are attributed to them; with no player, 'self'.
 async function handleMessages(batch) {
   const isPlayer = (u) => u !== 'self' && u !== 'event'
-  const lead = [...batch].reverse().find(m => isPlayer(m.username)) || batch[0]
-  const username = lead.username
-  const histKey = lead.historyAs || username
-  const isPlayerMessage = isPlayer(username)
-  const message = batch.filter(m => isPlayer(m.username)).map(m => m.message).join('\n') || lead.message
-  const isMonitorCall = batch.length === 1 && username === 'self' && typeof message === 'string' && message.startsWith('[MONITOR]')
+  const player = [...batch].reverse().find(m => isPlayer(m.username))
+  const username = player ? player.username : 'self'
+  const histKey = player ? (player.historyAs || username) : (state.lastActionUsername || 'self')
+  const isPlayerMessage = !!player
+  const message = batch.filter(m => isPlayer(m.username)).map(m => m.message).join('\n')
+  const isMonitorCall = !player && batch.some(m => m.username === 'self' && m.message.startsWith('[MONITOR]'))
   // A player's message becomes its record BEFORE the context is built, so it sits
   // in this turn's NEW= with its own r# and the line below points at it. Recorded
   // after, it showed up unnumbered now and again as a record next turn — and a
@@ -371,7 +367,7 @@ async function handleMessages(batch) {
   } catch (err) {
     if (err.message?.includes('abort') || err.message?.includes('SIGTERM')) {
       console.log('  [API] aborted (player interrupted)')
-      return
+      return 'aborted'
     }
     console.error(color(c.red, `API error: ${err.message}`))
     provider.destroy()
@@ -429,4 +425,4 @@ function getPersonalities() {
   return PERSONALITIES
 }
 
-module.exports = { handleMessage, handleMessages, sendChat, initChatLogs, initAI, abortResponse, switchPersonality, getPersonalities }
+module.exports = { handleMessages, sendChat, initChatLogs, initAI, abortResponse, switchPersonality, getPersonalities }

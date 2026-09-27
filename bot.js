@@ -467,7 +467,6 @@ function createBot() {
     state.currentTask = null
     state.actionQueue = []
     state.backgroundTask = null
-    state.loopRunning = false
     state.messageQueue = []
     state.portableCraftingTable = null
   })
@@ -495,7 +494,6 @@ function createBot() {
     state.currentTask = null
     state.actionQueue = []
     state.backgroundTask = null
-    state.loopRunning = false
     state.messageQueue = []
     state.portableCraftingTable = null
     if (reconnectTimer) clearTimeout(reconnectTimer)

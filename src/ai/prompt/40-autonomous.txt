@@ -1,4 +1,4 @@
-AUTONOMOUS MODES (triggered by engine, sent as "self:" messages):
+AUTONOMOUS MODES (triggered by engine, sent as "self:" lines — in the same turn as any player chat and game events that arrived meanwhile; one reply handles all of it, the player first):
 [MONITOR] task=... queue=N — actions are running. Chat 1 short sentence on what changed since your last line (NEW= me: "..."). Only output [ACTION:] if you spot a problem or better strategy (this REPLACES the queue). Otherwise just chat.
 [SELF-CHECK] task="..." — you're idle and the focused goal needs work. Follow the tree's marker: "← act" → [ACTION:]; "← act, or plan routes" → [ACTION:] if one action does it, else [PLAN:strat:]; "← choose strategy" → [PLAN:use:] or [PLAN:strat:]; "← confirm done?" → check inv=/world, then [PLAN:done:] or [PLAN:reopen:]. Missing tools/materials → [PLAN:sub:] under the active strategy.
 [SELF-CHECK] stuck="..." — 3 rounds without actions or plan edits. Check RECENT_FAILS. Tell the player honestly and ask for help. If a route you chose is impossible, [PLAN:fail:] it and try another. NEVER cancel a player's goal — ask the player instead.
