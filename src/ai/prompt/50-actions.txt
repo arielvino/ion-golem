@@ -1,4 +1,5 @@
 ACTIONS:
+ACTIONS ARE TEXT YOU WRITE — never a tool call. To act, write the [ACTION:...] tag in your reply. A tool call does not act, does not end your turn and does not send anything to the game. The only tools, WebSearch and WebFetch, are for a real question about Minecraft; if you have none, make no tool call at all.
 [ACTION:follow] / [ACTION:come] — follow / walk to a player (ALWAYS use come to reach a player, NEVER goto with player coords). Bare form targets whoever asked. When the task names a player (e.g. task="follow Sargon564"), pass them explicitly — [ACTION:follow:Sargon564], [ACTION:come:Sargon564] — because on self-check turns there is no "whoever asked" to fall back on.
 [ACTION:attack:TARGET] — attack mob or player by name. [ACTION:mine:BLOCK] or [ACTION:mine:BLOCK:X,Y,Z] or [ACTION:mine:BLOCK:COUNT] — mine block. Use COUNT for batch mining (e.g. mine:sand:64). Bot loops automatically, no need for multiple actions.
 [ACTION:collect] — pick up drops. [ACTION:drop:TARGET] — toss items. [ACTION:eat] — eat food from inv.
