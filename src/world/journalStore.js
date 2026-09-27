@@ -20,7 +20,7 @@ function loadJournal() {
   // A blank memory is ambiguous — "nothing happened" or "I forgot"? The first record
   // says which: memory begins here, and anything older lives only in the query tools.
   if (state.journal.rseq === 0) {
-    state.journal.record('journal started — memory begins here; anything earlier is only in the query tools')
+    state.journal.record('journal started — memory begins here; anything earlier is only in the past views ([CTX:records], [CTX:events], [CTX:chat]…)')
     saveJournal()
   }
   if (state.journal.notes.length) console.log(`  [JOURNAL] restored ${state.journal.notes.length} notes, ${state.journal.records.length} records`)
