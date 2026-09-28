@@ -105,6 +105,14 @@ test('materials alone are not a village: an iceberg is not a snowy village', () 
   assert.ok(!guess(members, c, 'snowy_plains').hyps.some(h => h.kind === 'village'))
 })
 
+test('badlands terracotta alone is no place; with pyramid sandstone in a desert it is', () => {
+  const badlands = [at('orange_terracotta', 0, 64, 0), at('red_terracotta', 1, 64, 0),
+    at('yellow_terracotta', 2, 64, 0), at('white_terracotta', 3, 64, 0)]
+  assert.equal(guess(badlands, c, 'badlands').hyps.length, 0)
+  const pyramid = [at('orange_terracotta', 0, 64, 0), at('chiseled_sandstone', 1, 64, 0), at('blue_terracotta', 2, 64, 0)]
+  assert.equal(guess(pyramid, c, 'desert').hyps[0].kind, 'desert_pyramid')
+})
+
 test('netherrack: strong ruined-portal cue in the overworld, not even searched in the nether', () => {
   const members = [at('obsidian', 0, 64, 0), at('netherrack', 1, 64, 0), at('netherrack', 2, 64, 0), at('magma_block', 3, 64, 0)]
   const over = guess(members, compile(mcData, 'overworld')).hyps[0]

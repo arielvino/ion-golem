@@ -23,10 +23,11 @@
 //   cue: materials only pick the style, they cannot make the place on their own (an
 //   iceberg's packed + blue ice is not a snowy village).
 //
-// Never use a block that also generates naturally IN THAT DIMENSION (logs, stone, grass;
-// netherrack is fine as an overworld variant cue, meaningless in the nether): a forest would
-// then read as a weak witch hut, and every one of its thousands of logs costs an LOS test.
-// Colored terracotta counts as natural — badlands are made of it; glazed terracotta is not.
+// A block that also generates naturally IN THAT DIMENSION is a cue only if natural terrain
+// cannot supply the rest of the evidence. A place needs two cue types (and a variant kind
+// a core cue), so badlands terracotta alone never makes a pyramid or a savanna village.
+// Logs failed that test: forest + a player's crafting table read as a weak witch hut.
+// Netherrack is a strong overworld variant cue and meaningless in the nether.
 
 const FINGERPRINTS = [
   {
@@ -46,14 +47,14 @@ const FINGERPRINTS = [
         biomes: ['plains', 'meadow'],
         blocks: {
           dirt_path: 2, oak_planks: 1.5, stripped_oak_log: 1.5, oak_stairs: 1, oak_fence: 1,
-          oak_door: 1, white_wool: 1, yellow_wool: 1,
+          oak_door: 1, white_wool: 1, yellow_wool: 1, white_terracotta: 1,
         },
       },
       desert: {
         biomes: ['desert'],
         blocks: {
           smooth_sandstone: 2, cut_sandstone: 2, smooth_sandstone_stairs: 1, jungle_fence: 1.5,
-          jungle_door: 1.5, lime_glazed_terracotta: 2, light_blue_glazed_terracotta: 2,
+          jungle_door: 1.5, lime_terracotta: 1.5, lime_glazed_terracotta: 2, light_blue_glazed_terracotta: 2,
           white_glazed_terracotta: 2,
         },
       },
@@ -61,7 +62,8 @@ const FINGERPRINTS = [
         biomes: ['savanna'],
         blocks: {
           dirt_path: 2, acacia_planks: 1.5, stripped_acacia_log: 1.5, acacia_stairs: 1,
-          acacia_fence: 1, acacia_door: 1, orange_glazed_terracotta: 2, yellow_glazed_terracotta: 2,
+          acacia_fence: 1, acacia_door: 1, orange_terracotta: 1, red_terracotta: 1,
+          yellow_terracotta: 1, orange_glazed_terracotta: 2, yellow_glazed_terracotta: 2,
         },
       },
       taiga: {
@@ -82,12 +84,14 @@ const FINGERPRINTS = [
     minScore: 4,
   },
   {
+    // one block list in every biome (minecraft.wiki) — no variants
     kind: 'pillager_outpost',
     dimensions: ['overworld'],
     biomes: ['plains', 'desert', 'savanna', 'taiga', 'snowy_plains', 'meadow', 'frozen_peaks', 'jagged_peaks', 'stony_peaks', 'snowy_slopes', 'cherry_grove', 'grove'],
     blocks: {
-      dark_oak_log: 2, dark_oak_planks: 2, dark_oak_fence: 2, birch_planks: 1,
-      cobblestone: 1, white_wall_banner: 3, target: 2, '*_fence': 0.5,
+      dark_oak_log: 2, dark_oak_planks: 2, dark_oak_stairs: 1, dark_oak_fence: 2, birch_planks: 1,
+      cobblestone: 1, mossy_cobblestone: 0.5, white_wool: 0.5, carved_pumpkin: 1.5,
+      white_wall_banner: 3,
     },
     // allays are caged only at outposts; pillagers also roam the world in patrols
     entities: { allay: 7, pillager: 3, iron_golem: 2 },
@@ -133,7 +137,7 @@ const FINGERPRINTS = [
     dimensions: ['overworld'],
     biomes: ['desert'],
     blocks: {
-      chiseled_sandstone: 3, blue_terracotta: 3, cut_sandstone: 1,
+      chiseled_sandstone: 3, orange_terracotta: 3, blue_terracotta: 3, cut_sandstone: 1,
       sandstone_stairs: 1, tnt: 2,
     },
     entities: {},
