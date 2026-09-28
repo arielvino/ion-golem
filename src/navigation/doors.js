@@ -1,5 +1,6 @@
 // doors.js — walking through wooden doors and fence gates the way a player does: open the
-// one in the way, step through, close it again behind you.
+// one in the way (or shut an open one that swung across the path), step through, and
+// leave it as you found it.
 //
 // The planner and the step checks treat an openable door as walkable (flat steps only);
 // the live door state is read here, right before the step, from the cell next to the bot —
@@ -64,26 +65,26 @@ async function clearDoorway(bot, cx, cy, cz, dx, dz) {
   for (const [x, z] of [[cx, cz], [cx + dx, cz + dz]]) {
     const door = doorAt(bot, x, cy, z) || doorAt(bot, x, cy + 1, z)
     if (!door || !blocksAxis(door, axis)) continue
-    if (!(await toggle(bot, door))) return { ok: false, why: `${where(door)} didn't open` }
-    console.log(`  [door] opened ${where(door)}`)
-    // Close it behind us only if we opened it from closed (not a door we had to shut).
-    if (isOpen(bot.blockAt(door.position))) state.doorToClose = { x: door.position.x, y: door.position.y, z: door.position.z, name: door.name }
+    const wasOpen = isOpen(door)
+    if (!(await toggle(bot, door))) return { ok: false, why: `${where(door)} didn't ${wasOpen ? 'close' : 'open'}` }
+    console.log(`  [door] ${wasOpen ? 'closed' : 'opened'} ${where(door)} to get through`)
+    state.doorToRestore = { x: door.position.x, y: door.position.y, z: door.position.z, name: door.name, open: wasOpen }
   }
   return { ok: true }
 }
 
-// At the start of a step: once the bot has left the cell of the door it opened, and isn't
-// stepping back into it, close the door again.
-async function closeBehind(bot, nx, nz) {
-  const d = state.doorToClose
+// At the start of a step (and when a walk ends): once the bot has left the cell of the door
+// it toggled, and isn't stepping back into it, put the door back the way it was.
+async function restoreBehind(bot, nx, nz) {
+  const d = state.doorToRestore
   if (!d) return
   const p = bot.entity.position
   const inside = Math.floor(p.x) === d.x && Math.floor(p.z) === d.z
   if (inside || (nx === d.x && nz === d.z)) return
-  state.doorToClose = null
+  state.doorToRestore = null
   const door = bot.blockAt(new Vec3(d.x, d.y, d.z))
-  if (!door || door.name !== d.name || !isOpen(door)) return
-  if (await toggle(bot, door)) console.log(`  [door] closed ${where(door)} behind me`)
+  if (!door || door.name !== d.name || isOpen(door) === d.open) return
+  if (await toggle(bot, door)) console.log(`  [door] ${d.open ? 'opened' : 'closed'} ${where(door)} behind me, as I found it`)
 }
 
-module.exports = { blocksAxis, clearDoorway, closeBehind }
+module.exports = { blocksAxis, clearDoorway, restoreBehind }

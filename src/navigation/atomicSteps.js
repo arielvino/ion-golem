@@ -240,7 +240,7 @@ async function liveStep(bot, dx, dz, opts = {}) {
   const cx = Math.floor(pos.x), cy = Math.round(pos.y), cz = Math.floor(pos.z)
   const nx = cx + dx, nz = cz + dz
   const doors = require('./doors')
-  await doors.closeBehind(bot, nx, nz)
+  await doors.restoreBehind(bot, nx, nz)
 
   // Determine move type from DB checks: try flat, then up, then down
   let moveType = null, targetY = cy, drop = 0
@@ -649,7 +649,7 @@ async function followPath(bot, path, opts = {}) {
       break
     }
     if (pathIdx >= path.length) return true
-    await require('./doors').closeBehind(bot, path[pathIdx].x, path[pathIdx].z)
+    await require('./doors').restoreBehind(bot, path[pathIdx].x, path[pathIdx].z)
 
     // Check for consecutive same-direction flat steps — sprint through them.
     // pathIdx is a DESTINATION (next node to reach), but countStraightRun and

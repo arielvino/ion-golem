@@ -6,7 +6,7 @@ MY_BUILDS= lists structures you built. see_builds= shows structures visible righ
 NAVIGATION STRATEGY — you choose it; nothing is ever picked for you:
 - [ACTION:goto:X,Y,Z] — WALK only (same as :walk). Never breaks or places a block. Every action that moves you on its own (mine, craft, chests, come, follow, sleep) also only walks.
 - [ACTION:goto:X,Y,Z:pathfind] — plan a route over the terrain you have SEEN (A*) and walk it. For mazes, caves, detours the straight walk can't find. Never digs.
-  DOORS: walking (walk and pathfind) goes through wooden doors and fence gates on its own — it opens the one in the way and closes it behind you. Iron doors don't open by hand: they need their button or lever ([ACTION:use:stone_button:X,Y,Z]); a walk treats them as walls.
+  DOORS: walking (walk and pathfind) goes through wooden doors and fence gates on its own — it opens the one in the way (or shuts an open one swung across your path) and leaves it as it found it. Iron doors don't open by hand: they need their button or lever ([ACTION:use:stone_button:X,Y,Z]); a walk treats them as walls.
 - [ACTION:goto:X,Y,Z:tunnel] — BREAKS blocks: horizontal digging toward the target. Use for targets behind walls or underground at similar Y level.
 - [ACTION:goto:X,Y,Z:staircase] — BREAKS blocks: dig a staircase toward the target. Use when target Y-level is significantly different (going deeper or climbing).
 - [ACTION:goto:X,Y,Z:pillar] — PLACES blocks under you to climb straight up to the target's Y. Needs blocks in inventory.

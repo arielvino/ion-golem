@@ -4,7 +4,7 @@ module.exports = {
   // Action state
   currentTask: null,
   navigationStatus: null,
-  doorToClose: null,     // {x,y,z,name} of a door liveStep opened; closed once we're past it (doors.js)
+  doorToRestore: null,   // {x,y,z,name,open} of a door liveStep toggled; put back once we're past it (doors.js)
   actionQueue: [],
   backgroundTask: null,
   // Abort/interrupt
