@@ -835,13 +835,16 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
   // which findWaypoint guarantees is farther than the sub-goal, so reaching the
   // sub-goal still scores as progress.
   let gx = tx, gy = ty, gz = tz
-  let path = planFromHere(gx, gy, gz, mode, avoid)
+  // The walk is done within `range` of the real target, so plan to that; a sub-goal
+  // is a cell to stand on, planned exactly.
+  const goalRange = () => (gx === tx && gy === ty && gz === tz ? range : 0)
+  let path = planFromHere(gx, gy, gz, mode, avoid, goalRange())
   if (!path) {
     const sub = findWaypoint(target)
     if (!sub) { console.log(`  cardinalWalk: no optimistic path to ${tx},${ty},${tz} and no sub-goal`); return false }
     gx = Math.floor(sub.x); gy = Math.round(sub.y); gz = Math.floor(sub.z)
     console.log(`  cardinalWalk: no path to target → sub-goal ${gx},${gy},${gz}`)
-    path = planFromHere(gx, gy, gz, mode, avoid)
+    path = planFromHere(gx, gy, gz, mode, avoid, goalRange())
     if (!path) { console.log(`  cardinalWalk: no path to sub-goal ${gx},${gy},${gz} either`); return false }
   }
   console.log(`  cardinalWalk: optimistic path ${path.length} nodes toward ${gx},${gy},${gz}`)
@@ -889,7 +892,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
         dirs.delete(back)              // ignore the exit we came in through
         if (dirs.size === 0) {         // nothing else open ⇒ dead end
           avoid.add(vk)
-          const np = planFromHere(gx, gy, gz, mode, avoid)
+          const np = planFromHere(gx, gy, gz, mode, avoid, goalRange())
           if (!np) { console.log(`  cardinalWalk: dead end at ${vk}, region sealed → bailing`); break }
           console.log(`  cardinalWalk: dead end at ${vk} → blacklisted, backtracking`)
           path = np; idx = 0; lastCell = vk; cameFrom = null
@@ -941,7 +944,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
         }
         if (blockedAhead) {
           if (++replans > 6) break
-          const np = planFromHere(gx, gy, gz, mode, avoid)
+          const np = planFromHere(gx, gy, gz, mode, avoid, goalRange())
           if (!np) break
           path = np; idx = 0
         }
@@ -955,7 +958,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
     avoid.add(`${next.x},${next.y},${next.z}`)
     if (!_pKnownClear(nx, cy, nz) || !_pKnownClear(nx, cy + 1, nz)) avoid.add(`${nx},${cy},${nz}`)
     if (++replans > 6) { console.log(`  cardinalWalk: replan budget exhausted`); break }
-    const np = planFromHere(gx, gy, gz, mode, avoid)
+    const np = planFromHere(gx, gy, gz, mode, avoid, goalRange())
     if (!np) { console.log(`  cardinalWalk: boxed in after ${replans} replans`); break }
     path = np; idx = 0
   }
