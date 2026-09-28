@@ -10,6 +10,11 @@
 // blocks: block name → weight. A leading '*' matches by suffix ('*_planks' = any planks).
 // entities: entity name → weight. Only LOS-visible entities count.
 // minScore: below this total a cluster is not reported as this kind at all.
+// dimensions: where the kind can exist at all ('overworld', 'the_nether', 'the_end').
+//   A hard gate — elsewhere the kind is dropped and its cues are not even searched for.
+// biomes (optional): where it generates. A soft prior, not a gate: a mismatch only
+//   discounts the score, because the biome is sampled at the cluster's center and
+//   structures straddle biome borders (a plains village spills into the next forest).
 //
 // Never use a block that also generates naturally (logs, stone, grass): a forest would
 // then read as a weak witch hut, and every one of its thousands of logs costs an LOS test.
@@ -17,6 +22,8 @@
 const FINGERPRINTS = [
   {
     kind: 'village',
+    dimensions: ['overworld'],
+    biomes: ['plains', 'meadow', 'desert', 'savanna', 'taiga', 'snowy_plains'],
     blocks: {
       bell: 6, '*_bed': 2, dirt_path: 2, hay_block: 2, composter: 2, farmland: 1.5,
       lectern: 2, smoker: 2, blast_furnace: 2, barrel: 1, fletching_table: 2,
@@ -29,15 +36,19 @@ const FINGERPRINTS = [
   },
   {
     kind: 'pillager_outpost',
+    dimensions: ['overworld'],
+    biomes: ['plains', 'desert', 'savanna', 'taiga', 'snowy_plains', 'meadow', 'frozen_peaks', 'jagged_peaks', 'stony_peaks', 'snowy_slopes', 'cherry_grove', 'grove'],
     blocks: {
       dark_oak_log: 2, dark_oak_planks: 2, dark_oak_fence: 2, birch_planks: 1,
       cobblestone: 1, white_wall_banner: 3, target: 2, '*_fence': 0.5,
     },
-    entities: { pillager: 6, iron_golem: 2, allay: 3 },
+    // allays are caged only at outposts; pillagers also roam the world in patrols
+    entities: { allay: 7, pillager: 3, iron_golem: 2 },
     minScore: 4,
   },
   {
     kind: 'nether_fortress',
+    dimensions: ['the_nether'],
     blocks: {
       nether_bricks: 3, nether_brick_fence: 3, nether_brick_stairs: 2, nether_wart: 3,
       spawner: 2,
@@ -47,6 +58,8 @@ const FINGERPRINTS = [
   },
   {
     kind: 'bastion',
+    dimensions: ['the_nether'],
+    biomes: ['nether_wastes', 'soul_sand_valley', 'crimson_forest', 'warped_forest'],
     blocks: {
       gilded_blackstone: 5, polished_blackstone_bricks: 2, cracked_polished_blackstone_bricks: 2,
       gold_block: 2, chiseled_polished_blackstone: 2,
@@ -56,18 +69,22 @@ const FINGERPRINTS = [
   },
   {
     kind: 'mineshaft',
+    dimensions: ['overworld'],
     blocks: { rail: 3, cobweb: 2, oak_fence: 1, oak_planks: 1, dark_oak_fence: 0.5 },
     entities: { cave_spider: 4, chest_minecart: 3 },
     minScore: 4,
   },
   {
     kind: 'dungeon',
+    dimensions: ['overworld'],
     blocks: { spawner: 4, mossy_cobblestone: 2, cobblestone: 0.5 },
     entities: {},
     minScore: 4,
   },
   {
     kind: 'desert_pyramid',
+    dimensions: ['overworld'],
+    biomes: ['desert'],
     blocks: {
       chiseled_sandstone: 3, orange_terracotta: 3, blue_terracotta: 3, cut_sandstone: 1,
       sandstone_stairs: 1, tnt: 2,
@@ -77,18 +94,22 @@ const FINGERPRINTS = [
   },
   {
     kind: 'ocean_monument',
+    dimensions: ['overworld'],
+    biomes: ['deep_ocean', 'deep_cold_ocean', 'deep_lukewarm_ocean', 'deep_frozen_ocean'],
     blocks: { prismarine_bricks: 3, dark_prismarine: 3, sea_lantern: 3, prismarine: 1.5 },
     entities: { guardian: 4, elder_guardian: 6 },
     minScore: 4,
   },
   {
     kind: 'ruined_portal',
+    dimensions: ['overworld', 'the_nether'],
     blocks: { crying_obsidian: 4, obsidian: 2, magma_block: 1, gold_block: 2 },
     entities: {},
     minScore: 4,
   },
   {
     kind: 'stronghold',
+    dimensions: ['overworld'],
     blocks: {
       end_portal_frame: 6, mossy_stone_bricks: 1.5, cracked_stone_bricks: 1.5, stone_bricks: 1,
       iron_bars: 1, iron_door: 2,
@@ -98,6 +119,8 @@ const FINGERPRINTS = [
   },
   {
     kind: 'ancient_city',
+    dimensions: ['overworld'],
+    biomes: ['deep_dark'],
     blocks: {
       reinforced_deepslate: 6, sculk_shrieker: 4, sculk_sensor: 2, soul_lantern: 2,
       deepslate_tiles: 1, deepslate_bricks: 1,
@@ -107,6 +130,8 @@ const FINGERPRINTS = [
   },
   {
     kind: 'witch_hut',
+    dimensions: ['overworld'],
+    biomes: ['swamp'],
     blocks: { cauldron: 2, potted_red_mushroom: 3, spruce_planks: 1, spruce_stairs: 1 },
     entities: { witch: 5 },
     minScore: 4,
