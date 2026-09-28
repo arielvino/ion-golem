@@ -1002,6 +1002,7 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
 
     if (goal.isDone(ctx)) {
       console.log(color(c.green, `  runStrategy[${name}]: done (${goal.desc})`))
+      await require('./doors').closeBehind(bot, null, null)   // a door we just walked through
       return { ok: true, reason: 'done' }
     }
 

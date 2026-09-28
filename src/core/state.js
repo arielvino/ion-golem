@@ -4,6 +4,7 @@ module.exports = {
   // Action state
   currentTask: null,
   navigationStatus: null,
+  doorToClose: null,     // {x,y,z,name} of a door liveStep opened; closed once we're past it (doors.js)
   actionQueue: [],
   backgroundTask: null,
   // Abort/interrupt

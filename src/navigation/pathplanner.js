@@ -10,7 +10,7 @@ const { BlockMap } = require('../world/blockmap')
 const { getNeighbors } = require('./atomicSteps')
 const { getLastVisionResult } = require('../perception/vision')
 const { surveyForNav } = require('../perception/visibility')
-const { _pPassable, _pHazard, _pSurface, _pFloor, _pKnownSolid, _pKnownClear } = require('./blockquery')
+const { _pPassable, _pHazard, _pSurface, _pOpenable, _pFloor, _pKnownSolid, _pKnownClear } = require('./blockquery')
 
 // ─── DB-Based A* Pathfinder ──────────────────────────────────────────
 
@@ -251,11 +251,14 @@ function _pNeighbors(x, y, z, mode, avoid) {
     // FLAT — optimistic over unknown. Floor support is the block BELOW the foot
     // (y-1): solid/unknown ground, or a surface block at foot level (carpet/lily).
     // Checking the foot cell itself would reject all known-air walkable space.
+    // A wooden door / fence gate counts as walkable here (liveStep opens it), at a small
+    // extra cost so open ground is still preferred.
+    const door = _pOpenable(nx, y, nz) || _pOpenable(nx, y + 1, nz)
     if (!(avoid && avoid.has(`${nx},${y},${nz}`)) &&
-        _pPassable(nx, y, nz) && _pPassable(nx, y + 1, nz) &&
+        (_pPassable(nx, y, nz) || _pOpenable(nx, y, nz)) && (_pPassable(nx, y + 1, nz) || _pOpenable(nx, y + 1, nz)) &&
         (_pFloor(nx, y - 1, nz) || _pSurface(nx, y, nz)) &&
         !_pHazard(nx, y, nz) && !_pHazard(nx, y - 1, nz)) {
-      out.push({ x: nx, y, z: nz, cost: 1 })
+      out.push({ x: nx, y, z: nz, cost: door ? 1.5 : 1 })
       continue
     }
     // STEP-UP — only onto a KNOWN solid step (flat was blocked by it)

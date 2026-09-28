@@ -151,4 +151,9 @@ function isPlaceable(name) {
   return _PLACEABLE_NAMES.has(name) || name.includes('terracotta')
 }
 
-module.exports = { TRANSPARENT, NOTABLE_TRANSPARENT, PASSABLE, SURFACE, HAZARDS, RESOURCES, WATER_BLOCKS, FIRE_BLOCKS, STRUCTURAL_AIR, isPlaceable }
+// Doors and fence gates a hand can open. Iron doors need redstone, so they stay walls.
+function isOpenable(name) {
+  return !!name && ((name.endsWith('_door') && name !== 'iron_door') || name.endsWith('_fence_gate'))
+}
+
+module.exports = { TRANSPARENT, NOTABLE_TRANSPARENT, PASSABLE, SURFACE, HAZARDS, RESOURCES, WATER_BLOCKS, FIRE_BLOCKS, STRUCTURAL_AIR, isPlaceable, isOpenable }
