@@ -189,7 +189,11 @@ function createBot() {
     // players — just a world-frame bearing (azimuth). This is the same signal a
     // human player reads off the locator bar to know which way to head. Keyed by
     // player UUID; context.js turns it into a heading + rough distance.
+    // The server sends a waypoint only when it changes (the player crosses into a new
+    // block / chunk / bearing) and removes it with 'untrack' — a player standing still
+    // gets no packets at all, so an entry stays valid until untracked, never timed out.
     bot._waypoints = new Map()
+    bot.on('playerLeft', (p) => { if (p?.uuid) bot._waypoints.delete(p.uuid) })
     bot._client.on('tracked_waypoint', (packet) => {
       try {
         const wp = packet.waypoint

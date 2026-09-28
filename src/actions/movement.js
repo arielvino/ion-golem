@@ -24,7 +24,7 @@ function resolvePlayerTarget(bot, username) {
     return { x: e.x, y: e.y, z: e.z, precise: true, tracked: true }
   }
   const wp = p?.uuid ? bot._waypoints?.get(p.uuid) : null
-  if (!wp || (Date.now() - wp.t) >= 30000) return null
+  if (!wp) return null
   const pos = bot.entity.position
   if (wp.type === 'vec3i') {
     return { x: wp.x, y: wp.y, z: wp.z, precise: true, tracked: false }

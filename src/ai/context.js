@@ -218,8 +218,7 @@ function getBotContext() {
     // position — toward the player, enough to start walking the right way.
     // Bearing yaw uses mineflayer's lookAt convention: atan2(-dx, -dz).
     const wp = pl && pl.uuid ? bot._waypoints?.get(pl.uuid) : null
-    const fresh = wp && (Date.now() - wp.t) < 30000
-    if (fresh && (wp.type === 'vec3i' || wp.type === 'chunk')) {
+    if (wp && (wp.type === 'vec3i' || wp.type === 'chunk')) {
       const tx = wp.type === 'vec3i' ? wp.x : wp.chunkX * 16 + 8
       const tz = wp.type === 'vec3i' ? wp.z : wp.chunkZ * 16 + 8
       const dir = yawToDir(Math.atan2(-(tx - pos.x), -(tz - pos.z)))
@@ -228,7 +227,7 @@ function getBotContext() {
         ? `${name}@${Math.floor(tx)},${wp.y},${Math.floor(tz)}(out_of_range,locator,head=${dir},~${dist}m)`
         : `${name}@~${Math.floor(tx)},~${Math.floor(tz)}(out_of_range,locator_chunk,head=${dir},~${dist}m)`
     }
-    if (fresh && wp.type === 'azimuth') {
+    if (wp && wp.type === 'azimuth') {
       // Very distant: only a world-frame bearing, no distance. Rebuild a unit
       // delta from the azimuth (atan2(dz,dx)) and reuse the same heading math.
       const dir = yawToDir(Math.atan2(-Math.cos(wp.azimuth), -Math.sin(wp.azimuth)))
