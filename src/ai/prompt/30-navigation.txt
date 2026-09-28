@@ -3,12 +3,13 @@ sky=visible = surface. ceiling=5m = underground. drop=10m = cliff below. Navigat
 PLACES=[...] — what kind of place the things you can see add up to: villages, outposts, fortresses, ruined portals, lava pools. KIND(style)@X,Y,Z DIST DIR. It is a GUESS from a glimpse, never a fact. A bare entry is a confident guess. An entry with a number (0.65) is unsure: "or ..." names the runner-up, and confirm:A,B names what you have NOT seen yet that would settle it — look or walk toward it before you commit to that guess (e.g. before promising a player loot or trades). Absent = nothing recognizable in sight, NOT proof that nothing is there.
 MY_BUILDS= lists structures you built. see_builds= shows structures visible right now.
 
-NAVIGATION STRATEGY — choose based on context:
-- [ACTION:goto:X,Y,Z] — default, tries walking then auto-picks digging strategy if needed.
-- [ACTION:goto:X,Y,Z:tunnel] — tunnel (horizontal digging) toward the target. Use for targets behind walls or underground at similar Y level.
-- [ACTION:goto:X,Y,Z:staircase] — dig a staircase toward the target. Use when target Y-level is significantly different (going deeper or climbing).
-- [ACTION:goto:X,Y,Z:walk] — walk only, never digs. Use when you know a walkable path exists.
-  NOTE: when you request :tunnel/:staircase/:walk the bot runs ONLY that method — no automatic fallback. If it can't break through it FAILS CLEANLY and tells you why (e.g. "staircase stuck"); you then choose the next move. This is intentional — you stay in control.
+NAVIGATION STRATEGY — you choose it; nothing is ever picked for you:
+- [ACTION:goto:X,Y,Z] — WALK only (same as :walk). Never breaks or places a block. Every action that moves you on its own (mine, craft, chests, come, follow, sleep) also only walks.
+- [ACTION:goto:X,Y,Z:pathfind] — plan a route over the terrain you have SEEN (A*) and walk it. For mazes, caves, detours the straight walk can't find. Never digs.
+- [ACTION:goto:X,Y,Z:tunnel] — BREAKS blocks: horizontal digging toward the target. Use for targets behind walls or underground at similar Y level.
+- [ACTION:goto:X,Y,Z:staircase] — BREAKS blocks: dig a staircase toward the target. Use when target Y-level is significantly different (going deeper or climbing).
+- [ACTION:goto:X,Y,Z:pillar] — PLACES blocks under you to climb straight up to the target's Y. Needs blocks in inventory.
+  NOTE: every goto runs exactly ONE method — there is no automatic fallback and nothing digs unless you asked for a digging method. If it can't get there it FAILS CLEANLY and tells you why (e.g. "walk stuck", "staircase stuck"); you then choose the next move. Breaking blocks is always your informed decision — check [CTX:slice]/[CTX:around] first, and never dig through a player's build.
 COORDINATE↔COMPASS (don't guess the sign): NORTH=-Z, SOUTH=+Z, WEST=-X, EAST=+X, UP=+Y, DOWN=-Y. So "go north" = a SMALLER (more negative) Z (from Z=-746, north is Z=-900, not -500).
   For "dig/go DIRECTION" with no fixed destination, PREFER a directional verb (tunnel/move/staircase below) — it commits the heading so the sign can't be wrong. Only hand-pick a goto coordinate when you have an actual target point.
 DIRECTIONAL digging/movement — when you DON'T have a target coordinate, only a direction + a condition (the bot discovers where to stop at runtime):

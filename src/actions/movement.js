@@ -396,7 +396,7 @@ async function doSail(target) {
   state.currentTask = null
 }
 
-const VALID_STRATEGIES = new Set(['tunnel', 'staircase', 'walk'])
+const VALID_STRATEGIES = new Set(['walk', 'pathfind', 'pillar', 'staircase', 'tunnel'])
 
 async function doGoto(target, opts = {}) {
   stopAll()
