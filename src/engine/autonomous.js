@@ -2,7 +2,7 @@
 const state = require('../core/state')
 const { sleep } = require('../core/tick')
 const { sendChat } = require('../core/utils')
-const { HEALTH_AUTOEAT, OXYGEN_DROWNING, OXYGEN_FALL_SAFE } = require('../config/safety')
+const { HEALTH_AUTOEAT, FOOD_FULL, OXYGEN_DROWNING, OXYGEN_FALL_SAFE } = require('../config/safety')
 const { WATER_BLOCKS, FIRE_BLOCKS } = require('../config/blocks')
 const T = require('../config/timings')
 const { entityTag } = require('../perception/entityTag')
@@ -12,9 +12,11 @@ function setupAutonomous(interruptFn) {
 
   // --- AUTO-EAT on low health ---
   bot.on('health', () => {
-    if (bot.health <= HEALTH_AUTOEAT) {
-      const foods = bot.inventory.items().filter(i => i.foodRecovery > 0)
-      if (foods.length > 0 && !state.currentTask?.includes('eating')) {
+    if (bot.health <= HEALTH_AUTOEAT && bot.food < FOOD_FULL) {
+      const { edibleFoods } = require('../actions/vitals')
+      // One eat at a time: 'health' fires on every HP/food change.
+      const eating = state.backgroundTask?.action === 'eat' || state.actionQueue.some(a => a.actionStr === 'eat')
+      if (edibleFoods(bot).length > 0 && !eating) {
         console.log(`  [AUTO] HP=${Math.round(bot.health)}, eating`)
         interruptFn()
         // Prepend eat to front of queue instead of replacing
