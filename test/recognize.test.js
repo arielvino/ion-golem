@@ -139,3 +139,39 @@ test('nether bricks + blaze → fortress', () => {
   const members = [at('nether_bricks', 0, 70, 0), at('nether_brick_fence', 1, 70, 0), at('blaze', 2, 71, 0, true)]
   assert.equal(guess(members, c).hyps[0].kind, 'nether_fortress')
 })
+
+test('fire gives away lava out of sight: fire alone reads as a lava pool', () => {
+  const members = [at('fire', 0, 64, 0), at('fire', 1, 64, 0)]
+  assert.equal(guess(members, compile(mcData, 'overworld')).hyps[0].kind, 'lava_pool')
+})
+
+test('lava + fire alone is a pool; add obsidian and it is a ruined portal first', () => {
+  const ow = compile(mcData, 'overworld')
+  const pool = [at('lava', 0, 64, 0), at('lava', 1, 64, 0), at('fire', 2, 65, 0)]
+  assert.deepEqual(guess(pool, ow).hyps.map(h => h.kind), ['lava_pool'])
+  const portal = [...pool, at('obsidian', 3, 64, 0), at('obsidian', 3, 65, 0), at('crying_obsidian', 3, 66, 0)]
+  assert.equal(guess(portal, ow).hyps[0].kind, 'ruined_portal')
+})
+
+test('the ruined portal seen in the field beats stronghold clearly', () => {
+  // cue counts from the live probe at a generated overworld ruined portal
+  const seen = { netherrack: 16, cracked_stone_bricks: 7, obsidian: 6, magma_block: 5, crying_obsidian: 4, stone_bricks: 3, iron_bars: 2, gold_block: 1 }
+  const members = Object.entries(seen).flatMap(([n, k]) => Array.from({ length: k }, (_, i) => at(n, i, 64, 0)))
+  const top = guess(members, compile(mcData, 'overworld'), 'forest').hyps[0]
+  assert.equal(top.kind, 'ruined_portal')
+  // stronghold keeps a real share: the stone bricks and iron bars genuinely overlap. What
+  // truly separates them is depth (strongholds are always buried) — no depth prior yet.
+  assert.ok(top.share > 0.8, `share ${top.share.toFixed(2)}`)
+})
+
+test('the nether never reads lava or fire as a place', () => {
+  const members = [at('lava', 0, 30, 0), at('lava', 1, 30, 0), at('fire', 2, 31, 0)]
+  assert.equal(guess(members, compile(mcData, 'the_nether')).hyps.length, 0)
+})
+
+test('a kind can claim names from all its variants without scanning out-of-dimension cues', () => {
+  const nether = compile(mcData, 'the_nether')
+  const rp = nether.kinds.find(k => k.kind === 'ruined_portal')
+  assert.ok(rp.names.has('obsidian'))
+  assert.ok(![...nether.idToName.values()].includes('netherrack'))
+})

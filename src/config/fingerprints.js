@@ -10,6 +10,8 @@
 // blocks: block name → weight. A leading '*' matches by suffix ('*_planks' = any planks).
 // entities: entity name → weight. Only LOS-visible entities count.
 // minScore: below this total a cluster is not reported as this kind at all.
+// minCues (default 2): distinct cue types needed. One type alone is a coincidence for a
+//   structure, but a feature made of one material (a lava pool) needs only 1.
 // dimensions: where the kind can exist at all ('overworld', 'the_nether', 'the_end').
 //   A hard gate — elsewhere the kind is dropped and its cues are not even searched for.
 // biomes (optional): where it generates. A soft prior, not a gate: a mismatch only
@@ -47,7 +49,7 @@ const FINGERPRINTS = [
         biomes: ['plains', 'meadow'],
         blocks: {
           dirt_path: 2, oak_planks: 1.5, stripped_oak_log: 1.5, oak_stairs: 1, oak_fence: 1,
-          oak_door: 1, white_wool: 1, yellow_wool: 1, white_terracotta: 1,
+          oak_door: 1, white_wool: 1, yellow_wool: 1, white_terracotta: 1, mossy_cobblestone: 0.5,
         },
       },
       desert: {
@@ -90,7 +92,7 @@ const FINGERPRINTS = [
     biomes: ['plains', 'desert', 'savanna', 'taiga', 'snowy_plains', 'meadow', 'frozen_peaks', 'jagged_peaks', 'stony_peaks', 'snowy_slopes', 'cherry_grove', 'grove'],
     blocks: {
       dark_oak_log: 2, dark_oak_planks: 2, dark_oak_stairs: 1, dark_oak_fence: 2, birch_planks: 1,
-      cobblestone: 1, mossy_cobblestone: 0.5, white_wool: 0.5, carved_pumpkin: 1.5,
+      cobblestone: 1, mossy_cobblestone: 0.5, white_wool: 0.5, hay_block: 0.5, carved_pumpkin: 1.5,
       white_wall_banner: 3,
     },
     // allays are caged only at outposts; pillagers also roam the world in patrols
@@ -128,7 +130,8 @@ const FINGERPRINTS = [
   {
     kind: 'dungeon',
     dimensions: ['overworld'],
-    blocks: { spawner: 4, mossy_cobblestone: 2, cobblestone: 0.5 },
+    // the spawner is the dungeon; mossy cobblestone is also a village and outpost material
+    blocks: { spawner: 4, mossy_cobblestone: 1, cobblestone: 0.25 },
     entities: {},
     minScore: 4,
   },
@@ -155,12 +158,31 @@ const FINGERPRINTS = [
     kind: 'ruined_portal',
     dimensions: ['overworld', 'the_nether'],
     blocks: { crying_obsidian: 4, obsidian: 2, gold_block: 2 },
-    // netherrack and magma are nearly proof in the overworld and the ground in the nether
+    // netherrack, magma and lava are nearly proof in the overworld and the ground in the
+    // nether. Overworld portals are framed in stone bricks that randomly crack or moss
+    // (minecraft.wiki), which a stronghold shares — the obsidian core tells them apart.
     variants: {
-      overworld: { dimensions: ['overworld'], blocks: { netherrack: 3, magma_block: 1 } },
+      overworld: {
+        dimensions: ['overworld'],
+        blocks: {
+          netherrack: 3, magma_block: 1, lava: 1, fire: 1, stone_bricks: 1, cracked_stone_bricks: 1.5,
+          mossy_stone_bricks: 1, chiseled_stone_bricks: 1, stone_brick_stairs: 1, mossy_stone_brick_stairs: 1,
+          iron_bars: 1,
+        },
+      },
       nether: { dimensions: ['the_nether'], blocks: {} },
     },
     entities: {},
+    minScore: 4,
+  },
+  {
+    // A feature, not a structure: all it is made of is lava, so one cue type is enough.
+    // Fire is how lava gives itself away when the pool is out of sight.
+    kind: 'lava_pool',
+    dimensions: ['overworld'],
+    blocks: { lava: 3, fire: 2 },
+    entities: {},
+    minCues: 1,
     minScore: 4,
   },
   {

@@ -23,6 +23,7 @@ const { blockVisible } = require('./visibility')
 const { hasLineOfSight } = require('./vision')
 
 const LINK = 10          // blocks: two visible cues closer than this belong to one place
+const MERGE = 40         // blocks: same-kind places closer than this are one (a village's houses)
 const VISIBLE_CAP = 16   // per block type: stop LOS-testing once this many are seen
 const COUNT_SAT = 8      // per cue: sightings beyond this add no more evidence
 const OFF_BIOME = 0.4    // score factor for a kind seen outside the biomes it generates in
@@ -45,8 +46,9 @@ function compile(mcData, dimension = null) {
   const idToName = new Map()
   const entityCues = new Set()
   const existsHere = (x) => !dimension || !x.dimensions || x.dimensions.includes(dimension)
+  const namesOf = (k) => mcData.blocksArray.filter(b => matches(k, b.name)).map(b => b.name)
   const blockCuesOf = (blocks) => Object.entries(blocks).map(([k, w]) => {
-    const names = new Set(mcData.blocksArray.filter(b => matches(k, b.name)).map(b => b.name))
+    const names = new Set(namesOf(k))
     for (const n of names) {
       const b = mcData.blocksByName[n]
       for (let id = b.minStateId; id <= b.maxStateId; id++) idToName.set(id, n)
@@ -59,8 +61,13 @@ function compile(mcData, dimension = null) {
       ? Object.entries(fp.variants).filter(([, v]) => existsHere(v))
         .map(([name, v]) => ({ name, biomes: v.biomes ? new Set(v.biomes) : null, blockCues: blockCuesOf(v.blocks) }))
       : [{ name: null, biomes: fp.biomes ? new Set(fp.biomes) : null, blockCues: [] }]
+    // every name this kind can claim, for absorbing unrecognized scraps (no scan side effect)
+    const names = new Set(Object.keys(fp.entities))
+    for (const blocks of [fp.blocks, ...variants.map(v => fp.variants?.[v.name]?.blocks || {})]) {
+      for (const k of Object.keys(blocks)) for (const n of namesOf(k)) names.add(n)
+    }
     return {
-      kind: fp.kind, minScore: fp.minScore, hasVariants: !!fp.variants, variants,
+      kind: fp.kind, minScore: fp.minScore, minCues: fp.minCues ?? 2, hasVariants: !!fp.variants, variants, names,
       blockCues: blockCuesOf(fp.blocks),
       entityCues: Object.entries(fp.entities).map(([k, w]) => ({ key: k, w })),
     }
@@ -145,8 +152,8 @@ function guess(members, c, biome = null) {
     for (const v of k.variants) {
       const own = tally(v.blockCues)
       let score = core.score + own.score
-      // one cue type alone is a coincidence, not a place
-      if (core.hit + own.hit < 2) continue
+      // one cue type alone is a coincidence, not a place (unless the kind says otherwise)
+      if (core.hit + own.hit < k.minCues) continue
       if (biome && v.biomes && !v.biomes.has(biome)) score *= OFF_BIOME
       if (!best || score > best.score) best = { v, score, missing: [...core.missing, ...own.missing] }
     }
@@ -169,11 +176,50 @@ function biomeAt(bot, mcData, at) {
   } catch { return null }
 }
 
+// The merged group (from mergeSameKind) within MERGE of scrap `g` whose kind claims at
+// least one of g's cues, nearest first. null = g stays unrecognized.
+function nearestOwner(g, groups, c) {
+  let best = null, bestD2 = MERGE * MERGE
+  for (const group of groups) {
+    const kind = c.kinds.find(k => k.kind === group[0].hyps[0].kind)
+    if (![...g.counts.keys()].some(n => kind.names.has(n))) continue
+    for (const p of group) {
+      const dx = p.at.x - g.at.x, dy = p.at.y - g.at.y, dz = p.at.z - g.at.z
+      const d2 = dx * dx + dy * dy + dz * dz
+      if (d2 <= bestD2) { bestD2 = d2; best = group }
+    }
+  }
+  return best
+}
+
+// Union places whose top guess is the same kind and whose centers are within MERGE.
+function mergeSameKind(places) {
+  const parent = places.map((_, i) => i)
+  const find = (i) => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i }
+  for (let i = 0; i < places.length; i++) {
+    for (let j = i + 1; j < places.length; j++) {
+      if (places[i].hyps[0].kind !== places[j].hyps[0].kind) continue
+      const a = places[i].at, b = places[j].at
+      const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z
+      if (dx * dx + dy * dy + dz * dz <= MERGE * MERGE) parent[find(i)] = find(j)
+    }
+  }
+  const groups = new Map()
+  for (let i = 0; i < places.length; i++) {
+    const r = find(i)
+    if (!groups.has(r)) groups.set(r, [])
+    groups.get(r).push(places[i])
+  }
+  return [...groups.values()]
+}
+
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
 // → { places: [{ at:{x,y,z}, biome, dist, dir, counts: Map, hyps: [{kind,variant,score,share,missing}] }],
-//     unrecognized, candidates, losTests, visible, ms }
+//     unrecognized, unrecognizedGroups: [{ at, biome, dist, dir, counts }], candidates, losTests, visible, ms }
+//   unrecognizedGroups: cue clusters no fingerprint explains — "something is there".
+//   Kept rather than dropped: they are what a new fingerprint would be written from.
 function recognize({ maxDistance = 48 } = {}) {
   const bot = state.bot
   if (!bot?.entity) return null
@@ -183,20 +229,39 @@ function recognize({ maxDistance = 48 } = {}) {
   const eye = bot.entity.position.offset(0, 1.62, 0)
   const { cues, candidates, losTests } = visibleCues(eye, maxDistance, c)
 
-  const places = []
-  let unrecognized = 0
-  for (const members of cluster(cues)) {
+  // First pass: each cluster on its own. Second pass: a village is many houses with
+  // open ground between them, so places whose best guess is the same kind and whose
+  // centers are close are merged, and a nearby unrecognized scrap made of that kind's
+  // cues (a lone house wall, the outpost floor under the bot's feet) is absorbed; each
+  // merged place is re-guessed on its pooled evidence.
+  const guessed = cluster(cues).map(members => place(members))
+  const merged = mergeSameKind(guessed.filter(p => p.hyps.length))
+  const unrecognizedGroups = []
+  for (const g of guessed.filter(p => !p.hyps.length)) {
+    const home = nearestOwner(g, merged, c)
+    if (home) home.push(g)
+    else unrecognizedGroups.push(g)
+  }
+  const places = merged.map(group => group.length === 1 ? group[0] : place(group.flatMap(p => p.members)))
+    .filter(p => p.hyps.length)
+  for (const p of [...places, ...unrecognizedGroups]) {
+    const dx = p.at.x - eye.x, dy = p.at.y - eye.y, dz = p.at.z - eye.z
+    p.dist = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz))
+    p.dir = compass(dx, dz)
+  }
+
+  function place(members) {
     const at = { x: 0, y: 0, z: 0 }
     for (const m of members) { at.x += m.x; at.y += m.y; at.z += m.z }
     for (const a of ['x', 'y', 'z']) at[a] = Math.round(at[a] / members.length)
     const biome = biomeAt(bot, mcData, at)
     const { counts, hyps } = guess(members, c, biome)
-    if (hyps.length === 0) { unrecognized++; continue }
-    const dx = at.x - eye.x, dy = at.y - eye.y, dz = at.z - eye.z
-    places.push({ at, biome, dist: Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz)), dir: compass(dx, dz), counts, hyps })
+    return { at, biome, counts, hyps, members }
   }
+
   places.sort((a, b) => a.dist - b.dist)
-  return { places, unrecognized, candidates, losTests, visible: cues.length, maxDistance, ms: Date.now() - t0 }
+  for (const p of [...places, ...unrecognizedGroups]) delete p.members
+  return { places, unrecognized: unrecognizedGroups.length, unrecognizedGroups, candidates, losTests, visible: cues.length, maxDistance, ms: Date.now() - t0 }
 }
 
 function formatRecognition(r) {
@@ -209,7 +274,9 @@ function formatRecognition(r) {
     const confirm = p.hyps.slice(0, 2).map(h => `${label(h)}: ${h.missing.join(', ') || '—'}`).join('; ')
     return `  ~${p.dist}m ${p.dir} @${p.at.x},${p.at.y},${p.at.z}${p.biome ? ` (${p.biome})` : ''}: ${guesses}\n    seen: ${seen}\n    would confirm → ${confirm}`
   })
-  return [head, ...lines].join('\n')
+  const odd = r.unrecognizedGroups.slice(0, 3).map(g =>
+    `  unrecognized ~${g.dist}m ${g.dir}: ${[...g.counts].map(([n, k]) => `${n}×${k}`).join(' ')}`)
+  return [head, ...lines, ...odd].join('\n')
 }
 
 module.exports = { recognize, formatRecognition, compile, cluster, guess }
