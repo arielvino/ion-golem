@@ -175,3 +175,17 @@ test('a kind can claim names from all its variants without scanning out-of-dimen
   assert.ok(rp.names.has('obsidian'))
   assert.ok(![...nether.idToName.values()].includes('netherrack'))
 })
+
+test('context line: a sure guess is terse, an unsure one says what would settle it', () => {
+  const { formatPlacesContext } = require('../src/perception/recognize')
+  const counts = new Map()
+  const sure = { at: { x: 1, y: 64, z: 2 }, dist: 5, dir: 'N', counts, hyps: [{ kind: 'village', variant: 'plains', share: 1, missing: ['hay_block'] }] }
+  const unsure = { at: { x: 9, y: 70, z: 9 }, dist: 10, dir: 'SE', counts, hyps: [
+    { kind: 'ruined_portal', variant: 'overworld', share: 0.65, missing: ['mossy_stone_bricks'] },
+    { kind: 'lava_pool', variant: null, share: 0.22, missing: [] },
+    { kind: 'stronghold', variant: null, share: 0.13, missing: [] },
+  ] }
+  assert.equal(formatPlacesContext({ places: [] }), '')
+  assert.equal(formatPlacesContext({ places: [sure, unsure] }),
+    ' PLACES=[village(plains)@1,64,2 5m N | ruined_portal(overworld)@9,70,9 10m SE 0.65 or lava_pool 0.22 confirm:mossy_stone_bricks]')
+})

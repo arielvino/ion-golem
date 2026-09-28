@@ -23,7 +23,9 @@ const { blockVisible } = require('./visibility')
 const { hasLineOfSight } = require('./vision')
 
 const LINK = 10          // blocks: two visible cues closer than this belong to one place
-const MERGE = 40         // blocks: same-kind places closer than this are one (a village's houses)
+const MERGE = 32         // blocks: same-kind places whose nearest members are this close are one
+                         // place (a village's houses); measured edge-to-edge, not center-to-center,
+                         // because a sprawling village's halves have centers 45+ blocks apart
 const VISIBLE_CAP = 16   // per block type: stop LOS-testing once this many are seen
 const COUNT_SAT = 8      // per cue: sightings beyond this add no more evidence
 const OFF_BIOME = 0.4    // score factor for a kind seen outside the biomes it generates in
@@ -176,6 +178,19 @@ function biomeAt(bot, mcData, at) {
   } catch { return null }
 }
 
+// Squared distance between the nearest members of two places (edge-to-edge gap).
+function gap2(a, b) {
+  let best = Infinity
+  for (const m of a.members) {
+    for (const n of b.members) {
+      const dx = m.x - n.x, dy = m.y - n.y, dz = m.z - n.z
+      const d2 = dx * dx + dy * dy + dz * dz
+      if (d2 < best) best = d2
+    }
+  }
+  return best
+}
+
 // The merged group (from mergeSameKind) within MERGE of scrap `g` whose kind claims at
 // least one of g's cues, nearest first. null = g stays unrecognized.
 function nearestOwner(g, groups, c) {
@@ -184,24 +199,21 @@ function nearestOwner(g, groups, c) {
     const kind = c.kinds.find(k => k.kind === group[0].hyps[0].kind)
     if (![...g.counts.keys()].some(n => kind.names.has(n))) continue
     for (const p of group) {
-      const dx = p.at.x - g.at.x, dy = p.at.y - g.at.y, dz = p.at.z - g.at.z
-      const d2 = dx * dx + dy * dy + dz * dz
+      const d2 = gap2(p, g)
       if (d2 <= bestD2) { bestD2 = d2; best = group }
     }
   }
   return best
 }
 
-// Union places whose top guess is the same kind and whose centers are within MERGE.
+// Union places whose top guess is the same kind and whose nearest members are within MERGE.
 function mergeSameKind(places) {
   const parent = places.map((_, i) => i)
   const find = (i) => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i }
   for (let i = 0; i < places.length; i++) {
     for (let j = i + 1; j < places.length; j++) {
       if (places[i].hyps[0].kind !== places[j].hyps[0].kind) continue
-      const a = places[i].at, b = places[j].at
-      const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z
-      if (dx * dx + dy * dy + dz * dz <= MERGE * MERGE) parent[find(i)] = find(j)
+      if (gap2(places[i], places[j]) <= MERGE * MERGE) parent[find(i)] = find(j)
     }
   }
   const groups = new Map()
@@ -279,4 +291,26 @@ function formatRecognition(r) {
   return [head, ...lines, ...odd].join('\n')
 }
 
-module.exports = { recognize, formatRecognition, compile, cluster, guess }
+// The per-turn context line — data only, how to read it lives in the system prompt.
+// A confident guess is just kind + where; an unsure one adds its share, the runner-up
+// and the unseen cues that would settle it. Unrecognized groups are left out: noise
+// at this resolution (the debug `places` action shows them).
+const SURE = 0.9, ALT = 0.15, MAX_PLACES = 4
+function formatPlacesContext(r) {
+  if (!r?.places.length) return ''
+  const label = (h) => h.variant ? `${h.kind}(${h.variant})` : h.kind
+  const items = r.places.slice(0, MAX_PLACES).map(p => {
+    const [top, ...rest] = p.hyps
+    let s = `${label(top)}@${p.at.x},${p.at.y},${p.at.z} ${p.dist}m ${p.dir}`
+    if (top.share < SURE) {
+      s += ` ${top.share.toFixed(2)}`
+      const alts = rest.filter(h => h.share >= ALT).map(h => `${label(h)} ${h.share.toFixed(2)}`)
+      if (alts.length) s += ` or ${alts.join(', ')}`
+      if (top.missing.length) s += ` confirm:${top.missing.slice(0, 2).join(',')}`
+    }
+    return s
+  })
+  return ` PLACES=[${items.join(' | ')}]`
+}
+
+module.exports = { recognize, formatRecognition, formatPlacesContext, compile, cluster, guess }

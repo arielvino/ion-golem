@@ -3,6 +3,7 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { getLastVisionResult, formatVision, hasLineOfSight } = require('../perception/vision')
 const { getLastSurvey } = require('../perception/visibility')
+const { recognize, formatPlacesContext } = require('../perception/recognize')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
 const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
@@ -250,6 +251,13 @@ function getBotContext() {
     }
   } catch(e) { console.warn('  [CTX] biome detection err:', e.message) }
 
+  let placesInfo = ''
+  try {
+    const r = recognize({ maxDistance: ranges.sight.placesBlocks })
+    placesInfo = formatPlacesContext(r)
+    if (r?.ms > 150) console.log(`  [PLACES] slow ${r.ms}ms (${r.losTests} los / ${r.candidates} scan)`)
+  } catch (e) { console.warn('  [CTX] places err:', e.message) }
+
   const pathCount = countNearbyPathBlocks(pos)
   const pathInfo = pathCount > 0 ? ` paths=${pathCount}` : ''
 
@@ -279,7 +287,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${placesInfo}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
   // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
