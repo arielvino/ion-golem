@@ -2,8 +2,10 @@
 // and bucket fill (item-use on a liquid source).
 const state = require('../core/state')
 const { stopAll, sleep } = require('../core/tick')
+const { Vec3 } = require('vec3')
 const { navigateTo } = require('../navigation/navigation')
-const { sendChat, normalizeItemName, fuzzyMatch, parseCoordTarget } = require('../core/utils')
+const { sendChat, normalizeItemName, fuzzyMatch, parseCoordTarget, recordFailure } = require('../core/utils')
+const { findKnownBlocks, reachKnownBlock } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 
 async function doUse(target) {
@@ -12,52 +14,42 @@ async function doUse(target) {
   const mcData = require('minecraft-data')(bot.version)
   state.currentTask = `using ${target}`
 
-  let block = null
-
-  // Parse target — could be "block:X,Y,Z" coords or just a block name
+  // Parse target — "block:X,Y,Z" coords, or the nearest block of that name the bot has seen
+  let pos = null
+  let accept = b => b.name !== 'air'
+  let label = target
   const coord = parseCoordTarget(target)
   if (coord) {
-    const { x, y, z } = coord
-    block = bot.blockAt(new (require('vec3').Vec3)(x, y, z))
-    if (!block || block.name === 'air') {
-      sendChat(`No block at ${x},${y},${z}!`)
-      state.currentTask = null
-      return
-    }
+    pos = new Vec3(coord.x, coord.y, coord.z)
+    label = coord.name || 'block'
   } else {
-    // Search for block by name nearby
     const normalized = normalizeItemName(target)
-    const matchingBlocks = Object.entries(mcData.blocksByName)
-      .filter(([name]) => fuzzyMatch(name, normalized))
-      .map(([, b]) => b.id)
-
-    if (matchingBlocks.length === 0) {
+    const names = Object.keys(mcData.blocksByName).filter(name => fuzzyMatch(name, normalized))
+    if (names.length === 0) {
       sendChat(`Don't know block "${target}"!`)
       state.currentTask = null
       return
     }
-
-    block = bot.findBlock({ matching: matchingBlocks, maxDistance: 32 })
-    if (!block) {
+    const known = findKnownBlocks(names, { maxDistance: 32, count: 1 })
+    if (known.length === 0) {
       sendChat(`Can't find ${target} nearby!`)
+      recordFailure(`use:${target} - none seen within 32 blocks`)
       state.currentTask = null
       return
     }
+    pos = known[0].pos
+    accept = b => names.includes(b.name)
+    label = known[0].name || target
   }
 
-  // Navigate to the block
-  const dist = bot.entity.position.distanceTo(block.position)
-  if (dist > 3) {
-    await navigateTo(block.position.x, block.position.y, block.position.z, 3, 30000)
-  }
-
-  // Re-fetch block in case we moved
-  block = bot.blockAt(block.position)
-  if (!block || block.name === 'air') {
-    sendChat(`Block disappeared!`)
+  // Walk up to it; use it only when it is in reach and in sight
+  const r = await reachKnownBlock(pos, accept, label, 30000)
+  if (!r.block) {
+    if (r.why !== 'aborted') { sendChat(`Can't use ${label}!`); recordFailure(`use:${target} - ${r.why}`) }
     state.currentTask = null
     return
   }
+  const block = r.block
 
   try {
     await bot.activateBlock(block)
@@ -88,12 +80,9 @@ async function doFill(targetName) {
   const liquidBlock = mcData.blocksByName[liquidName]
   if (!liquidBlock) { sendChat(`Unknown liquid: ${liquidName}`); return false }
 
-  // Find source blocks (metadata 0 = still/source, not flowing)
-  const allLiquid = bot.findBlocks({
-    matching: liquidBlock.id,
-    maxDistance: 32,
-    count: 100,
-  })
+  // Find source blocks (metadata 0 = still/source, not flowing) — only ones in sight
+  const allLiquid = findKnownBlocks([liquidName], { maxDistance: 32, count: 100 })
+    .filter(k => k.seen === 'now').map(k => k.pos)
   const sources = allLiquid.filter(pos => {
     const b = bot.blockAt(pos)
     return b && b.metadata === 0

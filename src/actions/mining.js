@@ -5,6 +5,7 @@ const { tickWait, raceAbort, AbortError, stopAll, isAborted } = require('../core
 const { navigateTo, digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
+const { approachToTouch, touchFailText } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 
@@ -161,19 +162,20 @@ async function doMine(targetName, opts = {}) {
   debugChat(`[mine] ${block.name} @${bPos.x},${bPos.y},${bPos.z} (${dirStr} ${dist}m)`)
   console.log(`\n  found ${blockType.name} at (${bPos.x},${bPos.y},${bPos.z}) dist=${dist}`)
 
-  // Simple navigation: pathfinder only. If it fails, report and let AI decide.
-  const reached = await navigateTo(bPos.x, bPos.y, bPos.z, 4, 15000)
-  if (isAborted()) break
-  if (!reached) {
-    const newDist = Math.round(bot.entity.position.distanceTo(bPos))
-    console.log(`  can't reach ${blockType.name} at (${bPos.x},${bPos.y},${bPos.z}), ${newDist}m away`)
-    recordFailure(`mine:${targetName} - can't reach (${bPos.x},${bPos.y},${bPos.z}), ${newDist}m away. Use [ACTION:goto:${bPos.x},${bPos.y},${bPos.z}] to get closer first.`)
+  // Walk up to it; dig only when it is in reach and in sight. Being out of reach says
+  // nothing about the block itself, so it is reported, never blacklisted.
+  const touch = await approachToTouch(bPos, 15000)
+  if (!touch || isAborted()) break
+  if (!touch.ok) {
+    const why = touchFailText(block.name, bPos, touch)
+    console.log(`  can't mine: ${why}`)
+    recordFailure(`mine:${targetName} - ${why}. Use [ACTION:goto:${bPos.x},${bPos.y},${bPos.z}] to get closer first.`)
     break
   }
 
   try {
     const target = bot.blockAt(bPos)
-    if (target && bot.canDigBlock(target)) {
+    if (target && target.diggable) {
       // The dig itself goes through the atomic. Intent 'harvest' equips a
       // drop-capable tool and REFUSES a block that would drop nothing without one
       // — unless the AI escalated with :skiptool (→ clear-no-tool, hand-mine it).
@@ -211,12 +213,15 @@ async function doMine(targetName, opts = {}) {
         break
       } else {
         console.log(`  dig failed on ${target.name} (${res.reason})`)
-        state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
+        // Only a block that can't be broken at all is skipped from now on; a refusal
+        // (not permitted yet, hazard next to it, protected path block) may change.
+        if (res.reason === 'unbreakable' || res.reason === 'not_diggable') state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
         recordFailure(`mine:${targetName} - block at ${bPos.x},${bPos.y},${bPos.z} ${res.reason === 'unbreakable' ? 'unbreakable (wrong tool?)' : `could not be dug (${res.reason})`}`)
       }
     } else {
       console.log(`  can't dig ${target?.name || 'null'}`)
       state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
+      recordFailure(`mine:${targetName} - ${target ? `${target.name} at ${bPos.x},${bPos.y},${bPos.z} can't be dug` : `block at ${bPos.x},${bPos.y},${bPos.z} is unloaded`}`)
     }
   } catch (err) {
     if (err instanceof AbortError) throw err

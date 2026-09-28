@@ -1,12 +1,13 @@
 // Inventory actions — drop, equip, unequip, give, require, take, deposit, inspect.
 // (eat/sleep live in ./vitals, bucket fill lives in ./interaction)
 const state = require('../core/state')
-const { navigateTo } = require('../navigation/navigation')
+const { Vec3 } = require('vec3')
 const { isAborted } = require('../core/tick')
 const { doCome } = require('./movement')
 const { sendChat, debugChat, normalizeItemName, recordFailure, fuzzyMatch, resolvePlayerName, logEvent } = require('../core/utils')
 const { searchContainersFor, saveContainerState, removeContainerState, logGameEvent } = require('../world/memory')
 const { getFurnaceState, saveContainerItems } = require('./containers')
+const { findKnownBlocks, reachKnownBlock } = require('../perception/touch')
 
 async function doDrop(targetName) {
   const bot = state.bot
@@ -155,6 +156,7 @@ async function doTake(target) {
   const itemName = normalizeItemName(parts[0])
   const count = parts.length > 1 ? parseInt(parts[1], 10) : 1
   let remaining = count
+  const whyNot = []
 
   const hits = searchContainersFor(itemName, bot.entity.position, 256)
     .filter(h => STORAGE_TYPES.has(h.type))
@@ -171,15 +173,15 @@ async function doTake(target) {
   for (const [, pos] of containers) {
     if (remaining <= 0) break
 
-    const block = bot.blockAt(require('vec3')(pos.x, pos.y, pos.z))
-    if (!block || !STORAGE_TYPES.has(block.name)) {
-      removeContainerState(pos.x, pos.y, pos.z)
-      console.log(`  take: stale container at ${pos.x},${pos.y},${pos.z} removed`)
+    const r = await reachKnownBlock(new Vec3(pos.x, pos.y, pos.z), b => STORAGE_TYPES.has(b.name), pos.type, 30000)
+    if (isAborted()) break
+    if (!r.block) {
+      if (r.gone) removeContainerState(pos.x, pos.y, pos.z)
+      console.log(`  take: ${r.why}`)
+      whyNot.push(r.why)
       continue
     }
-
-    const arrived = await navigateTo(pos.x, pos.y, pos.z, 3, 30000)
-    if (!arrived) { console.log(`  take: can't reach ${pos.x},${pos.y},${pos.z}`); continue }
+    const block = r.block
 
     let container
     try {
@@ -219,7 +221,7 @@ async function doTake(target) {
     sendChat(`Got ${count}x ${itemName} from storage`)
     return
   }
-  throw new Error(`take: got ${got}/${count} ${itemName}`)
+  throw new Error(`take: got ${got}/${count} ${itemName}${whyNot.length ? ` (${whyNot.join('; ')})` : ''}`)
 }
 
 async function doDeposit(target) {
@@ -240,14 +242,12 @@ async function doDeposit(target) {
     return
   }
 
-  // Find nearby storage containers (from memory + live scan)
-  const mcData = require('minecraft-data')(bot.version)
+  // Storage the bot has seen, now or before
   const storageNames = [...STORAGE_TYPES]
-  const storageIds = storageNames.map(n => mcData.blocksByName[n]?.id).filter(Boolean)
-  const foundPositions = bot.findBlocks({ matching: storageIds, maxDistance: 64, count: 10 })
+  const foundPositions = findKnownBlocks(storageNames, { maxDistance: 64, count: 10 }).map(k => k.pos)
   if (foundPositions.length === 0) {
     sendChat("No chests or storage nearby!")
-    recordFailure('deposit - no storage containers found within 64 blocks')
+    recordFailure('deposit - no storage container seen within 64 blocks')
     state.currentTask = null
     return
   }
@@ -257,16 +257,16 @@ async function doDeposit(target) {
   foundPositions.sort((a, b) => a.distanceTo(pos) - b.distanceTo(pos))
 
   let totalDeposited = 0
+  const whyNot = []
   let remaining = isAll ? Infinity : count
 
   for (const containerPos of foundPositions) {
     if (!isAll && remaining <= 0) break
 
-    const block = bot.blockAt(containerPos)
-    if (!block || !STORAGE_TYPES.has(block.name)) continue
-
-    const arrived = await navigateTo(containerPos.x, containerPos.y, containerPos.z, 3, 30000)
-    if (!arrived) { console.log(`  deposit: can't reach ${containerPos.x},${containerPos.y},${containerPos.z}`); continue }
+    const r = await reachKnownBlock(containerPos, b => STORAGE_TYPES.has(b.name), 'container', 30000)
+    if (isAborted()) break
+    if (!r.block) { console.log(`  deposit: ${r.why}`); whyNot.push(r.why); continue }
+    const block = r.block
 
     let container
     try {
@@ -310,37 +310,37 @@ async function doDeposit(target) {
     sendChat(`Deposited ${totalDeposited}x ${isAll ? 'items' : itemName} into storage`)
     return
   }
-  throw new Error(`deposit: couldn't deposit ${itemName} (no space or container unreachable)`)
+  throw new Error(`deposit: couldn't deposit ${itemName} (${whyNot.length ? whyNot.join('; ') : 'no space'})`)
 }
 
 async function doInspect(target) {
   const bot = state.bot
-  const { Vec3 } = require('vec3')
   state.currentTask = `inspecting container`
 
-  // Parse target — either "X,Y,Z" coords or find nearest container
-  let block
+  // Parse target — either "X,Y,Z" coords or the nearest container the bot has seen
+  const FURNACES = ['furnace', 'blast_furnace', 'smoker']
+  let pos
   const coordMatch = target.match(/^(-?\d+),(-?\d+),(-?\d+)$/)
   if (coordMatch) {
-    const pos = new Vec3(parseInt(coordMatch[1]), parseInt(coordMatch[2]), parseInt(coordMatch[3]))
-    block = bot.blockAt(pos)
+    pos = new Vec3(parseInt(coordMatch[1]), parseInt(coordMatch[2]), parseInt(coordMatch[3]))
   } else {
-    // Find nearest container
-    const mcData = require('minecraft-data')(bot.version)
-    const containerNames = ['chest', 'trapped_chest', 'barrel', 'furnace', 'blast_furnace', 'smoker']
-    const ids = containerNames.map(n => mcData.blocksByName[n]?.id).filter(Boolean)
-    block = bot.findBlock({ matching: ids, maxDistance: 32 })
+    const known = findKnownBlocks(['chest', 'trapped_chest', 'barrel', ...FURNACES], { maxDistance: 32, count: 1 })
+    if (known.length === 0) {
+      sendChat('No container found nearby!')
+      recordFailure('inspect - no container seen within 32 blocks')
+      state.currentTask = null
+      return
+    }
+    pos = known[0].pos
   }
 
-  if (!block || (!STORAGE_TYPES.has(block.name) && !['furnace', 'blast_furnace', 'smoker'].includes(block.name))) {
-    sendChat('No container found nearby!')
+  const r = await reachKnownBlock(pos, b => STORAGE_TYPES.has(b.name) || FURNACES.includes(b.name), 'container', 15000)
+  if (!r.block) {
+    if (r.why !== 'aborted') { sendChat("Can't reach the container!"); recordFailure(`inspect - ${r.why}`) }
     state.currentTask = null
     return
   }
-
-  const pos = block.position
-  const arrived = await navigateTo(pos.x, pos.y, pos.z, 3, 15000)
-  if (!arrived) { sendChat("Can't reach the container!"); state.currentTask = null; return }
+  const block = r.block
 
   try {
     if (['furnace', 'blast_furnace', 'smoker'].includes(block.name)) {

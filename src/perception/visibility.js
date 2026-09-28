@@ -47,7 +47,8 @@ function inFov(eye, look, point, cosHalf) {
 // block from occluding itself, and (vs corners) avoids 1px-sliver false positives.
 // This is an approximation of true per-pixel visibility, deliberately: a block that is
 // ~95% occluded may read as unseen, which is harmless for awareness/navigation.
-function blockVisible(eye, bx, by, bz) {
+// `passSet` overrides which blocks the sightline passes through (default: see-through).
+function blockVisible(eye, bx, by, bz, passSet) {
   const faces = []
   if (eye.x > bx + 1) faces.push({ d: eye.x - (bx + 1), p: new Vec3(bx + 1, by + 0.5, bz + 0.5) })
   else if (eye.x < bx) faces.push({ d: bx - eye.x, p: new Vec3(bx, by + 0.5, bz + 0.5) })
@@ -59,7 +60,7 @@ function blockVisible(eye, bx, by, bz) {
   if (faces.length === 0) return true // eye sits within the block's cell on every axis
   faces.sort((a, b) => b.d - a.d) // most face-on first → best early-exit odds
   for (const f of faces) {
-    if (rayClear(eye, f.p)) return true
+    if (rayClear(eye, f.p, passSet)) return true
   }
   return false
 }

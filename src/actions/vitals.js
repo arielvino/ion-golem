@@ -1,7 +1,7 @@
 // Vitals actions — survival upkeep: eat (hunger) and sleep (rest)
 const state = require('../core/state')
 const { sleep, waitForEventOrTimeout } = require('../core/tick')
-const { navigateTo } = require('../navigation/navigation')
+const { reachKnownBlock } = require('../perception/touch')
 const { sendChat, recordFailure } = require('../core/utils')
 const { Vec3 } = require('vec3')
 const { logGameEvent, queryBlockMemory } = require('../world/memory')
@@ -38,9 +38,9 @@ async function doSleep() {
   const errors = []
   for (const { x, y, z } of beds) {
     try {
-      await navigateTo(x, y, z, 3, 10000)
-      const bedBlock = bot.blockAt(new Vec3(x, y, z))
-      if (!bedBlock || !bedBlock.name.endsWith('_bed')) { errors.push(`${x},${y},${z}: no bed there any more`); continue }
+      const r = await reachKnownBlock(new Vec3(x, y, z), b => b.name.endsWith('_bed'), 'bed', 10000)
+      if (!r.block) { errors.push(r.why); continue }
+      const bedBlock = r.block
       await bot.sleep(bedBlock)
       console.log('  sleeping in bed')
       await waitForEventOrTimeout(bot, 'wake', 60000)
