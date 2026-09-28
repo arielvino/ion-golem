@@ -146,6 +146,10 @@ async function handleMessages(batch) {
       console.log(color(c.magenta, `  [CTX] queued ${name}${parts.length > 1 ? ':' + parts.slice(1).join(':') : ''}`) + bad)
     }
 
+    // [ASKBREAK:<action>] — ask the players to approve breaking blocks for that action
+    // (no-unpermitted-breaking mode). The bot posts the request; only a player's reply grants it.
+    for (const m of rawReply.matchAll(/\[ASKBREAK:([^\]]+)\]/g)) require('../engine/breakPermission').requestBreak(m[1])
+
     const bpMatch = rawReply.match(/\[BLUEPRINT:([\s\S]*?)\]/)
     if (bpMatch) {
       state.pendingBlueprint = parseBlueprint(bpMatch[1])
@@ -246,7 +250,7 @@ async function handleMessages(batch) {
     function onDelta(_delta, fullText) {
       // Early chat send: before first tag
       if (!chatSent) {
-        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX|LOG):?/)
+        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX|LOG|ASKBREAK):?/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
@@ -297,6 +301,7 @@ async function handleMessages(batch) {
         .replace(/\s*\[PLAN:[^\]]+\]/g, '')
         .replace(/\s*\[NOTE:(?:[^[\]]|\[[^[\]]*\])*\]/g, '')
         .replace(/\s*\[CTX:[^\]]+\]/g, '')
+        .replace(/\s*\[ASKBREAK:[^\]]+\]/g, '')
         .replace(/\s*\[BLUEPRINT:[\s\S]*?\]/g, '').trim()
 
       const playerAskedStatus = isPlayerMessage && /agenda|stack|status|what.*doing|task/i.test(message)

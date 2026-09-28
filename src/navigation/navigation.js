@@ -67,6 +67,8 @@ async function digBlock(pos, opts = {}) {
   const bot = state.bot
   const b = bot.blockAt(pos)
   if (!b || !b.diggable || STRUCTURAL_AIR.has(b.name)) return { ok: false, reason: 'not_diggable' }
+  // No-unpermitted-breaking mode: the running action must carry a player's approval.
+  if (!require('../engine/breakPermission').mayBreak(b.name, pos, opts.reason)) return { ok: false, reason: 'not_permitted' }
 
   const intent = opts.intent || state.navIntent || 'clear'
 

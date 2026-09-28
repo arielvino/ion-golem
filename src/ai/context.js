@@ -287,7 +287,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${placesInfo}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${placesInfo}${require('../engine/breakPermission').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
   // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
