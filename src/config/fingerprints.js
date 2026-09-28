@@ -15,23 +15,70 @@
 // biomes (optional): where it generates. A soft prior, not a gate: a mismatch only
 //   discounts the score, because the biome is sampled at the cluster's center and
 //   structures straddle biome borders (a plains village spills into the next forest).
+// variants (optional): styles of one kind built from different materials, each with its
+//   own blocks and optional biomes/dimensions (a variant outside the current dimension
+//   is dropped like a kind is). The kind's own blocks/entities are the shared core, scored
+//   once; each variant adds its materials and the best one wins, so the styles never
+//   split the kind's vote against its rivals. A variant kind needs at least one core
+//   cue: materials only pick the style, they cannot make the place on their own (an
+//   iceberg's packed + blue ice is not a snowy village).
 //
-// Never use a block that also generates naturally (logs, stone, grass): a forest would
+// Never use a block that also generates naturally IN THAT DIMENSION (logs, stone, grass;
+// netherrack is fine as an overworld variant cue, meaningless in the nether): a forest would
 // then read as a weak witch hut, and every one of its thousands of logs costs an LOS test.
+// Colored terracotta counts as natural — badlands are made of it; glazed terracotta is not.
 
 const FINGERPRINTS = [
   {
+    // Materials come from minecraft.wiki's per-style block lists. The shared cues say
+    // "village"; the variant materials only say which style — see `variants` above.
     kind: 'village',
     dimensions: ['overworld'],
-    biomes: ['plains', 'meadow', 'desert', 'savanna', 'taiga', 'snowy_plains'],
     blocks: {
-      bell: 6, '*_bed': 2, dirt_path: 2, hay_block: 2, composter: 2, farmland: 1.5,
+      bell: 6, '*_bed': 2, hay_block: 2, composter: 2, farmland: 1.5,
       lectern: 2, smoker: 2, blast_furnace: 2, barrel: 1, fletching_table: 2,
       cartography_table: 2, brewing_stand: 1.5, grindstone: 2, loom: 2, stonecutter: 1.5,
-      smithing_table: 2, '*_planks': 1, '*_fence': 1, glass_pane: 1, cobblestone: 0.5,
-      '*_door': 1,
+      smithing_table: 2, glass_pane: 1, cobblestone: 0.5,
     },
     entities: { villager: 6, iron_golem: 2 },
+    variants: {
+      plains: {
+        biomes: ['plains', 'meadow'],
+        blocks: {
+          dirt_path: 2, oak_planks: 1.5, stripped_oak_log: 1.5, oak_stairs: 1, oak_fence: 1,
+          oak_door: 1, white_wool: 1, yellow_wool: 1,
+        },
+      },
+      desert: {
+        biomes: ['desert'],
+        blocks: {
+          smooth_sandstone: 2, cut_sandstone: 2, smooth_sandstone_stairs: 1, jungle_fence: 1.5,
+          jungle_door: 1.5, lime_glazed_terracotta: 2, light_blue_glazed_terracotta: 2,
+          white_glazed_terracotta: 2,
+        },
+      },
+      savanna: {
+        biomes: ['savanna'],
+        blocks: {
+          dirt_path: 2, acacia_planks: 1.5, stripped_acacia_log: 1.5, acacia_stairs: 1,
+          acacia_fence: 1, acacia_door: 1, orange_glazed_terracotta: 2, yellow_glazed_terracotta: 2,
+        },
+      },
+      taiga: {
+        biomes: ['taiga'],
+        blocks: {
+          dirt_path: 2, spruce_planks: 1.5, spruce_stairs: 1, spruce_fence: 1, spruce_door: 1,
+          spruce_trapdoor: 1, campfire: 1.5, mossy_cobblestone: 1,
+        },
+      },
+      snowy: {
+        biomes: ['snowy_plains'],
+        blocks: {
+          dirt_path: 2, spruce_planks: 1, stripped_spruce_log: 1.5, spruce_fence: 1, spruce_door: 1,
+          snow_block: 1, packed_ice: 1, blue_ice: 1.5, diorite_wall: 1.5, lantern: 1,
+        },
+      },
+    },
     minScore: 4,
   },
   {
@@ -86,7 +133,7 @@ const FINGERPRINTS = [
     dimensions: ['overworld'],
     biomes: ['desert'],
     blocks: {
-      chiseled_sandstone: 3, orange_terracotta: 3, blue_terracotta: 3, cut_sandstone: 1,
+      chiseled_sandstone: 3, blue_terracotta: 3, cut_sandstone: 1,
       sandstone_stairs: 1, tnt: 2,
     },
     entities: {},
@@ -103,7 +150,12 @@ const FINGERPRINTS = [
   {
     kind: 'ruined_portal',
     dimensions: ['overworld', 'the_nether'],
-    blocks: { crying_obsidian: 4, obsidian: 2, magma_block: 1, gold_block: 2 },
+    blocks: { crying_obsidian: 4, obsidian: 2, gold_block: 2 },
+    // netherrack and magma are nearly proof in the overworld and the ground in the nether
+    variants: {
+      overworld: { dimensions: ['overworld'], blocks: { netherrack: 3, magma_block: 1 } },
+      nether: { dimensions: ['the_nether'], blocks: {} },
+    },
     entities: {},
     minScore: 4,
   },

@@ -30,28 +30,40 @@ const OFF_BIOME = 0.4    // score factor for a kind seen outside the biomes it g
 const matches = (key, name) => key.startsWith('*') ? name.endsWith(key.slice(1)) : name === key
 
 // Resolve the fingerprint table against this version's block list, once per dimension.
-// Kinds that cannot exist in `dimension` are dropped here, so their cues are never
-// searched for (no nether bricks scan in the overworld). A null dimension keeps all.
+// Kinds and variants that cannot exist in `dimension` are dropped here, so their cues
+// are never searched for (no nether bricks scan in the overworld, no netherrack cue in
+// the nether). A null dimension keeps all.
 // → { idToName: stateId → block name (the union of every cue), entityCues: Set,
-//     kinds: [{ kind, minScore, biomes: Set|null, blockCues: [{key,w,names:Set}], entityCues: [{key,w}] }] }
+//     kinds: [{ kind, minScore, blockCues, entityCues,
+//               variants: [{ name, biomes: Set|null, blockCues }] }] }
+//   blockCues: [{key,w,names:Set}], entityCues: [{key,w}]. A kind without variants
+//   gets a single unnamed one carrying the kind's biomes, so scoring has one shape.
 let _compiled = null
 function compile(mcData, dimension = null) {
   const key = `${mcData.version?.minecraftVersion || 'x'}/${dimension}`
   if (_compiled?.key === key) return _compiled
   const idToName = new Map()
   const entityCues = new Set()
-  const here = FINGERPRINTS.filter(fp => !dimension || !fp.dimensions || fp.dimensions.includes(dimension))
-  const kinds = here.map(fp => {
-    const blockCues = Object.entries(fp.blocks).map(([k, w]) => {
-      const names = new Set(mcData.blocksArray.filter(b => matches(k, b.name)).map(b => b.name))
-      for (const n of names) {
-        const b = mcData.blocksByName[n]
-        for (let id = b.minStateId; id <= b.maxStateId; id++) idToName.set(id, n)
-      }
-      return { key: k, w, names }
-    })
+  const existsHere = (x) => !dimension || !x.dimensions || x.dimensions.includes(dimension)
+  const blockCuesOf = (blocks) => Object.entries(blocks).map(([k, w]) => {
+    const names = new Set(mcData.blocksArray.filter(b => matches(k, b.name)).map(b => b.name))
+    for (const n of names) {
+      const b = mcData.blocksByName[n]
+      for (let id = b.minStateId; id <= b.maxStateId; id++) idToName.set(id, n)
+    }
+    return { key: k, w, names }
+  })
+  const kinds = FINGERPRINTS.filter(existsHere).map(fp => {
     for (const k of Object.keys(fp.entities)) entityCues.add(k)
-    return { kind: fp.kind, minScore: fp.minScore, biomes: fp.biomes ? new Set(fp.biomes) : null, blockCues, entityCues: Object.entries(fp.entities).map(([k, w]) => ({ key: k, w })) }
+    const variants = fp.variants
+      ? Object.entries(fp.variants).filter(([, v]) => existsHere(v))
+        .map(([name, v]) => ({ name, biomes: v.biomes ? new Set(v.biomes) : null, blockCues: blockCuesOf(v.blocks) }))
+      : [{ name: null, biomes: fp.biomes ? new Set(fp.biomes) : null, blockCues: [] }]
+    return {
+      kind: fp.kind, minScore: fp.minScore, hasVariants: !!fp.variants, variants,
+      blockCues: blockCuesOf(fp.blocks),
+      entityCues: Object.entries(fp.entities).map(([k, w]) => ({ key: k, w })),
+    }
   })
   _compiled = { key, idToName, entityCues, kinds }
   return _compiled
@@ -103,31 +115,44 @@ function cluster(cues) {
 }
 
 // Step 4: score one cluster against every kind. `biome` is the biome at the cluster's
-// center (null = unknown, no prior applied).
+// center (null = unknown, no prior applied). A kind's core cues are scored once; each
+// variant adds its own materials and biome prior, and the kind keeps its best variant.
 function guess(members, c, biome = null) {
   const counts = new Map()
   for (const m of members) counts.set(m.name, (counts.get(m.name) || 0) + 1)
   const evidence = (count, w) => count > 0 ? w * (1 + Math.log2(Math.min(count, COUNT_SAT))) : 0
-
-  const hyps = []
-  for (const k of c.kinds) {
+  const tally = (blockCues, entityCues = []) => {
     let score = 0, hit = 0
     const missing = []
-    for (const cue of k.blockCues) {
+    for (const cue of blockCues) {
       let n = 0
       for (const name of cue.names) n += counts.get(name) || 0
       if (n) { score += evidence(n, cue.w); hit++ } else missing.push(cue)
     }
-    for (const cue of k.entityCues) {
+    for (const cue of entityCues) {
       const n = counts.get(cue.key) || 0
       if (n) { score += evidence(n, cue.w); hit++ } else missing.push(cue)
     }
-    // one cue type alone is a coincidence, not a place
-    if (hit < 2) continue
-    if (biome && k.biomes && !k.biomes.has(biome)) score *= OFF_BIOME
-    if (score < k.minScore) continue
-    missing.sort((a, b) => b.w - a.w)
-    hyps.push({ kind: k.kind, score, missing: missing.slice(0, 3).map(m => m.key) })
+    return { score, hit, missing }
+  }
+
+  const hyps = []
+  for (const k of c.kinds) {
+    const core = tally(k.blockCues, k.entityCues)
+    // materials only pick a variant's style; the place itself needs a core cue
+    if (k.hasVariants && core.hit === 0) continue
+    let best = null
+    for (const v of k.variants) {
+      const own = tally(v.blockCues)
+      let score = core.score + own.score
+      // one cue type alone is a coincidence, not a place
+      if (core.hit + own.hit < 2) continue
+      if (biome && v.biomes && !v.biomes.has(biome)) score *= OFF_BIOME
+      if (!best || score > best.score) best = { v, score, missing: [...core.missing, ...own.missing] }
+    }
+    if (!best || best.score < k.minScore) continue
+    best.missing.sort((a, b) => b.w - a.w)
+    hyps.push({ kind: k.kind, variant: best.v.name, score: best.score, missing: best.missing.slice(0, 3).map(m => m.key) })
   }
   const total = hyps.reduce((s, h) => s + h.score, 0)
   for (const h of hyps) h.share = h.score / total
@@ -147,7 +172,7 @@ function biomeAt(bot, mcData, at) {
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
-// → { places: [{ at:{x,y,z}, dist, dir, counts: Map, hyps: [{kind,score,share,missing}] }],
+// → { places: [{ at:{x,y,z}, biome, dist, dir, counts: Map, hyps: [{kind,variant,score,share,missing}] }],
 //     unrecognized, candidates, losTests, visible, ms }
 function recognize({ maxDistance = 48 } = {}) {
   const bot = state.bot
@@ -178,9 +203,10 @@ function formatRecognition(r) {
   if (!r) return 'places: no bot yet'
   const head = `places r${r.maxDistance}: ${r.places.length} recognized, ${r.unrecognized} unrecognized group(s)`
   const lines = r.places.map(p => {
-    const guesses = p.hyps.map(h => `${h.kind} ${h.share.toFixed(2)}`).join(' | ')
+    const label = (h) => h.variant ? `${h.kind}(${h.variant})` : h.kind
+    const guesses = p.hyps.map(h => `${label(h)} ${h.share.toFixed(2)}`).join(' | ')
     const seen = [...p.counts].sort((a, b) => b[1] - a[1]).map(([n, k]) => `${n}×${k}`).join(' ')
-    const confirm = p.hyps.slice(0, 2).map(h => `${h.kind}: ${h.missing.join(', ') || '—'}`).join('; ')
+    const confirm = p.hyps.slice(0, 2).map(h => `${label(h)}: ${h.missing.join(', ') || '—'}`).join('; ')
     return `  ~${p.dist}m ${p.dir} @${p.at.x},${p.at.y},${p.at.z}${p.biome ? ` (${p.biome})` : ''}: ${guesses}\n    seen: ${seen}\n    would confirm → ${confirm}`
   })
   return [head, ...lines].join('\n')
