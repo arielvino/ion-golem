@@ -189,3 +189,23 @@ test('context line: a sure guess is terse, an unsure one says what would settle 
   assert.equal(formatPlacesContext({ places: [sure, unsure] }),
     ' PLACES=[village(plains)@1,64,2 5m N | ruined_portal(overworld)@9,70,9 10m SE 0.65 or lava_pool 0.22 confirm:mossy_stone_bricks]')
 })
+
+// Field repro (BroDev, 2026-09-28): standing 2m from a ruined portal the context still
+// said "ruined_portal 0.65 or lava_pool 0.22" — lava_pool and stronghold were fed only
+// by the portal's own lava, fire and stone bricks. Cue counts from the live probe there.
+test('a runner-up made only of the top guess\'s own cues is explained away', () => {
+  const seen = { fire: 16, netherrack: 16, lava: 10, cracked_stone_bricks: 7, obsidian: 5, crying_obsidian: 4,
+    magma_block: 4, stone_brick_stairs: 2, iron_bars: 2, stone_bricks: 2, gold_block: 1, chiseled_stone_bricks: 1,
+    mossy_stone_brick_stairs: 1 }
+  const members = Object.entries(seen).flatMap(([n, k]) => Array.from({ length: k }, (_, i) => at(n, i, 64, 0)))
+  const hyps = guess(members, compile(mcData, 'overworld'), 'forest').hyps
+  assert.deepEqual(hyps.map(h => h.kind), ['ruined_portal'])
+})
+
+test('a runner-up with evidence of its own survives explaining away', () => {
+  // dark-oak outpost + a bell: the bell is village-only evidence the outpost cannot claim
+  const members = [at('dark_oak_planks', 0, 64, 0), at('dark_oak_log', 1, 64, 0), at('dark_oak_fence', 2, 64, 0),
+    at('white_wall_banner', 3, 64, 0), at('bell', 4, 64, 0), at('iron_golem', 5, 64, 0, true)]
+  const kinds = guess(members, compile(mcData, 'overworld')).hyps.map(h => h.kind)
+  assert.ok(kinds.includes('pillager_outpost') && kinds.includes('village'), kinds.join(','))
+})

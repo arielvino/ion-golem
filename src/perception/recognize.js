@@ -130,19 +130,24 @@ function guess(members, c, biome = null) {
   const counts = new Map()
   for (const m of members) counts.set(m.name, (counts.get(m.name) || 0) + 1)
   const evidence = (count, w) => count > 0 ? w * (1 + Math.log2(Math.min(count, COUNT_SAT))) : 0
+  // seen: the cue names this hypothesis used; claims: every name it could account for
   const tally = (blockCues, entityCues = []) => {
     let score = 0, hit = 0
-    const missing = []
+    const missing = [], seen = [], claims = []
     for (const cue of blockCues) {
       let n = 0
-      for (const name of cue.names) n += counts.get(name) || 0
+      for (const name of cue.names) {
+        claims.push(name)
+        if (counts.has(name)) { n += counts.get(name); seen.push(name) }
+      }
       if (n) { score += evidence(n, cue.w); hit++ } else missing.push(cue)
     }
     for (const cue of entityCues) {
+      claims.push(cue.key)
       const n = counts.get(cue.key) || 0
-      if (n) { score += evidence(n, cue.w); hit++ } else missing.push(cue)
+      if (n) { score += evidence(n, cue.w); hit++; seen.push(cue.key) } else missing.push(cue)
     }
-    return { score, hit, missing }
+    return { score, hit, missing, seen, claims }
   }
 
   const hyps = []
@@ -157,16 +162,31 @@ function guess(members, c, biome = null) {
       // one cue type alone is a coincidence, not a place (unless the kind says otherwise)
       if (core.hit + own.hit < k.minCues) continue
       if (biome && v.biomes && !v.biomes.has(biome)) score *= OFF_BIOME
-      if (!best || score > best.score) best = { v, score, missing: [...core.missing, ...own.missing] }
+      if (!best || score > best.score) {
+        best = { v, score, missing: [...core.missing, ...own.missing], seen: [...core.seen, ...own.seen],
+          claims: new Set([...core.claims, ...own.claims]) }
+      }
     }
     if (!best || best.score < k.minScore) continue
     best.missing.sort((a, b) => b.w - a.w)
-    hyps.push({ kind: k.kind, variant: best.v.name, score: best.score, missing: best.missing.slice(0, 3).map(m => m.key) })
+    hyps.push({ kind: k.kind, variant: best.v.name, score: best.score, missing: best.missing.slice(0, 3).map(m => m.key),
+      seen: best.seen, claims: best.claims })
   }
-  const total = hyps.reduce((s, h) => s + h.score, 0)
-  for (const h of hyps) h.share = h.score / total
   hyps.sort((a, b) => b.score - a.score)
-  return { counts, hyps }
+  // Explaining away: a runner-up whose every sighting the top guess also accounts for is
+  // not a rival, it is a part (a ruined portal's lava is not a separate lava pool; its
+  // stone bricks are not a stronghold). Only a rival with evidence of its own stays —
+  // otherwise the rivals grow with every block of the top guess seen and its share can
+  // never rise, however close the bot gets.
+  const [top, ...rest] = hyps
+  const kept = top ? [top, ...rest.filter(h => h.seen.some(n => !top.claims.has(n)))] : []
+  const total = kept.reduce((s, h) => s + h.score, 0)
+  for (const h of kept) {
+    h.share = h.score / total
+    delete h.seen
+    delete h.claims
+  }
+  return { counts, hyps: kept }
 }
 
 // Biome is read from chunk data, but it is not hidden knowledge: the center sits among
