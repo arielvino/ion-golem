@@ -195,6 +195,20 @@ async function executeAction(actionStr, username, opts = {}) {
         }
         break
       }
+      case 'places': case 'recognize': {
+        // "What kind of place is around me?" — fingerprint cues, LOS-gated, grouped, guessed.
+        // target: search radius in blocks (default 48).
+        const { recognize, formatRecognition } = require('../perception/recognize')
+        const { debugChat } = require('../core/utils')
+        const r = parseInt(target, 10)
+        const result = recognize(Number.isFinite(r) ? { maxDistance: r } : {})
+        const text = formatRecognition(result)
+        state.lastObservation = { ts: Date.now(), text }
+        debugChat(`[places] ${text}`)
+        console.log(`  [places] ${text}`)
+        if (result) console.log(`  [places] ${result.visible} visible cues / ${result.losTests} los / ${result.candidates} scanned in ${result.ms}ms`)
+        break
+      }
       case 'personality': {
         const p = switchPersonality(target)
         const { sendChat } = require('../core/utils')
