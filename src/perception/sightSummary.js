@@ -62,15 +62,16 @@ function summarizeSight({ dimension, eye, blocks, places = [] }) {
 
 const pct = (x) => `${Math.round(100 * x)}%`
 
-// The context lines — data only; how to read them belongs in the system prompt.
+// The context lines — data only; how to read them belongs in the system prompt. An empty
+// layer is left out. Entries: NAMExCOUNT@X,Y,Z (the nearest one) DIST DIR.
 function formatSight(s) {
-  const item = (e) => `${e.name} ${e.count} ${e.dist}m ${e.dir}`
-  return [
-    `BIOMES=[${s.biomes.map(b => `${b.name} ${pct(b.share)}`).join(', ')}]`,
-    `TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)}`).join(', ')}`).join(' | ')}]`,
-    `RESOURCES=[${s.resources.map(item).join(', ')}]`,
-    `UNEXPLAINED=[${s.unexplained.map(item).join(', ')}]`,
-  ].join('\n')
+  const item = (e) => `${e.name}x${e.count}@${e.at.x},${e.at.y},${e.at.z} ${e.dist}m ${e.dir}`
+  const lines = []
+  if (s.biomes.length) lines.push(`BIOMES=[${s.biomes.map(b => `${b.name} ${pct(b.share)}`).join(', ')}]`)
+  if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)}`).join(', ')}`).join(' | ')}]`)
+  if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(item).join(', ')}]`)
+  if (s.unexplained.length) lines.push(`UNEXPLAINED=[${s.unexplained.map(item).join(', ')}]`)
+  return lines.join('\n')
 }
 
 module.exports = { summarizeSight, formatSight, TERRAIN_TOP }

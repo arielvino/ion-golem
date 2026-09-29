@@ -3,7 +3,9 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { getLastVisionResult, formatVision, hasLineOfSight } = require('../perception/vision')
 const { getLastSurvey } = require('../perception/visibility')
-const { recognize, formatPlacesContext } = require('../perception/recognize')
+const { recognizeView, formatPlacesContext } = require('../perception/recognize')
+const { lookAround } = require('../perception/sight')
+const { summarizeSight, formatSight } = require('../perception/sightSummary')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
 const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
@@ -250,12 +252,19 @@ function getBotContext() {
     }
   } catch(e) { console.warn('  [CTX] biome detection err:', e.message) }
 
-  let placesInfo = ''
+  // One all-round ray view feeds both the place guesses and the material layers
+  // (BIOMES / TERRAIN / RESOURCES / UNEXPLAINED), so they always agree on what is seen.
+  let placesInfo = '', sightInfo = ''
   try {
-    const r = recognize({ maxDistance: ranges.sight.placesBlocks })
+    const t0 = Date.now()
+    const view = lookAround(bot, ranges.sight.viewBlocks)
+    const r = recognizeView(view, { maxDistance: ranges.sight.placesBlocks })
     placesInfo = formatPlacesContext(r)
-    if (r?.ms > 150) console.log(`  [PLACES] slow ${r.ms}ms (${r.losTests} los / ${r.candidates} scan)`)
-  } catch (e) { console.warn('  [CTX] places err:', e.message) }
+    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, places: r?.places || [] })
+    sightInfo = ' ' + formatSight(summary).split('\n').join(' ')
+    const ms = Date.now() - t0
+    if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
+  } catch (e) { console.warn('  [CTX] sight err:', e.message) }
 
   const pathCount = countNearbyPathBlocks(pos)
   const pathInfo = pathCount > 0 ? ` paths=${pathCount}` : ''
@@ -289,7 +298,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${placesInfo}${require('../engine/breakPermission').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }

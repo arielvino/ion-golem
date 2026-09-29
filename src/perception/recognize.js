@@ -94,13 +94,46 @@ function visibleCues(eye, maxDistance, c) {
     seenPerName.set(cnd.name, n + 1)
     out.push({ name: cnd.name, x: cnd.x, y: cnd.y, z: cnd.z, entity: false })
   }
+  out.push(...visibleEntityCues(eye, maxDistance, c))
+  return { cues: out, candidates: candidates.length, losTests }
+}
+
+function visibleEntityCues(eye, maxDistance, c) {
+  const bot = state.bot
+  const out = []
   for (const e of Object.values(bot.entities || {})) {
     if (e === bot.entity || !e.position || !c.entityCues.has(e.name)) continue
     if (e.position.distanceTo(eye) > maxDistance) continue
     if (!hasLineOfSight(eye, e.position, e.height || 1.8)) continue
     out.push({ name: e.name, x: Math.floor(e.position.x), y: Math.floor(e.position.y), z: Math.floor(e.position.z), entity: true })
   }
-  return { cues: out, candidates: candidates.length, losTests }
+  return out
+}
+
+// Steps 1+2 from a ray-cast view (perception/sight.js) instead of scan + LOS: the view
+// already holds exactly the visible blocks. Nearest first, VISIBLE_CAP per name like the
+// scan, so the evidence is scored the same way.
+function viewCues(view, maxDistance, c) {
+  const { eye, blocks } = view
+  const names = new Set(c.idToName.values())
+  const max2 = maxDistance * maxDistance
+  const hits = []
+  for (const b of blocks) {
+    if (!names.has(b.name)) continue
+    const d2 = (b.x + 0.5 - eye.x) ** 2 + (b.y + 0.5 - eye.y) ** 2 + (b.z + 0.5 - eye.z) ** 2
+    if (d2 <= max2) hits.push({ b, d2 })
+  }
+  hits.sort((a, b) => a.d2 - b.d2)
+  const per = new Map()
+  const out = []
+  for (const { b } of hits) {
+    const n = per.get(b.name) || 0
+    if (n >= VISIBLE_CAP) continue
+    if (state.stmts?.isPlaced?.get(b.x, b.y, b.z)) continue // our own builds are not a place
+    per.set(b.name, n + 1)
+    out.push({ name: b.name, x: b.x, y: b.y, z: b.z, entity: false })
+  }
+  return [...out, ...visibleEntityCues(eye, maxDistance, c)]
 }
 
 // Step 3: single-linkage clusters (union-find over pairs closer than LINK).
@@ -263,6 +296,16 @@ function recognize({ maxDistance = 48 } = {}) {
   return { ...recognizeCues(bot, mcData, eye, cues), candidates, losTests, maxDistance, ms: Date.now() - t0 }
 }
 
+// The same, reading the cues off a ray-cast view: { eye, blocks } from sight.lookAround.
+function recognizeView(view, { maxDistance = 64 } = {}) {
+  const bot = state.bot
+  if (!bot?.entity) return null
+  const t0 = Date.now()
+  const mcData = require('minecraft-data')(bot.version)
+  const c = compile(mcData, bot.game?.dimension || null)
+  return { ...recognizeCues(bot, mcData, view.eye, viewCues(view, maxDistance, c)), maxDistance, ms: Date.now() - t0 }
+}
+
 // Steps 3+4 on cues found any way (the scan + LOS above, or a ray-cast view):
 // [{ name, x, y, z, entity }] → { places, unrecognized, unrecognizedGroups, visible }.
 function recognizeCues(bot, mcData, eye, cues) {
@@ -344,4 +387,4 @@ function formatPlacesContext(r) {
   return ` PLACES=[${items.join(' | ')}]`
 }
 
-module.exports = { recognize, recognizeCues, cueNames, VISIBLE_CAP, formatRecognition, formatPlacesContext, compile, cluster, guess }
+module.exports = { recognize, recognizeView, recognizeCues, cueNames, VISIBLE_CAP, formatRecognition, formatPlacesContext, compile, cluster, guess }
