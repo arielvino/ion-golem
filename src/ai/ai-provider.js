@@ -27,10 +27,28 @@ function createClaudeCodeProvider(opts = {}) {
   let pendingAborts = 0  // # of `result`s to drain unseen: aborted requests + our own /clear
   let systemPrompt = ''
   let reqSeq = 0  // per-request counter; names the interrupt control_request
+  // AI_TRACE=1: log every non-text CLI event with per-request counts — for diagnosing
+  // slow, stuck or drained turns (what arrived since SEND, and when).
+  let sinceSend = {}
+  const trace = process.env.AI_TRACE === '1'
+    ? (msg) => console.log(color(c.gray, `  [AI-TRACE] ${msg}`))
+    : () => {}
 
   function handleLine(line) {
     let event
-    try { event = JSON.parse(line) } catch (e) { return }
+    try { event = JSON.parse(line) } catch (e) { trace(`unparsed line: ${line.slice(0, 160)}`); return }
+    const kind = event.type === 'stream_event' ? `stream:${event.event?.type}` : `${event.type}${event.subtype ? ':' + event.subtype : ''}`
+    sinceSend[kind] = (sinceSend[kind] || 0) + 1
+    const draining = pendingAborts > 0
+    if (event.type === 'result') {
+      trace(`#${reqSeq} RESULT ${event.subtype}${event.is_error ? ' ERROR' : ''} dur=${event.duration_ms}ms api=${event.duration_api_ms}ms turns=${event.num_turns} len=${(event.result || '').length} ${draining ? `→ DRAINED (pendingAborts ${pendingAborts}→${pendingAborts - 1})` : (current ? '→ delivered' : '→ no current request')}${event.is_error ? ' body=' + JSON.stringify(event.result || '').slice(0, 200) : ''}`)
+    } else if (event.type === 'system' && event.subtype !== 'init') {
+      trace(`#${reqSeq} SYSTEM ${event.subtype}: ${JSON.stringify(event).slice(0, 300)}`)
+    } else if (event.type === 'stream_event' && ['message_start', 'message_stop'].includes(event.event?.type)) {
+      trace(`#${reqSeq} ${event.event.type}${draining ? ' (draining)' : ''}`)
+    } else if (!['stream_event', 'assistant', 'user', 'system'].includes(event.type)) {
+      trace(`#${reqSeq} OTHER ${JSON.stringify(event).slice(0, 300)}`)
+    }
 
     // Init event — process is ready. Every /clear starts a new session and emits
     // another init, so only the first one per process is news.
@@ -63,6 +81,7 @@ function createClaudeCodeProvider(opts = {}) {
         current.text += '\n'
       }
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        if (!current.firstTokenMs) trace(`#${reqSeq} first text delta after ${Date.now() - current.start}ms`)
         if (!current.firstTokenMs) current.firstTokenMs = Date.now() - current.start
         current.text += ev.delta.text
         if (current.onDelta) current.onDelta(ev.delta.text, current.text)
@@ -138,6 +157,7 @@ function createClaudeCodeProvider(opts = {}) {
 
     console.log(color(c.gray, `  [AI] spawning persistent process (${model})...`))
     const thisProc = spawn('claude', args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    trace(`spawned pid=${thisProc.pid}`)
     proc = thisProc
     state.claudeChild = thisProc
     buffer = ''
@@ -160,6 +180,7 @@ function createClaudeCodeProvider(opts = {}) {
 
     thisProc.on('close', (code) => {
       // Only clear state if this is still the active process (not a stale one after respawn)
+      trace(`pid=${thisProc.pid} closed code=${code}${proc !== thisProc ? ' (stale process)' : ''}`)
       if (proc !== thisProc) return
       console.log(color(c.yellow, `  [AI] process exited (code=${code})`))
       proc = null; ready = false; state.claudeChild = null
@@ -191,6 +212,8 @@ function createClaudeCodeProvider(opts = {}) {
       // collecting this response. See abort() / handleLine.
       current = { start: Date.now(), firstTokenMs: 0, text: '', usage: null, apiMs: 0, onDelta, onToolCall }
       reqSeq++
+      sinceSend = {}
+      trace(`#${reqSeq} SEND prompt=${prompt.length}ch pendingAborts=${pendingAborts} (+1 for /clear) pid=${proc?.pid} ready=${ready}`)
 
       const responsePromise = new Promise((resolve, reject) => {
         responseResolve = { resolve, reject }
@@ -215,7 +238,8 @@ function createClaudeCodeProvider(opts = {}) {
 
       let timer = null
       const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('AI response timeout')), 90000)
+        const mySeq = reqSeq
+        timer = setTimeout(() => { trace(`#${mySeq} TIMEOUT 90s — pendingAborts=${pendingAborts} events since send: ${JSON.stringify(sinceSend)}`); reject(new Error('AI response timeout')) }, 90000)
       })
 
       try {
@@ -235,6 +259,7 @@ function createClaudeCodeProvider(opts = {}) {
     },
 
     abort() {
+      trace(`#${reqSeq} ABORT ${responseResolve ? `in-flight → pendingAborts ${pendingAborts}→${pendingAborts + 1}` : '(nothing in flight, no-op)'} events so far: ${JSON.stringify(sinceSend)}`)
       if (responseResolve) {
         // Actually stop the CLI's turn. Without this the "aborted" request kept running to
         // the end — measured up to 85s when it made tool calls — and the next request
