@@ -145,7 +145,7 @@ function snapshot(bot, eye) {
         }
       }
     }
-  return { snap, side, ox: eye.x - x0, oy: eye.y - y0, oz: eye.z - z0 }
+  return { snap, side, x0, y0, z0, ox: eye.x - x0, oy: eye.y - y0, oz: eye.z - z0 }
 }
 
 // One ray per block on the cube shell at distance R, aimed at its centre. Marks every cell a ray
@@ -216,6 +216,29 @@ async function goTo(bot, spec) {
   return { feet }
 }
 
+// Split the seen cells by the biome of the cell itself (not of where the bot stands):
+// { biome: Map(stateId -> count) }. Biomes are stored per 4x4x4 cell, so look each one up once.
+function seenByBiome(bot, { snap, side, x0, y0, z0 }, seen) {
+  const biomeCache = new Map(), out = new Map(), p = new Vec3(0, 0, 0)
+  for (let i = 0; i < seen.length; i++) {
+    if (!seen[i]) continue
+    const x = x0 + i % side, z = z0 + Math.floor(i / side) % side, y = y0 + Math.floor(i / (side * side))
+    const key = `${x >> 2},${y >> 2},${z >> 2}`
+    let b = biomeCache.get(key)
+    if (b === undefined) { p.set(x, y, z); b = bot.registry.biomes[bot.world.getBiome(p)]?.name || 'unknown'; biomeCache.set(key, b) }
+    let m = out.get(b); if (!m) out.set(b, m = new Map())
+    m.set(snap[i], (m.get(snap[i]) || 0) + 1)
+  }
+  return out
+}
+
+// Map(stateId -> count) -> [[name, count]] without air, sorted.
+function named(byId, nameOf) {
+  const byName = new Map()
+  for (const [id, c] of byId) { const n = nameOf(id); if (!AIR.has(n)) byName.set(n, (byName.get(n) || 0) + c) }
+  return [...byName].sort((a, b) => b[1] - a[1])
+}
+
 function table(rows, total, limit) {
   return rows.slice(0, limit).map(([n, c]) => `  ${n.padEnd(26)} ${String(c).padStart(7)}  ${(100 * c / total).toFixed(1).padStart(5)}%`).join('\n')
 }
@@ -231,6 +254,7 @@ async function main() {
   const opaque = new Uint8Array(1 << 16)
   for (const b of Object.values(bot.registry.blocksByStateId))
     for (let s = b.minStateId; s <= b.maxStateId; s++) if ((b.boundingBox === 'block' && !b.transparent) || b.name === 'lava') opaque[s] = 1   // lava: not a full cube, but you can't see through it
+  const allBiomes = new Map()   // biome -> { samples, counts: Map(name -> n) }
   const nameOf = (s) => bot.registry.blocksByStateId[s]?.name || `state#${s}`
   for (const spec of specs) {
     console.log(`\n=== ${spec} ===`)
@@ -251,11 +275,30 @@ async function main() {
     const out = { spec, at: { x: p.x, y: p.y, z: p.z }, dimension: bot.game.dimension, biome: bot.registry.biomes[bot.world.getBiome(p)]?.name,
       radius: R, rays, openRays: open, ms: { snapshot: +tSnap.toFixed(1), rays: +tCast.toFixed(1), sort: +tSort.toFixed(2) },
       air: airN, blocks: blockN, counts: blocks }
+    const bb = seenByBiome(bot, d, seen)
+    out.byBiome = Object.fromEntries([...bb].map(([b, m]) => [b, named(m, nameOf)]))
+    for (const [b, rows] of Object.entries(out.byBiome)) {
+      const agg = allBiomes.get(b) || { samples: [], counts: new Map() }; allBiomes.set(b, agg)
+      if (rows.length) agg.samples.push(spec)
+      for (const [n, c] of rows) agg.counts.set(n, (agg.counts.get(n) || 0) + c)
+    }
     fs.writeFileSync(path.join(OUT_DIR, `${spec.replace(/[:@,/]/g, '_')}.json`), JSON.stringify(out, null, 1))
     console.log(`  @${p.x},${p.y},${p.z} ${bot.game.dimension} (biome here: ${out.biome})  snapshot ${tSnap.toFixed(0)} ms, rays ${tCast.toFixed(0)} ms, sort ${tSort.toFixed(2)} ms`)
     console.log(`  rays reaching ${R} unblocked: ${(100 * open / rays).toFixed(0)}%   air passed: ${airN}   blocks seen: ${blockN} (${blocks.length} kinds)`)
     console.log(table(blocks, blockN, 15))
+    console.log(`  by biome: ${Object.entries(out.byBiome).map(([b, r]) => `${b} ${r.reduce((s, [, c]) => s + c, 0)}`).join(', ')}`)
   }
+  // Every sample merged, grouped by the biome each seen block is in, then sorted.
+  console.log('\n##### BY BIOME (all samples merged) #####')
+  const merged = {}
+  for (const [b, { samples, counts }] of [...allBiomes].sort()) {
+    const rows = [...counts].sort((a, b) => b[1] - a[1]), n = rows.reduce((s, [, c]) => s + c, 0)
+    if (!n) continue
+    merged[b] = { blocks: n, samples, counts: rows }
+    console.log(`\n=== ${b}: ${n} blocks from ${samples.length} sample(s): ${samples.join(', ')}`)
+    console.log(table(rows, n, 15))
+  }
+  fs.writeFileSync(path.join(OUT_DIR, 'by-biome.json'), JSON.stringify(merged, null, 1))
   bot.quit()
   setTimeout(() => process.exit(0), 500)
 }
