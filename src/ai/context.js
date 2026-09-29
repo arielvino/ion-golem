@@ -12,7 +12,7 @@ const { renderNew, renderNotesBlock } = require('../world/journalStore')
 const { ago } = require('../world/journal')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
-const { providerNames, renderPending } = require('./ctxProviders')
+const { providerNames, renderPending, around } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
 const { entityTag } = require('../perception/entityTag')
 const { entityClass } = require('../perception/entityClass')
@@ -291,9 +291,12 @@ function getBotContext() {
 
   const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${placesInfo}${require('../engine/breakPermission').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
-  // The agenda and requested views hang OUTSIDE the blob: they are multi-line, and the
-  // blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
-  return [blob, renderAgenda(), renderNotesBlock(), renderPending()].filter(Boolean).join('\n')
+  let aroundView = ''
+  try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }
+
+  // The surroundings, agenda and requested views hang OUTSIDE the blob: they are multi-line,
+  // and the blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
+  return [blob, aroundView, renderAgenda(), renderNotesBlock(), renderPending()].filter(Boolean).join('\n')
 }
 
 module.exports = { getBotContext }

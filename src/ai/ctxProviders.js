@@ -277,7 +277,8 @@ function find(args) {
 // The bot's immediate surroundings: a 5x5 block, 2 above the feet to 3 below, drawn
 // as six small layers, plus what each side does to someone stepping that way. This
 // is the view for "why can't I move": a pillar, a ledge, a pit or a walled-in spot
-// reads off it at a glance, where a long slice buries it in terrain.
+// reads off it at a glance, where a long slice buries it in terrain. Sent in every
+// context (context.js), not on request: a stuck bot never thought to ask for it.
 function around() {
   const bot = state.bot
   const p = bot.entity.position.floored()
@@ -360,10 +361,6 @@ const PROVIDERS = {
     usage: 'find:<name>[:limit]       one material across inventory/view/containers/memory',
     render: find,
   },
-  around: {
-    usage: 'around                    your 5x5 surroundings, 2 up to 3 down, and what each side does (walk, step, drop, wall)',
-    render: around,
-  },
   ...PAST_PROVIDERS,
 }
 
@@ -397,4 +394,4 @@ function renderPending() {
   return out.join('\n\n')
 }
 
-module.exports = { PROVIDERS, providerNames, usageLines, isProvider, renderPending }
+module.exports = { PROVIDERS, providerNames, usageLines, isProvider, renderPending, around }

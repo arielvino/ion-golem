@@ -1,4 +1,4 @@
-// [CTX:around] (src/ai/ctxProviders.js) against a throwaway DB: the bot on top of
+// The around view (src/ai/ctxProviders.js, sent in every context) against a throwaway DB: the bot on top of
 // a dirt pillar 110..117 over a stone floor at y100, open air all around.
 const test = require('node:test')
 const assert = require('node:assert')
@@ -8,7 +8,7 @@ const path = require('path')
 const { Vec3 } = require('vec3')
 const state = require('../src/core/state')
 const memory = require('../src/world/memory')
-const { PROVIDERS } = require('../src/ai/ctxProviders')
+const { around } = require('../src/ai/ctxProviders')
 
 state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'around-'))
 memory.initDB()
@@ -20,7 +20,7 @@ for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) {
 state.bot = { entity: { position: new Vec3(0.5, 118, 0.5) } }
 
 test('on a pillar every side reads as a drop and the view says so', () => {
-  const out = PROVIDERS.around.render([])
+  const out = around()
   assert.match(out, /^around 0,118,0/)
   assert.match(out, /north: drop 17 → stone y100 \(~14 dmg\)/)
   assert.match(out, /every side drops more than 3 blocks — you are on a pillar or a peak/)
@@ -31,7 +31,7 @@ test('on a pillar every side reads as a drop and the view says so', () => {
 
 test('a walled-in spot reads as walls, with no drop verdict', () => {
   for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { put(x, 118, z, 'stone'); put(x, 119, z, 'stone') }
-  const out = PROVIDERS.around.render([])
+  const out = around()
   assert.match(out, /north: wall \(stone\) \| south: wall \(stone\) \| east: wall \(stone\) \| west: wall \(stone\)/)
   assert.doesNotMatch(out, /drops more than 3/)
 })

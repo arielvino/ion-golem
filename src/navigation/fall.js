@@ -1,6 +1,6 @@
 // Fall measurement from the block DB — how far a step off an edge, or through a
 // floor, would drop the bot, onto what, and for how much damage. Shared by the
-// descend actions (digdown/jumpdown) and the [CTX:around] view.
+// descend actions (digdown/jumpdown) and the around view in every context.
 const { dbBlock } = require('./atomicSteps')
 const { PASSABLE, HAZARDS, WATER_BLOCKS } = require('../config/blocks')
 
