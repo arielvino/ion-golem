@@ -98,6 +98,17 @@ const logStream = fs.createWriteStream(logFile, { flags: 'a' })
 const latestLog = path.join(RUNTIME_DIR, 'bot.log')
 try { fs.unlinkSync(latestLog) } catch(e) {}
 try { fs.symlinkSync(logFile, latestLog) } catch(e) {}
+// Timestamp every log-file line with local HH:MM:SS.mmm (matches the server log's clock),
+// so slow turns and stalls can be timed from the log alone.
+let atLineStart = true
+const stamp = (s) => {
+  if (typeof s !== 'string') return s
+  const d = new Date()
+  const t = `${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, '0')} `
+  let out = ''
+  for (const part of s.split(/(?<=\n)/)) { out += (atLineStart ? t : '') + part; atLineStart = part.endsWith('\n') }
+  return out
+}
 const origStdoutWrite = process.stdout.write.bind(process.stdout)
 const origStderrWrite = process.stderr.write.bind(process.stderr)
 const stripAnsi = (s) => typeof s === 'string' ? s.replace(/\x1b\[[0-9;]*m/g, '') : s
@@ -105,7 +116,7 @@ const stripAnsi = (s) => typeof s === 'string' ? s.replace(/\x1b\[[0-9;]*m/g, ''
 // Everything always goes to the log file.
 const SHOW_RE = /\[Bot\]|Bot has joined|Shutting down|ERROR|FATAL|unhandledRejection/
 process.stdout.write = (chunk, ...args) => {
-  logStream.write(stripAnsi(chunk))
+  logStream.write(stamp(stripAnsi(chunk)))
   if (!DEBUG_MODE && typeof chunk === 'string') {
     const plain = stripAnsi(chunk)
     if (plain.trim().length > 0 && !SHOW_RE.test(plain)) return true
@@ -113,7 +124,7 @@ process.stdout.write = (chunk, ...args) => {
   return origStdoutWrite(chunk, ...args)
 }
 process.stderr.write = (chunk, ...args) => {
-  logStream.write(stripAnsi(chunk))
+  logStream.write(stamp(stripAnsi(chunk)))
   if (!DEBUG_MODE && typeof chunk === 'string') {
     const plain = stripAnsi(chunk)
     if (plain.trim().length > 0 && !SHOW_RE.test(plain)) return true
