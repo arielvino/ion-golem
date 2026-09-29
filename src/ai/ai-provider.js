@@ -42,7 +42,7 @@ function createClaudeCodeProvider(opts = {}) {
     const draining = pendingAborts > 0
     if (event.type === 'result') {
       trace(`#${reqSeq} RESULT ${event.subtype}${event.is_error ? ' ERROR' : ''} dur=${event.duration_ms}ms api=${event.duration_api_ms}ms turns=${event.num_turns} len=${(event.result || '').length} ${draining ? `→ DRAINED (pendingAborts ${pendingAborts}→${pendingAborts - 1})` : (current ? '→ delivered' : '→ no current request')}${event.is_error ? ' body=' + JSON.stringify(event.result || '').slice(0, 200) : ''}`)
-    } else if (event.type === 'system' && event.subtype !== 'init') {
+    } else if (event.type === 'system' && event.subtype !== 'init' && event.subtype !== 'thinking_tokens') {  // thinking progress arrives ~1/s: counted in sinceSend only
       trace(`#${reqSeq} SYSTEM ${event.subtype}: ${JSON.stringify(event).slice(0, 300)}`)
     } else if (event.type === 'stream_event' && ['message_start', 'message_stop'].includes(event.event?.type)) {
       trace(`#${reqSeq} ${event.event.type}${draining ? ' (draining)' : ''}`)
