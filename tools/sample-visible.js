@@ -18,6 +18,8 @@ const fs = require('fs')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
 const { performance } = require('perf_hooks')
+const { recognizeCues, cueNames, formatPlacesContext, VISIBLE_CAP } = require('../src/perception/recognize')
+const { summarizeSight, formatSight } = require('../src/perception/sightSummary')
 
 const HOST = process.env.MC_HOST || 'localhost'
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
@@ -216,20 +218,30 @@ async function goTo(bot, spec) {
   return { feet }
 }
 
-// Split the seen cells by the biome of the cell itself (not of where the bot stands):
-// { biome: Map(stateId -> count) }. Biomes are stored per 4x4x4 cell, so look each one up once.
-function seenByBiome(bot, { snap, side, x0, y0, z0 }, seen) {
-  const biomeCache = new Map(), out = new Map(), p = new Vec3(0, 0, 0)
+// Every seen non-air cell as { id, name, x, y, z, biome }, the biome being that of the cell
+// itself (not of where the bot stands). Biomes are stored per 4x4x4 cell: one lookup each.
+function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen, nameOf) {
+  const biomeCache = new Map(), out = [], p = new Vec3(0, 0, 0)
   for (let i = 0; i < seen.length; i++) {
     if (!seen[i]) continue
+    const name = nameOf(snap[i]); if (AIR.has(name)) continue
     const x = x0 + i % side, z = z0 + Math.floor(i / side) % side, y = y0 + Math.floor(i / (side * side))
     const key = `${x >> 2},${y >> 2},${z >> 2}`
-    let b = biomeCache.get(key)
-    if (b === undefined) { p.set(x, y, z); b = bot.registry.biomes[bot.world.getBiome(p)]?.name || 'unknown'; biomeCache.set(key, b) }
-    let m = out.get(b); if (!m) out.set(b, m = new Map())
-    m.set(snap[i], (m.get(snap[i]) || 0) + 1)
+    let biome = biomeCache.get(key)
+    if (biome === undefined) { p.set(x, y, z); biome = bot.registry.biomes[bot.world.getBiome(p)]?.name || 'unknown'; biomeCache.set(key, biome) }
+    out.push({ id: snap[i], name, x, y, z, biome })
   }
   return out
+}
+
+// The recognizer's cues from the same view: its cue blocks, nearest first, VISIBLE_CAP per name.
+function cuesOf(blocks, eye, names) {
+  const per = new Map()
+  return blocks.filter(b => names.has(b.name))
+    .map(b => ({ b, d2: (b.x + 0.5 - eye.x) ** 2 + (b.y + 0.5 - eye.y) ** 2 + (b.z + 0.5 - eye.z) ** 2 }))
+    .sort((a, b) => a.d2 - b.d2)
+    .filter(({ b }) => { const n = per.get(b.name) || 0; per.set(b.name, n + 1); return n < VISIBLE_CAP })
+    .map(({ b }) => ({ name: b.name, x: b.x, y: b.y, z: b.z, entity: false }))
 }
 
 // Map(stateId -> count) -> [[name, count]] without air, sorted.
@@ -275,7 +287,20 @@ async function main() {
     const out = { spec, at: { x: p.x, y: p.y, z: p.z }, dimension: bot.game.dimension, biome: bot.registry.biomes[bot.world.getBiome(p)]?.name,
       radius: R, rays, openRays: open, ms: { snapshot: +tSnap.toFixed(1), rays: +tCast.toFixed(1), sort: +tSort.toFixed(2) },
       air: airN, blocks: blockN, counts: blocks }
-    const bb = seenByBiome(bot, d, seen)
+    t = now()
+    const vis = seenBlocks(bot, d, seen, nameOf)
+    const bb = new Map()
+    for (const b of vis) { let m = bb.get(b.biome); if (!m) bb.set(b.biome, m = new Map()); m.set(b.id, (m.get(b.id) || 0) + 1) }
+    const tBiome = now() - t
+    t = now()
+    const rec = recognizeCues(bot, bot.registry, eye, cuesOf(vis, eye, cueNames(bot.registry, bot.game.dimension)))
+    const tRec = now() - t
+    t = now()
+    const sight = summarizeSight({ dimension: bot.game.dimension, eye, blocks: vis, places: rec.places })
+    const tSum = now() - t
+    out.ms.biome = +tBiome.toFixed(1); out.ms.recognize = +tRec.toFixed(1); out.ms.summary = +tSum.toFixed(1)
+    out.sight = sight
+    out.places = rec.places.map(p => ({ ...p, counts: Object.fromEntries(p.counts) }))
     out.byBiome = Object.fromEntries([...bb].map(([b, m]) => [b, named(m, nameOf)]))
     for (const [b, rows] of Object.entries(out.byBiome)) {
       const agg = allBiomes.get(b) || { samples: [], counts: new Map() }; allBiomes.set(b, agg)
@@ -286,7 +311,9 @@ async function main() {
     console.log(`  @${p.x},${p.y},${p.z} ${bot.game.dimension} (biome here: ${out.biome})  snapshot ${tSnap.toFixed(0)} ms, rays ${tCast.toFixed(0)} ms, sort ${tSort.toFixed(2)} ms`)
     console.log(`  rays reaching ${R} unblocked: ${(100 * open / rays).toFixed(0)}%   air passed: ${airN}   blocks seen: ${blockN} (${blocks.length} kinds)`)
     console.log(table(blocks, blockN, 15))
-    console.log(`  by biome: ${Object.entries(out.byBiome).map(([b, r]) => `${b} ${r.reduce((s, [, c]) => s + c, 0)}`).join(', ')}`)
+    console.log(`  biome lookup ${tBiome.toFixed(0)} ms, recognize ${tRec.toFixed(0)} ms, summary ${tSum.toFixed(0)} ms`)
+    console.log('  --- what the model would get:')
+    console.log((formatSight(sight) + '\n' + (formatPlacesContext(rec).trim() || 'PLACES=[]')).split('\n').map(l => '  ' + l).join('\n'))
   }
   // Every sample merged, grouped by the biome each seen block is in, then sorted.
   console.log('\n##### BY BIOME (all samples merged) #####')

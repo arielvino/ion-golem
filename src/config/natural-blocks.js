@@ -6,6 +6,8 @@
 // so that blocks added by future Minecraft versions count as tells until someone lists them.
 //
 // The scope is checked against the biome of the block itself, not of where the bot stands.
+// A noise block is either TERRAIN (the area's material: summarized as name + %) or a RESOURCE:
+// natural and normal but rare and worth going for, reported with count and nearest spot.
 // Biome-scoped rules are strict: a badlands tree or terracotta band that crosses into the
 // neighbouring river's biome cells reads as a tell (edge tolerance: TODO.md).
 
@@ -69,6 +71,22 @@ const RULES = [
   [['end_stone', 'chorus_plant', 'chorus_flower'], END],
 ]
 
+// Resource block -> the name the model sees; ore variants merge ('deepslate_iron_ore' -> iron).
+// Only counts where the block is noise: an ore block in the wrong dimension is unexplained.
+const RESOURCE = new Map([
+  ...ORES.flatMap(o => [[`${o}_ore`, o], [`deepslate_${o}_ore`, o]]),
+  ['raw_iron_block', 'iron'], ['raw_copper_block', 'copper'],
+  ['nether_gold_ore', 'gold'], ['nether_quartz_ore', 'quartz'], ['ancient_debris', 'ancient_debris'],
+  ['budding_amethyst', 'amethyst'], ['amethyst_cluster', 'amethyst'], ['obsidian', 'obsidian'],
+  ['glowstone', 'glowstone'],
+  // food and crafting plants
+  ['sugar_cane', 'sugar_cane'], ['pumpkin', 'pumpkin'], ['melon', 'melon'], ['cocoa', 'cocoa'],
+  ['sweet_berry_bush', 'sweet_berries'], ['cave_vines', 'glow_berries'], ['cave_vines_plant', 'glow_berries'],
+  ['bee_nest', 'bee_nest'], ['kelp', 'kelp'], ['kelp_plant', 'kelp'], ['bamboo', 'bamboo'],
+  ['brown_mushroom', 'mushroom'], ['red_mushroom', 'mushroom'],
+  ['brown_mushroom_block', 'mushroom'], ['red_mushroom_block', 'mushroom'],
+])
+
 const NOISE = new Map()   // name -> [scope]
 for (const [names, scope] of RULES) for (const n of names) NOISE.set(n, [...(NOISE.get(n) || []), scope])
 
@@ -78,4 +96,10 @@ function isNoise(name, dimension, biome) {
   return (NOISE.get(name) || []).some(s => s.dims ? s.dims.includes(dim) : s.biomes.includes(biome))
 }
 
-module.exports = { isNoise, NOISE }
+// 'terrain' | 'resource' | null (not natural here: a structure, a portal or a player).
+function roleOf(name, dimension, biome) {
+  if (!isNoise(name, dimension, biome)) return null
+  return RESOURCE.has(name) ? 'resource' : 'terrain'
+}
+
+module.exports = { isNoise, roleOf, NOISE, RESOURCE }

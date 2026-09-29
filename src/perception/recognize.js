@@ -260,7 +260,13 @@ function recognize({ maxDistance = 48 } = {}) {
   const c = compile(mcData, bot.game?.dimension || null)
   const eye = bot.entity.position.offset(0, 1.62, 0)
   const { cues, candidates, losTests } = visibleCues(eye, maxDistance, c)
+  return { ...recognizeCues(bot, mcData, eye, cues), candidates, losTests, maxDistance, ms: Date.now() - t0 }
+}
 
+// Steps 3+4 on cues found any way (the scan + LOS above, or a ray-cast view):
+// [{ name, x, y, z, entity }] → { places, unrecognized, unrecognizedGroups, visible }.
+function recognizeCues(bot, mcData, eye, cues) {
+  const c = compile(mcData, bot.game?.dimension || null)
   // First pass: each cluster on its own. Second pass: a village is many houses with
   // open ground between them, so places whose best guess is the same kind and whose
   // centers are close are merged, and a nearby unrecognized scrap made of that kind's
@@ -293,7 +299,12 @@ function recognize({ maxDistance = 48 } = {}) {
 
   places.sort((a, b) => a.dist - b.dist)
   for (const p of [...places, ...unrecognizedGroups]) delete p.members
-  return { places, unrecognized: unrecognizedGroups.length, unrecognizedGroups, candidates, losTests, visible: cues.length, maxDistance, ms: Date.now() - t0 }
+  return { places, unrecognized: unrecognizedGroups.length, unrecognizedGroups, visible: cues.length }
+}
+
+// Every block name some fingerprint in this dimension uses as a cue.
+function cueNames(mcData, dimension) {
+  return new Set(compile(mcData, dimension).idToName.values())
 }
 
 function formatRecognition(r) {
@@ -333,4 +344,4 @@ function formatPlacesContext(r) {
   return ` PLACES=[${items.join(' | ')}]`
 }
 
-module.exports = { recognize, formatRecognition, formatPlacesContext, compile, cluster, guess }
+module.exports = { recognize, recognizeCues, cueNames, VISIBLE_CAP, formatRecognition, formatPlacesContext, compile, cluster, guess }
