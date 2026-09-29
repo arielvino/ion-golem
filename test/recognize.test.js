@@ -209,3 +209,17 @@ test('a runner-up with evidence of its own survives explaining away', () => {
   const kinds = guess(members, compile(mcData, 'overworld')).hyps.map(h => h.kind)
   assert.ok(kinds.includes('pillager_outpost') && kinds.includes('village'), kinds.join(','))
 })
+
+test('End spikes: obsidian alone is enough on the main island, not a player build elsewhere', () => {
+  const end = compile(mcData, 'the_end')
+  const pillar = Array.from({ length: 10 }, (_, i) => at('obsidian', 40, 60 + i, 0))
+  assert.strictEqual(guess(pillar, end, 'the_end').hyps[0]?.kind, 'end_spike')
+  assert.strictEqual(guess(pillar, end, 'end_highlands').hyps.length, 0)
+  assert.strictEqual(guess(pillar.slice(0, 1), end, 'the_end').hyps.length, 0)
+})
+
+test('End exit portal: the bedrock fountain with its torches, not a spike', () => {
+  const end = compile(mcData, 'the_end')
+  const fountain = [at('bedrock', 0, 60, 0), at('bedrock', 0, 61, 0), at('bedrock', 1, 59, 0), at('wall_torch', 1, 62, 0), at('wall_torch', -1, 62, 0)]
+  assert.strictEqual(guess(fountain, end, 'the_end').hyps[0]?.kind, 'end_exit_portal')
+})

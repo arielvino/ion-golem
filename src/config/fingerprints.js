@@ -207,6 +207,28 @@ const FINGERPRINTS = [
     minScore: 4,
   },
   {
+    // The obsidian pillars ringing the main island. Obsidian never generates in the End
+    // otherwise, so it is enough on its own there; off the main island's biome the
+    // discount keeps a player's obsidian build below minScore however much is seen.
+    kind: 'end_spike',
+    dimensions: ['the_end'],
+    biomes: ['the_end'],
+    blocks: { obsidian: 3, iron_bars: 2, bedrock: 1 },
+    entities: { end_crystal: 4 },
+    minCues: 1,
+    minScore: 6,
+  },
+  {
+    // The exit portal in the island's centre: a bedrock fountain with four torches on its
+    // pillar; the portal itself opens (and the egg appears) once the dragon is dead.
+    kind: 'end_exit_portal',
+    dimensions: ['the_end'],
+    biomes: ['the_end'],
+    blocks: { bedrock: 2, wall_torch: 2, end_portal: 5, dragon_egg: 5 },
+    entities: {},
+    minScore: 4,
+  },
+  {
     kind: 'witch_hut',
     dimensions: ['overworld'],
     biomes: ['swamp'],
