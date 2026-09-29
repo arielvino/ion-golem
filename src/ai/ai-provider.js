@@ -26,6 +26,7 @@ function createClaudeCodeProvider(opts = {}) {
   let current = null  // { start, firstTokenMs, text, usage, apiMs, onDelta, gen }
   let pendingAborts = 0  // # of `result`s to drain unseen: aborted requests + our own /clear
   let systemPrompt = ''
+  let reqSeq = 0  // per-request counter; names the interrupt control_request
 
   function handleLine(line) {
     let event
@@ -189,6 +190,7 @@ function createClaudeCodeProvider(opts = {}) {
       // aborted, handleLine drains its stale events (one `result` per pending abort) before
       // collecting this response. See abort() / handleLine.
       current = { start: Date.now(), firstTokenMs: 0, text: '', usage: null, apiMs: 0, onDelta, onToolCall }
+      reqSeq++
 
       const responsePromise = new Promise((resolve, reject) => {
         responseResolve = { resolve, reject }
@@ -211,8 +213,9 @@ function createClaudeCodeProvider(opts = {}) {
         throw new Error('Failed to write to AI process: ' + err.message)
       }
 
+      let timer = null
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('AI response timeout')), 90000)
+        timer = setTimeout(() => reject(new Error('AI response timeout')), 90000)
       })
 
       try {
@@ -225,6 +228,7 @@ function createClaudeCodeProvider(opts = {}) {
           totalMs: Date.now() - result.start,
         }
       } finally {
+        clearTimeout(timer)
         responseResolve = null
         current = null
       }
@@ -232,9 +236,16 @@ function createClaudeCodeProvider(opts = {}) {
 
     abort() {
       if (responseResolve) {
-        // The CLI can't be told to stop mid-request, so it will still emit a full `result`
-        // for this aborted request. Count it so handleLine drains that stale tail instead
-        // of feeding it to (or stalling) the next request.
+        // Actually stop the CLI's turn. Without this the "aborted" request kept running to
+        // the end — measured up to 85s when it made tool calls — and the next request
+        // queued behind it until the 90s timeout killed the process. An interrupt ends the
+        // turn at once with its own `result` (subtype error_during_execution), so the
+        // one-result-per-request drain accounting below still holds.
+        try {
+          proc?.stdin.write(JSON.stringify({ type: 'control_request', request_id: `abort-${reqSeq}`, request: { subtype: 'interrupt' } }) + '\n')
+        } catch (e) { console.warn(`  [AI] interrupt write failed: ${e.message}`) }
+        // Count the interrupted request's `result` so handleLine drains that stale tail
+        // instead of feeding it to (or stalling) the next request.
         pendingAborts++
         const r = responseResolve
         responseResolve = null
