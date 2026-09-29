@@ -270,7 +270,10 @@ function getBotContext() {
     const headBlock = bot.blockAt(pos.offset(0, 1, 0))
     const feetBlock = bot.blockAt(pos)
     const floorBlock = bot.blockAt(pos.offset(0, -1, 0))
-    bodyStr = ` body=[head:${blockName(headBlock)},feet:${blockName(feetBlock)},floor:${blockName(floorBlock)}]`
+    // Lying in a bed is a body state, not a block: feet:yellow_bed alone reads the same
+    // whether the bot is asleep in it or standing on it (26.3 once hid the wake-up).
+    const bed = bot.isSleeping ? ',in_bed(asleep)' : ''
+    bodyStr = ` body=[head:${blockName(headBlock)},feet:${blockName(feetBlock)},floor:${blockName(floorBlock)}${bed}]`
   } catch(e) { console.warn('  [CTX] body block detection err:', e.message) }
 
   // Names only — the usage syntax lives in the system prompt. Generated from the
