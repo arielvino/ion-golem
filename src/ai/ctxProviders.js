@@ -330,7 +330,7 @@ function around() {
       else if (f.blocks === 0) s = 'walkable'
       else if (f.water) s = `drop ${f.blocks} into water`
       else if (f.blocks <= 3) s = `step down ${f.blocks}`
-      else s = `drop ${f.blocks} → ${f.landing} y${f.at} (~${damageOf(f)} dmg)`
+      else s = `drop ${f.blocks} → onto ${f.landing}, stand at y${f.stand} (~${damageOf(f)} dmg)`
       if (f.blocks > 3) drops++
     }
     sides.push(`${name}: ${s}`)
@@ -338,7 +338,7 @@ function around() {
   const floor = at(p.x, p.y - 1, p.z)
   const under = measureFall(p.x, p.y, p.z, 1)
   const below = floor === null ? 'floor unseen'
-    : `floor ${floor}; breaking it: ${under.unknown ? `drop ≥${under.blocks}, then unseen` : `drop ${under.blocks} → ${under.landing ?? '?'} y${under.at}`}`
+    : `floor ${floor}; breaking it: ${under.unknown ? `drop ≥${under.blocks}, then unseen` : `drop ${under.blocks} → onto ${under.landing ?? '?'}, stand at y${under.stand}`}`
 
   const out = [`around ${p.x},${p.y},${p.z} — layers top→bottom, each 5x5: rows north→south, columns west→east, @ = you`, ...grid]
   out.push(sides.join(' | '))

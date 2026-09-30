@@ -10,8 +10,10 @@ const DIRS = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] }
 
 // Fall from standing at feet level `fromY` in column (x,z), cells fromY-1 downward.
 // `open` = cells treated as air regardless of the DB (the floor about to be dug).
-// Returns { blocks, landing, water, hazard, unknown } — `blocks` is how far the bot
-// drops; `unknown` means the scan hit a cell nobody has seen before finding ground.
+// Returns { blocks, landing, at, stand, water, hazard, unknown } — `blocks` is how far the
+// bot drops; `at` is the landing BLOCK's y, `stand` the feet y after landing (at + 1) —
+// the height pos= and digdown:yN speak in, so reports to the model give `stand`;
+// `unknown` means the scan hit a cell nobody has seen before finding ground.
 function measureFall(x, fromY, z, open = 0) {
   let blocks = 0
   for (let y = fromY - 1; y >= fromY - MAX_SCAN; y--) {
@@ -21,7 +23,7 @@ function measureFall(x, fromY, z, open = 0) {
     if (WATER_BLOCKS.has(name)) return { blocks, water: true, landing: name, at: y }
     if (HAZARDS.has(name)) return { blocks, hazard: name, landing: name, at: y }
     if (PASSABLE.has(name)) { blocks++; continue }
-    return { blocks, landing: name, at: y }
+    return { blocks, landing: name, at: y, stand: y + 1 }
   }
   return { blocks, unknown: true, at: fromY - MAX_SCAN }
 }
@@ -48,7 +50,7 @@ const damageOf = (fall) => (fall.water ? 0 : Math.max(0, fall.blocks - SAFE_FALL
 
 function describeFall(fall) {
   if (fall.unknown) return `at least ${fall.blocks} blocks, landing unseen (y${fall.at} never looked at)`
-  const onto = fall.water ? `into ${fall.landing}` : `onto ${fall.landing} at y${fall.at}`
+  const onto = fall.water ? `into ${fall.landing}` : `onto ${fall.landing}, you stand at y${fall.stand}`
   return `${fall.estimated ? 'about ' : ''}${fall.blocks} blocks ${onto}, ~${damageOf(fall)} damage${fall.estimated ? ' (judged from the open columns beside it)' : ''}`
 }
 

@@ -22,9 +22,9 @@ state.bot = { entity: { position: new Vec3(0.5, 118, 0.5) } }
 test('on a pillar every side reads as a drop and the view says so', () => {
   const out = around()
   assert.match(out, /^around 0,118,0/)
-  assert.match(out, /north: drop 17 → stone y100 \(~14 dmg\)/)
+  assert.match(out, /north: drop 17 → onto stone, stand at y101 \(~14 dmg\)/)
   assert.match(out, /every side drops more than 3 blocks — you are on a pillar or a peak/)
-  assert.match(out, /under you: floor dirt; breaking it: drop 1 → dirt y116/)
+  assert.match(out, /under you: floor dirt; breaking it: drop 1 → onto dirt, stand at y117/)
   // feet layer: @ in the middle, open air around
   assert.match(out, /\n(?:.{11}){2}\.\.@\.\./)
 })
