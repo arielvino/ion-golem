@@ -417,9 +417,10 @@ function createBot() {
       return
     }
     console.log(color(c.bold + c.white, `\n<${username}> ${message}`))
-    // !nobreak on|off is for the bot, not the AI; a yes/no to a pending break request is
+    // !nobreak / !defend on|off are for the bot, not the AI; a yes/no to a pending break request is
     // recorded here and still reaches the AI below.
     if (require('./src/engine/breakPermission').onPlayerChat(username, message)) return
+    if (require('./src/engine/defendMode').onPlayerChat(username, message)) return
     // Debug-only repro hooks: `!act <action>` runs an action with no model in the loop,
     // `!ai off|on` pauses/resumes model calls so the AI can't steer a staged scenario.
     // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.

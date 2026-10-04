@@ -45,8 +45,34 @@ function setupAutonomous(interruptFn) {
     }
   })
 
-  // --- DAMAGE RESPONSE ---
+  // --- AUTO-FIGHT: interrupt whatever runs and put an attack at the front ---
   let lastAutoFight = 0
+  function autoFight(attacker, logLine, chatLine) {
+    if (Date.now() - lastAutoFight < T.AUTOFIGHT_DEBOUNCE) return
+    if (bot.pvp.target) return
+    lastAutoFight = Date.now()
+    console.log(`  [AUTO] ${logLine}`)
+    sendChat(chatLine)
+    interruptFn()
+    // Prepend attack to front of queue instead of replacing
+    setTimeout(() => {
+      state.actionQueue.unshift({ actionStr: `attack:${entityTag(attacker)}`, username: 'auto' })
+    }, T.QUEUE_PREPEND_DELAY)
+  }
+
+  // --- DEFEND MODE (opt-in, !defend on): strike a hostile on sight, before it hits ---
+  const defend = require('./defendMode')
+  const { scanHostiles } = require('./guard')
+  let defendTicks = 0
+  bot.on('physicsTick', () => {
+    if (++defendTicks % 5 || !defend.isOn() || bot.pvp.target) return
+    const hostile = scanHostiles(defend.DEFEND_RANGE)
+    if (!hostile) return
+    autoFight(hostile, `defend: ${hostile.name} at ${hostile.position.distanceTo(bot.entity.position).toFixed(1)}m`,
+      `${hostile.name || 'Hostile'} spotted, engaging!`)
+  })
+
+  // --- DAMAGE RESPONSE ---
   let lastEnvDamage = 0
   bot.on('entityHurt', (entity) => {
     if (entity !== bot.entity) return
@@ -58,16 +84,7 @@ function setupAutonomous(interruptFn) {
     )
 
     if (attacker) {
-      if (Date.now() - lastAutoFight < T.AUTOFIGHT_DEBOUNCE) return
-      if (bot.pvp.target) return
-      lastAutoFight = Date.now()
-      console.log(`  [AUTO] attacked by ${attacker.name || attacker.displayName}!`)
-      sendChat(`Under attack by ${attacker.name || 'something'}!`)
-      interruptFn()
-      // Prepend attack to front of queue instead of replacing
-      setTimeout(() => {
-        state.actionQueue.unshift({ actionStr: `attack:${entityTag(attacker)}`, username: 'auto' })
-      }, T.QUEUE_PREPEND_DELAY)
+      autoFight(attacker, `attacked by ${attacker.name || attacker.displayName}!`, `Under attack by ${attacker.name || 'something'}!`)
       return
     }
 
