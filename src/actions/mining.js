@@ -76,22 +76,21 @@ async function doMine(targetName, opts = {}) {
   const seenKeys = new Set()
   const candidates = []
 
-  // If explicit coordinates given, verify and use as first candidate
+  // Explicit coordinates name exactly one block: mine that one or fail, never a substitute
+  // (the wood scoring below would otherwise prefer another log of the same tree).
   if (explicitPos) {
+    const at = `${explicitPos.x},${explicitPos.y},${explicitPos.z}`
     const eb = bot.blockAt(explicitPos)
-    if (eb && matchingIds.includes(eb.type)) {
-      const key = `${explicitPos.x},${explicitPos.y},${explicitPos.z}`
-      if (!state.skipBlocks.has(key)) {
-        seenKeys.add(key)
-        candidates.push(explicitPos)
-        console.log(`  using explicit coords (${explicitPos.x},${explicitPos.y},${explicitPos.z})`)
-      }
-    } else {
-      console.log(`  explicit coords (${explicitPos.x},${explicitPos.y},${explicitPos.z}) — block not found or wrong type`)
+    if (!eb || !matchingIds.includes(eb.type) || state.skipBlocks.has(at)) {
+      console.log(`  explicit coords (${at}) — block not found, wrong type or skipped`)
+      recordFailure(`mine:${targetName} - no ${rawName} at ${at} (${eb ? eb.name : 'unloaded'}). Mine by name without coords, or pick coords from VISION.`)
+      break
     }
+    console.log(`  using explicit coords (${at})`)
+    candidates.push(explicitPos)
   }
 
-  for (const pos of visionCandidates) {
+  for (const pos of explicitPos ? [] : visionCandidates) {
     const key = `${pos.x},${pos.y},${pos.z}`
     if (!seenKeys.has(key) && !state.stmts.isPlaced.get(pos.x, pos.y, pos.z)) {
       seenKeys.add(key); candidates.push(pos)
