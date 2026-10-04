@@ -1,5 +1,6 @@
 // Entry point — PID, createBot, shutdown, signals
 require('./src/lib/chunkLightFix')   // before mineflayer builds its Chunk class
+require('./src/lib/physicsEpsilonFix')   // before mineflayer's physics: vanilla collision tolerance
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const pvp = require('mineflayer-pvp').plugin
