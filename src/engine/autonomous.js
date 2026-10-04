@@ -54,9 +54,11 @@ function setupAutonomous(interruptFn) {
     console.log(`  [AUTO] ${logLine}`)
     sendChat(chatLine)
     interruptFn()
-    // Prepend attack to front of queue instead of replacing
+    // Prepend attack to front of queue instead of replacing, and launch it now — left
+    // to the engine it would wait for the next tick, up to 5s of free hits.
     setTimeout(() => {
       state.actionQueue.unshift({ actionStr: `attack:${entityTag(attacker)}`, username: 'auto' })
+      require('./engine').processActionQueue()
     }, T.QUEUE_PREPEND_DELAY)
   }
 
