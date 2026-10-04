@@ -51,7 +51,6 @@ async function doMine(targetName, opts = {}) {
     matchingIds = matches.map(n => mcData.blocksByName[n].id)
   }
 
-  const isWood = normalized.includes('log') || normalized.includes('wood') || normalized.includes('stem')
   let mined = 0
   let speedWarned = false  // harvest speed advisory fires at most once per mine action
 
@@ -119,30 +118,10 @@ async function doMine(targetName, opts = {}) {
     break // no candidates, stop batch
   }
 
-  let block
-  if (isWood) {
-    const botY = bot.entity.position.y
-    let bestScore = Infinity
-    for (const pos of candidates) {
-      const b = bot.blockAt(pos)
-      if (!b) continue
-      let groundDist = 0
-      for (let dy = 1; dy <= 5; dy++) {
-        const below = bot.blockAt(pos.offset(0, -dy, 0))
-        if (below && below.name !== 'air' && !below.name.includes('leaves') && !below.name.includes('log')) {
-          groundDist = dy; break
-        }
-      }
-      if (groundDist === 0) groundDist = 10
-      const dist = bot.entity.position.distanceTo(pos)
-      const yPenalty = Math.max(0, pos.y - botY - 3) * 4
-      const score = dist + yPenalty + groundDist * 3
-      if (score < bestScore) { bestScore = score; block = b }
-    }
-    if (!block) block = bot.blockAt(candidates[0])
-  } else {
-    block = bot.blockAt(candidates[0])
-  }
+  // Nearest first: vision lists blocks in ray order, not by distance.
+  const here = bot.entity.position
+  const nearest = candidates.reduce((a, b) => (here.distanceTo(b) < here.distanceTo(a) ? b : a))
+  const block = bot.blockAt(nearest)
 
   const bPos = block.position
   const dist = Math.round(bot.entity.position.distanceTo(bPos))
