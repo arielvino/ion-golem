@@ -1129,8 +1129,13 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   try {
     await raceAbort(bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, range)), timeout)
   } catch (e) {
-    if (e instanceof AbortError) { state.abortSignal = true; reason = 'abort' }
-    else if (!reason) reason = e.message === 'timeout' ? 'timeout' : e.name === 'NoPath' ? 'no path' : e.message
+    // An interrupt clears the goal itself (engine.interrupt), so goto rejects with
+    // GoalChanged before raceAbort's poll sees the abort — check the signal first.
+    if (e instanceof AbortError || state.abortSignal) { state.abortSignal = true; reason = 'abort' }
+    else if (!reason) reason = e.message === 'timeout' ? 'timeout'
+      : e.name === 'NoPath' ? 'no path'
+      : e.name === 'Timeout' ? 'no path found in time'
+      : e.message
   } finally {
     clearInterval(guard)
     bot.pathfinder.setGoal(null)
