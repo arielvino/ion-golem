@@ -135,6 +135,7 @@ function setupRetreat(interruptFn) {
       run.dir = dir
     }
 
+    if (state.creeperReflex) return         // creeper reflex is steering
     // Something caught up: turn and strike it (knockback buys distance), then run on.
     const pos = bot.entity.position
     const close = hs.filter(e => e.position.distanceTo(pos) < SWING_RANGE)

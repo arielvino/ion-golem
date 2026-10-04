@@ -74,7 +74,10 @@ async function doAttack(targetName) {
     // pvp no longer on this target ends this attack.
     waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => bot.pvp.stop(), () => bot.pvp.target !== entity)
     await raceAbort(waiter, 30000)
-    if (!entity.isValid) {
+    if (!entity.isValid && require('../engine/creeperDefense').didExplode(entity)) {
+      console.log('  exploded'); logEvent(`attack: ${label} exploded`)
+      killed = true   // the threat is gone, though not by our hand
+    } else if (!entity.isValid) {
       const pos = entity.position
       logGameEvent('kill', entity.name || entity.username, 1, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), { weapon: bot.heldItem?.name || 'hand', tag: label, uuid: entity.uuid })
       console.log('  killed!'); logEvent(`attack: killed ${label}`); sendChat('Got it!')
@@ -90,7 +93,8 @@ async function doAttack(targetName) {
     // pvp raises the shield after every swing and never lowers it when the fight
     // ends: left up, it slows every step and the bot walks around blocking.
     // (bot.usingHeldItem can't tell: mineflayer clears it on any entity_status.)
-    if (bot.inventory.slots[45]?.name === 'shield') bot.deactivateItem()
+    // Not while the creeper reflex holds it against a fuse.
+    if (bot.inventory.slots[45]?.name === 'shield' && !state.creeperReflex) bot.deactivateItem()
   }
   state.currentTask = null
   // Success = the target actually died. Stopping/timing out without a kill is not "done".

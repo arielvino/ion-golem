@@ -84,7 +84,7 @@ function setupRangedDefense() {
         count(threat, 'shield')
         console.log(`  [SHIELD] up vs ${threat.name} at ${threat.position.distanceTo(bot.entity.position).toFixed(1)}m`)
       } else if (raised && now - lastThreatAt > SHIELD_HOLD_MS) {
-        if (!bot.pvp?.target) bot.deactivateItem()   // in melee pvp keeps it up between swings
+        if (!bot.pvp?.target && !state.creeperReflex) bot.deactivateItem()   // in melee pvp keeps it up between swings
         raised = false
       }
       return

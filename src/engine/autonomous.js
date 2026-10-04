@@ -12,6 +12,7 @@ function setupAutonomous(interruptFn) {
   const ranged = require('./rangedDefense')
   ranged.setupRangedDefense()
   require('./retreat').setupRetreat(interruptFn)
+  require('./creeperDefense').setupCreeperDefense()
 
   // --- AUTO-EAT on low health ---
   bot.on('health', () => {
@@ -55,6 +56,7 @@ function setupAutonomous(interruptFn) {
   function autoFight(attacker, logLine, chatLine) {
     // Running from a swarm (the reflex or a flee action) beats turning to fight.
     if (bot.pvp.target || state.retreating || state.currentTask === 'fleeing') return
+    if (state.creeperReflex) return   // a creeper is fusing: block or run first, fight after
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return
     pending = attacker; pendingAt = Date.now()
     console.log(`  [AUTO] ${logLine}`)
