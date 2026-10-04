@@ -258,12 +258,12 @@ function createBot() {
     mv.allowSprinting = true
     mv.canOpenDoors = true
     mv.canDig = false
-    mv.allow1by1towers = true
+    // No scaffolding: pathfinder never picks its pillar/bridge blocks back up, so it
+    // left stray dirt and cobble all over. Pillaring and bridging are explicit actions.
+    mv.allow1by1towers = false
     mv.allowParkour = true
     mv.maxDropDown = 4
-    const scaffolds = ['cobblestone', 'dirt', 'netherrack', 'cobbled_deepslate']
-      .map(n => mcData.blocksByName[n]?.id).filter(Boolean)
-    mv.scafoldingBlocks = scaffolds
+    mv.scafoldingBlocks = []
     bot.pathfinder.setMovements(mv)
     if (process.argv.includes('--pathfinder')) console.log(color(c.yellow, '[NAV] walk/pathfind use mineflayer-pathfinder (experiment)'))
 
