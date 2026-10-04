@@ -48,6 +48,11 @@ async function doAttack(targetName) {
 
   let killed = false
   let waiter = null
+  // When the target goes, pvp.stop() waits up to 5s for a path_stop that the pathfinder
+  // only sends once its goal is reset, so a bot standing at the corpse lingers 5s
+  // before stoppedAttacking. Reset the goal ourselves: path_stop fires now.
+  const onGone = (e) => { if (e === entity) bot.pathfinder.setGoal(null) }
+  bot.on('entityGone', onGone)
   try {
     await equipBestWeapon(bot)
     bot.pvp.attack(entity)
@@ -69,6 +74,7 @@ async function doAttack(targetName) {
     else console.error('  pvp err:', err.message)
   } finally {
     if (waiter) waiter.cancel()
+    bot.removeListener('entityGone', onGone)
   }
   state.currentTask = null
   // Success = the target actually died. Stopping/timing out without a kill is not "done".

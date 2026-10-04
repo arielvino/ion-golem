@@ -46,11 +46,13 @@ function setupAutonomous(interruptFn) {
   })
 
   // --- AUTO-FIGHT: interrupt whatever runs and put an attack at the front ---
-  let lastAutoFight = 0
+  // No cooldown between fights: the next hostile is engaged as soon as pvp drops the
+  // last one. Only an attack still launching (target alive) holds off a second one.
+  let pending = null, pendingAt = 0
   function autoFight(attacker, logLine, chatLine) {
-    if (Date.now() - lastAutoFight < T.AUTOFIGHT_DEBOUNCE) return
     if (bot.pvp.target) return
-    lastAutoFight = Date.now()
+    if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return
+    pending = attacker; pendingAt = Date.now()
     console.log(`  [AUTO] ${logLine}`)
     sendChat(chatLine)
     interruptFn()

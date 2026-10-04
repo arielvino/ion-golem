@@ -12,8 +12,11 @@ module.exports = {
 
   // Minimum gap between repeated autonomous responses of the same kind.
   DROWNING_DEBOUNCE: 8000,   // re-dispatch swimup at most this often
-  AUTOFIGHT_DEBOUNCE: 5000,  // re-engage an attacker at most this often
   ENV_DAMAGE_DEBOUNCE: 3000, // re-react to environmental damage at most this often
+
+  // A dispatched reflex attack takes a moment to reach pvp (prepend delay + equip).
+  // Within this window, while its target lives, don't dispatch another one.
+  AUTOFIGHT_LAUNCH_GRACE: 2000,
 
   // Idle item-pickup sweep.
   PICKUP_INTERVAL: 2000,     // how often to scan for nearby dropped items when idle
