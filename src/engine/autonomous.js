@@ -56,6 +56,7 @@ function setupAutonomous(interruptFn) {
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return
     pending = attacker; pendingAt = Date.now()
     console.log(`  [AUTO] ${logLine}`)
+    require('../core/utils').logEvent(`reflex: ${logLine} → attack:${entityTag(attacker)}`)
     sendChat(chatLine)
     interruptFn()
     // Prepend attack to front of queue instead of replacing, and launch it now — left
