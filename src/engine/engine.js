@@ -155,7 +155,8 @@ function autonomousLine(bgResult) {
     console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
     return { kind: 'task', line: `[SELF-CHECK] task=${taskDesc}` }
   }
-  const wake = idleWakeReason(bgResult)
+  let wake = idleWakeReason(bgResult)
+  if (!wake && require('./leadMode').wantsWake()) wake = 'lead: no goal'
   if (!wake) return null
   console.log(color(c.cyan, `  [LOOP] idle wake: ${wake}`))
   return { kind: 'idle', line: '[SELF-CHECK] agenda=idle' }
