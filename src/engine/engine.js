@@ -6,7 +6,7 @@ const { handleMessages, abortResponse } = require('../ai/ai')
 const { executeAction } = require('../actions')
 const { stackTopTitle, stackTop } = require('./tasks')
 const { launchBackground, isBackgroundRunning, consumeBackgroundResult } = require('./backgroundTask')
-const { preCheck } = require('./guard')
+const { preCheck, scanHostiles } = require('./guard')
 const { FOOD_STARVING } = require('../config/safety')
 const { c, color } = require('../lib/colors')
 
@@ -15,6 +15,22 @@ const COOLDOWN = 5000          // ms between ticks (model turns); player chat ze
 const MAX_NO_ACTION = 3        // after 3 rounds with no action output, pause
 
 let loopCountdown = 0          // counts down, triggers at 0. Start at 0 = first tick fires on spawn
+
+// A hostile coming into view is answered at once, like chat, not up to COOLDOWN later.
+// Only the none→some edge fires, so a mob lingering in view doesn't keep zeroing it.
+const HOSTILE_POLL_MS = 500
+let hostilePollIn = 0
+let hostileInView = false
+function pollHostileWake() {
+  if ((hostilePollIn -= TICK_MS) > 0) return
+  hostilePollIn = HOSTILE_POLL_MS
+  const seen = !!scanHostiles()
+  if (seen && !hostileInView && loopCountdown > 0) {
+    console.log(color(c.cyan, '  [LOOP] hostile came into view — turn now'))
+    loopCountdown = 0
+  }
+  hostileInView = seen
+}
 
 // No-progress watchdog: force-interrupt a TRAVEL task wedged with zero progress, for hangs
 // no one issues `stop` for. Scoped to pure-travel actions (mining/follow/sail legitimately
@@ -157,6 +173,7 @@ async function startEngine() {
   while (state.engineRunning) {
     await sleep(TICK_MS)
     loopCountdown -= TICK_MS
+    pollHostileWake()
     if (loopCountdown > 0) continue
 
     // === TICK FIRES ===
