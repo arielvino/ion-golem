@@ -297,9 +297,23 @@ function createBot() {
     }, 3000)
     // Nearby blocks updated via vision system only — no direct bot.blockAt (x-ray rule)
 
-    // Log item pickups
+    // Log item pickups. Journal records are batched: a kill's drops land within a
+    // second or two, and become one "pickup:" record instead of one per stack.
+    const pickupBatch = new Map()
+    let pickupFlush = null
+    const journalPickup = (name, count) => {
+      pickupBatch.set(name, (pickupBatch.get(name) || 0) + count)
+      if (pickupFlush) return
+      pickupFlush = setTimeout(() => {
+        pickupFlush = null
+        const { logEvent } = require('./src/core/utils')
+        logEvent(`pickup: ${[...pickupBatch].map(([n, c]) => `${c} ${n}`).join(', ')}`)
+        pickupBatch.clear()
+      }, 2000)
+    }
     bot.on('playerCollect', (collector, collected) => {
       if (collector !== bot.entity) return
+      if (collected.name === 'experience_orb') return  // its metadata slot 8 is the xp value, not an item
       try {
         const pos = collected.position
         const md = collected.metadata
@@ -337,6 +351,7 @@ function createBot() {
           const { debugChat } = require('./src/core/utils')
           debugChat(`[pickup] ${count}x ${name}`)
           logGameEvent('pickup', name, count, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
+          journalPickup(name, count)
         } else {
           console.log(`  [PICKUP] could not resolve item. md[8]=${JSON.stringify(md?.[8])?.slice(0,100)}`)
         }
@@ -466,6 +481,8 @@ function createBot() {
         const pos = bot.entity?.position
         const cause = msg.replace(bot.username + ' ', '')
         logGameEvent('death', cause, 1, pos ? Math.floor(pos.x) : null, pos ? Math.floor(pos.y) : null, pos ? Math.floor(pos.z) : null, { message: msg })
+        require('./src/core/utils').logEvent(`death: ${cause}${pos ? ` at ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}` : ''}`)
+        state.diedAt = Date.now()
         if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
         state.messageQueue.push({
           username: 'event',
@@ -501,7 +518,17 @@ function createBot() {
 
   bot.on('death', () => {
     state.portableCraftingTable = null
+    state.diedAt = Date.now()
     // Death reason logged via messagestr handler with full message (e.g. "Bro was slain by Zombie")
+  })
+
+  // After a death, record where the bot came back and what it still carries.
+  bot.on('spawn', () => {
+    if (!state.diedAt) return
+    state.diedAt = null
+    const p = bot.entity.position
+    const items = bot.inventory.items()
+    require('./src/core/utils').logEvent(`respawn: at ${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}, inventory ${items.length ? items.map(i => `${i.count} ${i.name}`).join(', ') : 'empty'}`)
   })
 
   bot.on('end', () => {
