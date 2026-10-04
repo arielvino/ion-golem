@@ -30,8 +30,9 @@ function scanHostiles(range = 12) {
   const pos = bot.entity.position
   const eye = pos.offset(0, 1.62, 0)
   const { hasLineOfSight } = require('../perception/vision')
+  const { isNeutral } = require('../perception/entityClass')
   return bot.nearestEntity(e =>
-    e.type === 'hostile' &&
+    e.type === 'hostile' && !isNeutral(e) &&
     e.position.distanceTo(pos) < range &&
     hasLineOfSight(eye, e.position, e.height || 1.8)
   )

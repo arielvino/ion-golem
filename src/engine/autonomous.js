@@ -88,10 +88,11 @@ function setupAutonomous(interruptFn) {
 
     // Check for nearby hostile attacker (mineflayer doesn't provide source)
     // An archer hits from range: one in sight counts too.
-    const attacker = bot.nearestEntity(e =>
-      (e.type === 'hostile' || e.type === 'mob') &&
-      e.position.distanceTo(bot.entity.position) < 6
-    ) || ranged.nearestArcher(bot)
+    // A neutral mob (enderman) standing by is the attacker only if nothing else is.
+    const { isNeutral } = require('../perception/entityClass')
+    const near = (e) => (e.type === 'hostile' || e.type === 'mob') && e.position.distanceTo(bot.entity.position) < 6
+    const attacker = bot.nearestEntity(e => near(e) && !isNeutral(e)) ||
+      ranged.nearestArcher(bot) || bot.nearestEntity(near)
 
     if (attacker) {
       autoFight(attacker, `attacked by ${attacker.name || attacker.displayName}!`, `Under attack by ${attacker.name || 'something'}!`)

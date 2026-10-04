@@ -7,8 +7,12 @@
   "threats": [
     "ghast", "magma_cube", "phantom", "shulker", "slime", "ender_dragon", "hoglin"
   ],
+  "neutral": [
+    "enderman", "zombified_piglin", "piglin"
+  ],
   "_fields": {
     "background": "Despawning ambient/water mobs that never matter individually. Summarized per type (cod×12(41m+)), no tags, and not reported as they drift in and out of sight.",
-    "threats": "Hostile mobs minecraft-data does not type as 'hostile'. Every 'hostile'-typed entity is a threat automatically. Threats are always listed individually and never capped."
+    "threats": "Hostile mobs minecraft-data does not type as 'hostile'. Every 'hostile'-typed entity is a threat automatically. Threats are always listed individually and never capped.",
+    "neutral": "Hostile-typed mobs that leave you alone until provoked. Still threats in nearby=, but the reflexes never strike them first: provoking an enderman or a zombified piglin pack starts a fight that wasn't coming."
   }
 }

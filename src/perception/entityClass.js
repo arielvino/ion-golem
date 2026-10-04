@@ -7,6 +7,7 @@ const state = require('../core/state')
 
 const BACKGROUND = new Set(cfg.background)
 const THREATS = new Set(cfg.threats)
+const NEUTRAL = new Set(cfg.neutral)
 
 // 'drop' | 'threat' | 'background' | 'tracked'
 function entityClass(e) {
@@ -19,4 +20,7 @@ function entityClass(e) {
   return 'tracked'
 }
 
-module.exports = { entityClass }
+// Leaves you alone unless provoked: never a first-strike target.
+function isNeutral(e) { return NEUTRAL.has(e.name) }
+
+module.exports = { entityClass, isNeutral }

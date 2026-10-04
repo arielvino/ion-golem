@@ -26,10 +26,11 @@ const DIRS = 16
 function meleeHostiles(bot, range) {
   const { ARCHERS } = require('./rangedDefense')
   const { hasLineOfSight } = require('../perception/vision')
+  const { isNeutral } = require('../perception/entityClass')
   const pos = bot.entity.position
   const eye = pos.offset(0, 1.62, 0)
   return Object.values(bot.entities).filter(e =>
-    e.type === 'hostile' && !ARCHERS.has(e.name) && e !== bot.entity &&
+    e.type === 'hostile' && !ARCHERS.has(e.name) && !isNeutral(e) && e !== bot.entity &&
     e.position.distanceTo(pos) < range &&
     hasLineOfSight(eye, e.position, e.height || 1.8)
   )
