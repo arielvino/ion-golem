@@ -164,18 +164,20 @@ async function doFlee() {
   stopAll()
   const bot = state.bot
   state.currentTask = 'fleeing'
-  const hostile = bot.nearestEntity(e =>
-    (e.type === 'hostile' || e.type === 'mob') && e.position.distanceTo(bot.entity.position) < 32
-  )
   const pos = bot.entity.position
+  // Away from every hostile around at once, toward open floor.
+  const hostiles = Object.values(bot.entities).filter(e =>
+    e.type === 'hostile' && e.position.distanceTo(pos) < 16)
+  const { escapeDir } = require('../engine/retreat')
+  const dir = escapeDir(bot, hostiles)
   let fleeDir
-  if (hostile) {
-    fleeDir = pos.minus(hostile.position).normalize()
-    console.log(`  fleeing from ${hostile.name} at dist=${Math.round(hostile.position.distanceTo(pos))}`)
+  if (dir) {
+    fleeDir = new Vec3(dir.dx, 0, dir.dz)
+    console.log(`  fleeing from ${hostiles.length} hostile(s) toward ${dir.clear}+ blocks of open floor`)
   } else {
     const yaw = bot.entity.yaw
     fleeDir = new Vec3(-Math.sin(yaw), 0, -Math.cos(yaw))
-    console.log('  fleeing (no hostile nearby, running forward)')
+    console.log('  fleeing (no open direction known, running forward)')
   }
   const dest = pos.plus(fleeDir.scaled(30))
   bot.setControlState('sprint', true)

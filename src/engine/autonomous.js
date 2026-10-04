@@ -11,10 +11,11 @@ function setupAutonomous(interruptFn) {
   const bot = state.bot
   const ranged = require('./rangedDefense')
   ranged.setupRangedDefense()
+  require('./retreat').setupRetreat(interruptFn)
 
   // --- AUTO-EAT on low health ---
   bot.on('health', () => {
-    if (bot.health <= HEALTH_AUTOEAT && bot.food < FOOD_FULL) {
+    if (bot.health <= HEALTH_AUTOEAT && bot.food < FOOD_FULL && !state.retreating) {
       const { edibleFoods } = require('../actions/vitals')
       // One eat at a time: 'health' fires on every HP/food change.
       const eating = state.backgroundTask?.action === 'eat' || state.actionQueue.some(a => a.actionStr === 'eat')
@@ -52,7 +53,8 @@ function setupAutonomous(interruptFn) {
   // last one. Only an attack still launching (target alive) holds off a second one.
   let pending = null, pendingAt = 0
   function autoFight(attacker, logLine, chatLine) {
-    if (bot.pvp.target) return
+    // Running from a swarm (the reflex or a flee action) beats turning to fight.
+    if (bot.pvp.target || state.retreating || state.currentTask === 'fleeing') return
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return
     pending = attacker; pendingAt = Date.now()
     console.log(`  [AUTO] ${logLine}`)
