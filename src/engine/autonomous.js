@@ -9,6 +9,8 @@ const { entityTag } = require('../perception/entityTag')
 
 function setupAutonomous(interruptFn) {
   const bot = state.bot
+  const ranged = require('./rangedDefense')
+  ranged.setupRangedDefense()
 
   // --- AUTO-EAT on low health ---
   bot.on('health', () => {
@@ -82,10 +84,11 @@ function setupAutonomous(interruptFn) {
     if (entity !== bot.entity) return
 
     // Check for nearby hostile attacker (mineflayer doesn't provide source)
+    // An archer hits from range: one in sight counts too.
     const attacker = bot.nearestEntity(e =>
       (e.type === 'hostile' || e.type === 'mob') &&
       e.position.distanceTo(bot.entity.position) < 6
-    )
+    ) || ranged.nearestArcher(bot)
 
     if (attacker) {
       autoFight(attacker, `attacked by ${attacker.name || attacker.displayName}!`, `Under attack by ${attacker.name || 'something'}!`)

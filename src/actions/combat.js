@@ -28,6 +28,17 @@ async function equipBestWeapon(bot) {
   }
 }
 
+// A shield in the inventory goes to an empty off-hand; rangedDefense raises it.
+async function equipShield(bot) {
+  if (bot.inventory.slots[45]) return
+  const shield = bot.inventory.items().find(i => i.name === 'shield')
+  if (!shield) return
+  try { await raceAbort(bot.equip(shield, 'off-hand'), 5000) } catch (e) {
+    if (e instanceof AbortError) throw e
+    console.log(`  equip shield failed: ${e.message}`)
+  }
+}
+
 async function doAttack(targetName) {
   stopAll()
   const bot = state.bot
@@ -55,6 +66,7 @@ async function doAttack(targetName) {
   bot.on('entityGone', onGone)
   try {
     await equipBestWeapon(bot)
+    await equipShield(bot)
     bot.pvp.attack(entity)
     // Wait until pvp reports it stopped, or 30s; the timeout stops the attack.
     // stopAll() above didn't await pvp.stop(), so the PREVIOUS attack's
@@ -75,6 +87,10 @@ async function doAttack(targetName) {
   } finally {
     if (waiter) waiter.cancel()
     bot.removeListener('entityGone', onGone)
+    // pvp raises the shield after every swing and never lowers it when the fight
+    // ends: left up, it slows every step and the bot walks around blocking.
+    // (bot.usingHeldItem can't tell: mineflayer clears it on any entity_status.)
+    if (bot.inventory.slots[45]?.name === 'shield') bot.deactivateItem()
   }
   state.currentTask = null
   // Success = the target actually died. Stopping/timing out without a kill is not "done".
