@@ -49,6 +49,7 @@ function summarizeSight({ dimension, eye, blocks, places = [] }) {
     at: { x: e.at.x, y: e.at.y, z: e.at.z },
   })).sort((a, b) => a.dist - b.dist).slice(0, LIST_MAX)
   return {
+    seen: blocks.length,
     biomes: biomeList.map(([name, v]) => ({ name, share: v.n / total })),
     terrain: biomeList.map(([name, v]) => {
       const n = [...v.terrain.values()].reduce((s, c) => s + c, 0) || 1
@@ -64,13 +65,19 @@ const pct = (x) => `${Math.round(100 * x)}%`
 
 // The context lines — data only; how to read them belongs in the system prompt. An empty
 // layer is left out. Entries: NAMExCOUNT@X,Y,Z (the nearest one) DIST DIR.
-function formatSight(s) {
+// dark: lookAround's darkSummary (or null): DARK= is left out when nothing reached is dark.
+function formatSight(s, dark = null) {
   const item = (e) => `${e.name}x${e.count}@${e.at.x},${e.at.y},${e.at.z} ${e.dist}m ${e.dir}`
   const lines = []
   if (s.biomes.length) lines.push(`BIOMES=[${s.biomes.map(b => `${b.name} ${pct(b.share)}`).join(', ')}]`)
   if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)}`).join(', ')}`).join(' | ')}]`)
   if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(item).join(', ')}]`)
   if (s.unexplained.length) lines.push(`UNEXPLAINED=[${s.unexplained.map(item).join(', ')}]`)
+  if (dark?.count) {
+    const share = dark.count / (dark.count + (s.seen || 0))
+    const dirs = dark.dirs.filter(([, f]) => f >= 0.15).slice(0, 3).map(([d]) => d)
+    lines.push(`DARK=[light here ${dark.here} | ${dark.count} blocks in reach too dark to see (${pct(share)} of the view)${dirs.length ? `, mostly ${dirs.join(', ')}` : ''}]`)
+  }
   return lines.join('\n')
 }
 

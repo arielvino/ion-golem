@@ -100,9 +100,11 @@ function snapshot(bot, eye, R, darken = null) {
 // One ray per block on the cube shell at distance R, aimed at its centre. Marks every cell a ray
 // passes until the first opaque one (inclusive), up to distance R. With a light cube, a cell is
 // marked only if lit where the ray meets it (see the header) or it emits light. Returns seen
-// cells and how many rays ran their full length unblocked.
+// cells, the cells a ray reached but found too dark (dark), and how many rays ran their
+// full length unblocked.
 function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
   const seen = new Uint8Array(side * side * side)
+  const dark = new Uint8Array(side * side * side)
   const lit = (idx, face) => !light || light[face] >= MIN_LIGHT || (emits && emits[snap[idx]])
   const ex = Math.floor(ox), ey = Math.floor(oy), ez = Math.floor(oz)
   let rays = 0, open = 0
@@ -119,8 +121,8 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
       if (tx < ty && tx < tz) { x += sx; t = tx; tx += tdx } else if (ty < tz) { y += sy; t = ty; ty += tdy } else { z += sz; t = tz; tz += tdz }
       if (t > R) { open++; return }
       const idx = (y * side + z) * side + x
-      if (opaque[snap[idx]]) { if (lit(idx, prev)) seen[idx] = 1; return }
-      if (lit(idx, idx)) seen[idx] = 1
+      if (opaque[snap[idx]]) { if (lit(idx, prev)) seen[idx] = 1; else dark[idx] = 1; return }
+      if (lit(idx, idx)) seen[idx] = 1; else dark[idx] = 1
       prev = idx
     }
   }
@@ -128,7 +130,33 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
     if (Math.abs(a) === R || Math.abs(b) === R) for (let c = -R; c <= R; c++) ray(a, b, c)
     else { ray(a, b, -R); ray(a, b, R) }
   }
-  return { seen, rays, open }
+  return { seen, dark, rays, open }
+}
+
+// What the rays reached but could not see for the dark: non-air cells never seen lit by any
+// ray. → { count, here (light at the eye), dirs: [[dir, share]] (8 compass points, or up /
+// down when mostly vertical), most first }. null without light data.
+function darkSummary({ snap, light, side, x0, y0, z0 }, seen, dark, registry, eye) {
+  if (!light) return null
+  const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']   // +x east, +z south
+  const isAir = new Map()
+  const air = (st) => { let a = isAir.get(st); if (a === undefined) isAir.set(st, a = AIR.has(registry.blocksByStateId[st]?.name)); return a }
+  const dirs = new Map()
+  let count = 0
+  for (let i = 0; i < dark.length; i++) {
+    if (!dark[i] || seen[i] || air(snap[i])) continue
+    count++
+    const dx = x0 + i % side + 0.5 - eye.x, dz = z0 + Math.floor(i / side) % side + 0.5 - eye.z
+    const dy = y0 + Math.floor(i / (side * side)) + 0.5 - eye.y
+    const d = Math.abs(dy) > Math.hypot(dx, dz) ? (dy > 0 ? 'up' : 'down')
+      : COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
+    dirs.set(d, (dirs.get(d) || 0) + 1)
+  }
+  const e = Math.floor(eye.x) - x0, f = Math.floor(eye.y) - y0, g = Math.floor(eye.z) - z0
+  return {
+    count, here: light[(f * side + g) * side + e],
+    dirs: [...dirs].sort((a, b) => b[1] - a[1]).map(([d, n]) => [d, n / (count || 1)]),
+  }
 }
 
 // Every seen non-air cell as { id, name, x, y, z, biome }, the biome being that of the cell
@@ -148,8 +176,8 @@ function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen) {
   return out
 }
 
-// → { eye, radius, blocks: [{ id, name, x, y, z, biome }] (no air), rays, open (rays that
-//   reached R unblocked), ms: { snapshot, rays, blocks } }
+// → { eye, radius, blocks: [{ id, name, x, y, z, biome }] (no air), dark (darkSummary, null
+//   outside the overworld), rays, open (rays that reached R unblocked), ms: { snapshot, rays, blocks } }
 function lookAround(bot, R = 64) {
   const now = () => performance.now()
   const eye = bot.entity.position.offset(0, 1.62, 0)
@@ -159,12 +187,13 @@ function lookAround(bot, R = 64) {
   const cube = snapshot(bot, eye, R, darken)
   const tSnap = now() - t
   t = now()
-  const { seen, rays, open } = castRays(cube, opaqueTable(bot.registry), R, dark ? emitTable(bot.registry) : null)
+  const { seen, dark: unlit, rays, open } = castRays(cube, opaqueTable(bot.registry), R, dark ? emitTable(bot.registry) : null)
   const tRays = now() - t
   t = now()
   const blocks = seenBlocks(bot, cube, seen)
+  const darkness = darkSummary(cube, seen, unlit, bot.registry, eye)
   const tBlocks = now() - t
-  return { eye, radius: R, blocks, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks } }
+  return { eye, radius: R, blocks, dark: darkness, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks } }
 }
 
-module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, skyDarken, MIN_LIGHT, AIR }
+module.exports = { lookAround, snapshot, castRays, seenBlocks, darkSummary, opaqueTable, emitTable, skyDarken, MIN_LIGHT, AIR }

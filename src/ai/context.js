@@ -261,7 +261,7 @@ function getBotContext() {
     const r = recognizeView(view, { maxDistance: ranges.sight.placesBlocks })
     placesInfo = formatPlacesContext(r)
     const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, places: r?.places || [] })
-    sightInfo = ' ' + formatSight(summary).split('\n').join(' ')
+    sightInfo = ' ' + formatSight(summary, view.dark).split('\n').join(' ')
     const ms = Date.now() - t0
     if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
   } catch (e) { console.warn('  [CTX] sight err:', e.message) }

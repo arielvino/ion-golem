@@ -64,3 +64,24 @@ test('sky darkening follows the day', () => {
   assert.strictEqual(skyDarken(6000, 1), 3)       // rain by day
   assert.ok(skyDarken(13000) > 0 && skyDarken(13000) < 11)   // dusk
 })
+
+test('dark summary counts what was reached unlit, and where', () => {
+  const { darkSummary } = require('../src/perception/sight')
+  const c = scene()                                  // whole wall dark
+  const { seen, dark } = castRays(c, opaque, R, emits)
+  const reg = { blocksByStateId: { 0: { name: 'air' }, 1: { name: 'stone' } } }
+  const eye = { x: c.ox, y: c.oy, z: c.oz }
+  const d = darkSummary({ ...c, x0: 0, y0: 0, z0: 0 }, seen, dark, reg, eye)
+  assert.ok(d.count > 0)
+  assert.strictEqual(d.here, 0)
+  assert.strictEqual(d.dirs[0][0], 'E')              // the wall is at +x
+})
+
+test('DARK= line only when something reached is dark', () => {
+  const { formatSight } = require('../src/perception/sightSummary')
+  const s = { seen: 30, biomes: [], terrain: [], resources: [], unexplained: [] }
+  assert.ok(!formatSight(s, null).includes('DARK'))
+  assert.ok(!formatSight(s, { count: 0, here: 15, dirs: [] }).includes('DARK'))
+  assert.strictEqual(formatSight(s, { count: 70, here: 0, dirs: [['E', 0.8], ['down', 0.1]] }),
+    'DARK=[light here 0 | 70 blocks in reach too dark to see (70% of the view), mostly E]')
+})
