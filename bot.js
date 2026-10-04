@@ -477,6 +477,9 @@ function createBot() {
     // dying + respawning — otherwise (esp. with idle skip) it could respawn and sit silent.
     if (isBotEvent) {
       logChatDB('event', bot.username, msg)
+      // Own advancement: a journal record, so the model sees the milestone in NEW=.
+      const adv = msg.match(/has (?:made the advancement|completed the challenge|reached the goal) \[(.+)\]/)
+      if (adv) require('./src/core/utils').logEvent(`advancement: ${adv[1]}`)
       // Log bot death as game event with cause
       if (/was |died|drowned|burned|fell|hit the ground|went up in flames|walked into|tried to swim|suffocated|starved|was blown|was killed|was slain|was shot/.test(msg)) {
         const pos = bot.entity?.position
