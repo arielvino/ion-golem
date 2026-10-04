@@ -535,6 +535,31 @@ function countStraightRun(path, idx) {
   return count
 }
 
+// cardinalWalk's variant of countStraightRun. Its optimistic path runs through fog,
+// so the stretch only counts cells continuing the heading dx/dz from (cx,cy,cz) on
+// the flat that the DB already confirms walkable — dbCanFlat, the same strict check
+// liveStep makes. Fog ends the stretch; liveStep steps it as before.
+// The stretch is trimmed so the cell straight past its end is a wall or walkable
+// ground: a stalled event loop holds the keys for several physics ticks and the bot
+// overshoots, and at sprint speed that must not carry it off an unseen edge.
+function knownStraightRun(path, idx, cx, cy, cz, dx, dz, mode) {
+  const doorCell = (x, z) => dbOpenable(x, cy, z) || dbOpenable(x, cy + 1, z)
+  if (doorCell(cx, cz)) return 0
+  let count = 0, x = cx, z = cz
+  for (let i = idx; i < path.length; i++) {
+    const n = path[i]
+    if (n.x !== x + dx || n.z !== z + dz) break   // y: dbCanFlat at the bot's height decides, not the plan
+    if (!dbCanFlat(x, cy, z, dx, dz, mode) || doorCell(n.x, n.z)) break
+    count++; x = n.x; z = n.z
+  }
+  const overrunSafe = () => {
+    const ex = cx + dx * count, ez = cz + dz * count
+    return dbSolid(ex + dx, cy, ez + dz) || dbSolid(ex + dx, cy + 1, ez + dz) || dbCanFlat(ex, cy, ez, dx, dz, mode)
+  }
+  if (count > 0 && !overrunSafe()) count--   // the cell before the end passed dbCanFlat
+  return count
+}
+
 // Sprint through multiple consecutive flat steps in the same direction.
 // No intermediate checks — just sprint to the final block center and stop.
 // The path is pre-planned safe, so we only need to land precisely at the end.
@@ -716,4 +741,4 @@ async function followPath(bot, path, opts = {}) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock }
+module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock }

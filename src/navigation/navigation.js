@@ -11,7 +11,7 @@ const { isPlaceable, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks'
 const { faces } = require('../config/constants')
 const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
-const { liveStep, followPath, dbBlock, centerInBlock } = require('./atomicSteps')
+const { liveStep, followPath, knownStraightRun, sprintRun, dbBlock, centerInBlock } = require('./atomicSteps')
 const { preCheck } = require('../engine/guard')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
@@ -930,11 +930,31 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
       surveyForNav({ maxDistance: 18 })
     }
 
-    const res = await liveStep(bot, dx, dz, { mode })
+    // A straight stretch the DB already confirms walkable is sprinted in one go,
+    // braking once at its end, instead of stopping at every cell.
+    const run = knownStraightRun(path, idx, cx, cy, cz, dx, dz, mode)
+    let res
+    if (run >= 2) {
+      // cells at the bot's own height: the plan's y can sit one off (e.g. on snow layers)
+      const cells = Array.from({ length: run + 1 }, (_, i) => ({ x: cx + dx * i, y: cy, z: cz + dz * i }))
+      const ok = await sprintRun(bot, cells, 0, run)
+      if (!ok) {                         // landed >1 block off — re-derive from where it stands
+        if (++replans > 6) { console.log(`  cardinalWalk: replan budget exhausted`); break }
+        continue
+      }
+      for (let i = 1; i < run; i++) seen.add(`${cx + dx * i},${cy},${cz + dz * i}`)
+      idx += run - 1                     // the run's last node, which the advance loop skips
+      res = { ok: true, steps: run }
+    } else {
+      res = await liveStep(bot, dx, dz, { mode })
+      res.steps = 1
+    }
     if (res.ok) {
-      stepsDone++
-      cameFrom = { x: cx, y: cy, z: cz }   // the cell we just left → arrival dir at the next
-      if (++sinceSurvey >= 4) {
+      stepsDone += res.steps
+      // the cell left to arrive at the run's end → arrival dir at the next
+      cameFrom = { x: cx + dx * (res.steps - 1), y: cy, z: cz + dz * (res.steps - 1) }
+      sinceSurvey += res.steps
+      if (sinceSurvey >= 4) {
         sinceSurvey = 0
         surveyForNav({ maxDistance: 28 })
         // a node still ahead turned out to be a real wall → replan
