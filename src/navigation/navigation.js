@@ -1111,6 +1111,8 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
 // The pathfinder plans from chunk data (bot.blockAt), not the vision-fed DB, so
 // this mode knowingly breaks the no-x-ray rule — it's a comparison baseline.
 const PATHFINDER_NAV = process.argv.includes('--pathfinder')
+const NO_MOVE_MS = 2000      // pathfinder walk with no movement this long → cardinalWalk instead
+const NO_MOVE_DIST = 0.3
 
 async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   const bot = state.bot
@@ -1118,7 +1120,17 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   // Same hostile / critical-status guard runStrategy checks between steps, polled
   // here since goto is one long call. Clearing the goal makes goto reject.
   let reason = null
+  // No movement at all for NO_MOVE_MS (pinned at a wall, or thinking without a step):
+  // give up so navigateTo can fall back to cardinalWalk.
+  let anchor = bot.entity.position.clone(), anchorAt = Date.now()
   const guard = setInterval(() => {
+    const p = bot.entity.position
+    if (p.distanceTo(anchor) >= NO_MOVE_DIST) { anchor = p.clone(); anchorAt = Date.now() }
+    else if (Date.now() - anchorAt > NO_MOVE_MS && !goal.isDone()) {
+      reason = 'no movement'
+      bot.pathfinder.setGoal(null)
+      return
+    }
     let check = null
     try { check = preCheck({ ignoreMsgs: true }) } catch (e) { return }   // abort: raceAbort handles it
     if (check && (check.interrupt === 'hostile' || check.interrupt === 'low_health' || check.interrupt === 'drowning')) {
@@ -1186,9 +1198,17 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
     return false
   }
   const [name, stepFn] = entry
-  const res = PATHFINDER_NAV && (strategy === 'walk' || strategy === 'pathfind')
+  const startedAt = Date.now()
+  let res = PATHFINDER_NAV && (strategy === 'walk' || strategy === 'pathfind')
     ? await pathfinderWalk(tx, ty, tz, range, timeout, goal)
     : await runStrategy(name, stepFn, goal, { timeout, stuckLimit: strategy === 'walk' ? 3 : 5 })
+  // The pathfinder didn't move the bot at all: try our own walker for the time left.
+  if (res.reason === 'no movement' && !state.abortSignal) {
+    const left = Math.max(timeout - (Date.now() - startedAt), 3000)
+    console.log(color(c.yellow, `  nav: pathfinder made no movement in ${NO_MOVE_MS / 1000}s, falling back to cardinalWalk (${Math.round(left / 1000)}s)`))
+    res = await runStrategy('cardinalWalk', () => cardinalWalk(tx, ty, tz, 15, range), goal, { timeout: left, stuckLimit: 3 })
+    if (!res.ok) res = { ...res, reason: `${res.reason} (cardinalWalk, after the pathfinder made no movement)` }
+  }
   if (!res.ok) {
     const p = bot.entity.position
     const toolInfo = getToolSummary(bot)
