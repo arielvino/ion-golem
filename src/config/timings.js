@@ -21,4 +21,5 @@ module.exports = {
   // Idle item-pickup sweep.
   PICKUP_INTERVAL: 2000,     // how often to scan for nearby dropped items when idle
   PICKUP_NAV_TIMEOUT: 3000,  // give up walking to a dropped item after this long
+  PICKUP_SETTLE: 1000,       // after the walk, wait this long for the server to hand the item over
 }
