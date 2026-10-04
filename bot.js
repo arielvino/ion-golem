@@ -24,6 +24,8 @@ const { stopAll } = require('./src/core/tick')
 
 // --- Bot config ---
 const DEBUG_MODE = process.argv.includes('--debug')
+// --no-ai: start with model calls paused (a debugging bot driven by !act); `!ai on` resumes.
+if (process.argv.includes('--no-ai')) state.aiPaused = true
 const nameArg = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null
 const BOT_NAME = nameArg || process.env.MC_USERNAME || (DEBUG_MODE ? 'BroDev' : 'Bro')
 state.debugMode = DEBUG_MODE
