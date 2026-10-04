@@ -250,7 +250,8 @@ async function handleMessages(batch) {
     function onDelta(_delta, fullText) {
       // Early chat send: before first tag
       if (!chatSent) {
-        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX|LOG|ASKBREAK):?/)
+        // A real tag has content after the colon; a bare "[ACTION:]" mentioned in prose isn't one.
+        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX|LOG|ASKBREAK):[^\]\s]/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
