@@ -1105,6 +1105,44 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
   return res.ok
 }
 
+// ── Experiment: mineflayer-pathfinder as the walker (--pathfinder) ──
+// Replaces the 'walk' and 'pathfind' strategies with one bot.pathfinder.goto, using
+// the Movements configured in bot.js. Explicit tunnel/staircase/pillar stay ours.
+// The pathfinder plans from chunk data (bot.blockAt), not the vision-fed DB, so
+// this mode knowingly breaks the no-x-ray rule — it's a comparison baseline.
+const PATHFINDER_NAV = process.argv.includes('--pathfinder')
+
+async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
+  const bot = state.bot
+  console.log(`\n  pathfinder: GoalNear ${tx},${ty},${tz} r=${range} (timeout=${Math.round(timeout / 1000)}s)`)
+  // Same hostile / critical-status guard runStrategy checks between steps, polled
+  // here since goto is one long call. Clearing the goal makes goto reject.
+  let reason = null
+  const guard = setInterval(() => {
+    let check = null
+    try { check = preCheck({ ignoreMsgs: true }) } catch (e) { return }   // abort: raceAbort handles it
+    if (check && (check.interrupt === 'hostile' || check.interrupt === 'low_health' || check.interrupt === 'drowning')) {
+      reason = check.interrupt
+      bot.pathfinder.setGoal(null)
+    }
+  }, 250)
+  try {
+    await raceAbort(bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, range)), timeout)
+  } catch (e) {
+    if (e instanceof AbortError) { state.abortSignal = true; reason = 'abort' }
+    else if (!reason) reason = e.message === 'timeout' ? 'timeout' : e.name === 'NoPath' ? 'no path' : e.message
+  } finally {
+    clearInterval(guard)
+    bot.pathfinder.setGoal(null)
+  }
+  // goto also resolves when it gives up with an empty path, so judge arrival ourselves.
+  if (goal.isDone()) {
+    console.log(color(c.green, `  pathfinder: done (${goal.desc})`))
+    return { ok: true, reason: 'done' }
+  }
+  return { ok: false, reason: reason || 'stopped short' }
+}
+
 // Main navigation function — plans route step by step
 async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
   const bot = state.bot
@@ -1143,7 +1181,9 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
     return false
   }
   const [name, stepFn] = entry
-  const res = await runStrategy(name, stepFn, goal, { timeout, stuckLimit: strategy === 'walk' ? 3 : 5 })
+  const res = PATHFINDER_NAV && (strategy === 'walk' || strategy === 'pathfind')
+    ? await pathfinderWalk(tx, ty, tz, range, timeout, goal)
+    : await runStrategy(name, stepFn, goal, { timeout, stuckLimit: strategy === 'walk' ? 3 : 5 })
   if (!res.ok) {
     const p = bot.entity.position
     const toolInfo = getToolSummary(bot)

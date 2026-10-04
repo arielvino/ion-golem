@@ -265,6 +265,7 @@ function createBot() {
       .map(n => mcData.blocksByName[n]?.id).filter(Boolean)
     mv.scafoldingBlocks = scaffolds
     bot.pathfinder.setMovements(mv)
+    if (process.argv.includes('--pathfinder')) console.log(color(c.yellow, '[NAV] walk/pathfind use mineflayer-pathfinder (experiment)'))
 
     loadAgenda()
     require('./src/world/journalStore').loadJournal()
