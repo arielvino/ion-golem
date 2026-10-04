@@ -87,7 +87,7 @@ async function doSmelt(targetName) {
     if (inputItem && !isSmeltable(inputItem.name)) {
       sendChat(`Can't smelt ${inputItem.name} — not a valid furnace input!`)
       console.log(`  rejected smelting ${inputItem.name} (not smeltable)`)
-      recordFailure(`smelt:${targetName} - ${inputItem.name} cannot be smelted. Smeltable items: raw ores, ore blocks, food (raw_beef etc), logs (→charcoal), sand, cobblestone, clay_ball, iron/gold gear (→nuggets).`)
+      recordFailure(`smelt:${targetName} - ${inputItem.name} cannot be smelted. Smeltable items: raw ores, ore blocks, raw meat and fish (porkchop, beef, chicken, mutton, rabbit, cod, salmon), potato, kelp, logs (→charcoal), sand, cobblestone, clay_ball, iron/gold gear (→nuggets).`)
       furnace.close()
       state.currentTask = null
       return false
