@@ -28,7 +28,10 @@ async function doAttack(targetName) {
   try {
     bot.pvp.attack(entity)
     // Wait until pvp reports it stopped, or 30s; the timeout stops the attack.
-    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => bot.pvp.stop())
+    // stopAll() above didn't await pvp.stop(), so the PREVIOUS attack's
+    // stoppedAttacking can arrive after this one has started: only an event with
+    // pvp no longer on this target ends this attack.
+    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => bot.pvp.stop(), () => bot.pvp.target !== entity)
     await raceAbort(waiter, 30000)
     if (!entity.isValid) {
       const pos = entity.position
