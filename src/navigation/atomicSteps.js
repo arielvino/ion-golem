@@ -33,8 +33,9 @@ function canFlatStep(map, x, y, z, dx, dz, mode = 'safe') {
   const nx = x + dx, nz = z + dz
   if (!isSafe(map, nx, y, nz, mode) || !isSafe(map, nx, y - 1, nz, mode)) return 'no'
   if (map.isUnknown(nx, y, nz) || map.isUnknown(nx, y + 1, nz) || map.isUnknown(nx, y - 1, nz)) return 'unknown'
-  if (!map.isPassable(nx, y, nz)) return 'no'      // foot blocked
-  if (!map.isPassable(nx, y + 1, nz)) return 'no'  // head blocked
+  // A wooden door / fence gate is walkable on the flat: liveStep opens it (doors.js)
+  if (!map.isPassable(nx, y, nz) && !isOpenable(map.get(nx, y, nz))) return 'no'          // foot blocked
+  if (!map.isPassable(nx, y + 1, nz) && !isOpenable(map.get(nx, y + 1, nz))) return 'no'  // head blocked
   if (!hasFloor(map, nx, y, nz)) return 'no'       // no floor
   return 'yes'
 }
@@ -153,7 +154,7 @@ function dbPlanPath(sx, sy, sz, tx, ty, tz, mode = 'safe', maxNodes = 3000) {
 // ─── Live Movement Primitives ──────────────────────────────────────
 // These execute actual bot movement, verified against DB block queries.
 
-const { PASSABLE, SURFACE, HAZARDS, WATER_BLOCKS } = require('../config/blocks')
+const { PASSABLE, SURFACE, HAZARDS, WATER_BLOCKS, isOpenable } = require('../config/blocks')
 
 // Query single block from DB only. No bot.blockAt (no x-ray).
 // Vision updates DB every 3s. For immediate neighbors, the vision
@@ -171,6 +172,7 @@ function dbUnknown(x, y, z)  { return dbBlock(x, y, z) === null }
 function dbHazard(x, y, z)  { const n = dbBlock(x, y, z); return n !== null && HAZARDS.has(n) }
 function dbWater(x, y, z)   { const n = dbBlock(x, y, z); return WATER_BLOCKS.has(n) }
 function dbSurface(x, y, z) { const n = dbBlock(x, y, z); return n !== null && SURFACE.has(n) }
+function dbOpenable(x, y, z) { return isOpenable(dbBlock(x, y, z)) }
 
 function dbHasFloor(x, y, z) {
   if (dbSolid(x, y - 1, z)) return true
@@ -190,8 +192,9 @@ function dbCanFlat(cx, cy, cz, dx, dz, mode) {
   const nx = cx + dx, nz = cz + dz
   if (!dbSafe(nx, cy, nz, mode) || !dbSafe(nx, cy - 1, nz, mode)) return false
   if (dbUnknown(nx, cy, nz) || dbUnknown(nx, cy + 1, nz) || dbUnknown(nx, cy - 1, nz)) return false
-  if (!dbPassable(nx, cy, nz)) return false      // foot blocked
-  if (!dbPassable(nx, cy + 1, nz)) return false  // head blocked
+  // A wooden door / fence gate is walkable on the flat: liveStep opens it (doors.js)
+  if (!dbPassable(nx, cy, nz) && !dbOpenable(nx, cy, nz)) return false          // foot blocked
+  if (!dbPassable(nx, cy + 1, nz) && !dbOpenable(nx, cy + 1, nz)) return false  // head blocked
   if (!dbHasFloor(nx, cy, nz)) return false       // no floor
   return true
 }
@@ -236,6 +239,8 @@ async function liveStep(bot, dx, dz, opts = {}) {
   const pos = bot.entity.position
   const cx = Math.floor(pos.x), cy = Math.round(pos.y), cz = Math.floor(pos.z)
   const nx = cx + dx, nz = cz + dz
+  const doors = require('./doors')
+  await doors.restoreBehind(bot, nx, nz)
 
   // Determine move type from DB checks: try flat, then up, then down
   let moveType = null, targetY = cy, drop = 0
@@ -254,6 +259,14 @@ async function liveStep(bot, dx, dz, opts = {}) {
 
   if (!moveType) {
     return { ok: false, type: 'blocked', dy: 0 }
+  }
+
+  if (moveType === 'flat' && [[cx, cz], [nx, nz]].some(([x, z]) => dbOpenable(x, cy, z) || dbOpenable(x, cy + 1, z))) {
+    const d = await doors.clearDoorway(bot, cx, cy, cz, dx, dz)
+    if (!d.ok) {
+      console.log(`  [liveStep] ${d.why}`)
+      return { ok: false, type: 'blocked', dy: 0 }
+    }
   }
 
   // Log step attempt
@@ -509,12 +522,41 @@ function countStraightRun(path, idx) {
   const to = path[idx + 1]
   const dx = to.x - from.x, dz = to.z - from.z, dy = to.y - from.y
   if (dy !== 0 || (dx === 0 && dz === 0)) return 0 // not flat
+  // A door cell is never sprinted into or out of: liveStep opens/closes it (doors.js)
+  const doorCell = (n) => dbOpenable(n.x, n.y, n.z) || dbOpenable(n.x, n.y + 1, n.z)
+  if (doorCell(from) || doorCell(to)) return 0
   let count = 1
   for (let i = idx + 1; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1]
     if (b.x - a.x !== dx || b.z - a.z !== dz || b.y !== a.y) break
+    if (doorCell(b)) break
     count++
   }
+  return count
+}
+
+// cardinalWalk's variant of countStraightRun. Its optimistic path runs through fog,
+// so the stretch only counts cells continuing the heading dx/dz from (cx,cy,cz) on
+// the flat that the DB already confirms walkable — dbCanFlat, the same strict check
+// liveStep makes. Fog ends the stretch; liveStep steps it as before.
+// The stretch is trimmed so the cell straight past its end is a wall or walkable
+// ground: a stalled event loop holds the keys for several physics ticks and the bot
+// overshoots, and at sprint speed that must not carry it off an unseen edge.
+function knownStraightRun(path, idx, cx, cy, cz, dx, dz, mode) {
+  const doorCell = (x, z) => dbOpenable(x, cy, z) || dbOpenable(x, cy + 1, z)
+  if (doorCell(cx, cz)) return 0
+  let count = 0, x = cx, z = cz
+  for (let i = idx; i < path.length; i++) {
+    const n = path[i]
+    if (n.x !== x + dx || n.z !== z + dz) break   // y: dbCanFlat at the bot's height decides, not the plan
+    if (!dbCanFlat(x, cy, z, dx, dz, mode) || doorCell(n.x, n.z)) break
+    count++; x = n.x; z = n.z
+  }
+  const overrunSafe = () => {
+    const ex = cx + dx * count, ez = cz + dz * count
+    return dbSolid(ex + dx, cy, ez + dz) || dbSolid(ex + dx, cy + 1, ez + dz) || dbCanFlat(ex, cy, ez, dx, dz, mode)
+  }
+  if (count > 0 && !overrunSafe()) count--   // the cell before the end passed dbCanFlat
   return count
 }
 
@@ -632,6 +674,7 @@ async function followPath(bot, path, opts = {}) {
       break
     }
     if (pathIdx >= path.length) return true
+    await require('./doors').restoreBehind(bot, path[pathIdx].x, path[pathIdx].z)
 
     // Check for consecutive same-direction flat steps — sprint through them.
     // pathIdx is a DESTINATION (next node to reach), but countStraightRun and
@@ -698,4 +741,4 @@ async function followPath(bot, path, opts = {}) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock }
+module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock }

@@ -9,6 +9,7 @@
     "clay_ball", "clay", "cactus", "chorus_fruit", "wet_sponge",
     "netherrack", "ancient_debris", "sea_pickle", "stone_bricks",
     "cracked_stone_bricks", "basalt", "smooth_basalt",
-    "potato", "kelp"
+    "potato", "kelp",
+    "porkchop", "beef", "chicken", "mutton", "rabbit", "cod", "salmon"
   ]
 }

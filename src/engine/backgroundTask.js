@@ -9,7 +9,6 @@ let executeFnRef = null  // stored on first launch so chaining can call it
 function drainNext() {
   if (state.abortSignal || state.actionQueue.length === 0) return
   const next = state.actionQueue.shift()
-  state.lastActionUsername = next.username
   launchBackground(next.actionStr, next.username, executeFnRef)
 }
 
@@ -64,7 +63,7 @@ function launchBackground(actionStr, username, executeFn) {
         task.status = 'failed'
         task.error = err.message
         // The handler already recorded a specific reason (recordFailure) and the engine
-        // logged `${action} failed` to HISTORY. Only add a note for multi-alternative
+        // logged `${action} failed` to the journal. Only add a note for multi-alternative
         // chains, where "every fallback failed" is information the handler can't give.
         if (task.totalAlts > 1) recordFailure(`${task.actionStr} - all ${task.totalAlts} alternatives failed`)
         state.actionQueue = []  // drop remaining queue on failure

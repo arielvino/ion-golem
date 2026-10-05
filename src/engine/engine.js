@@ -2,19 +2,35 @@
 // Long-running actions run as detached background tasks so chat is always responsive.
 const state = require('../core/state')
 const { sleep, stopAll, AbortError } = require('../core/tick')
-const { handleMessage, abortResponse } = require('../ai/ai')
+const { handleMessages, abortResponse } = require('../ai/ai')
 const { executeAction } = require('../actions')
-const { stackTopTitle, stackTop, stackTitles, saveStack } = require('./tasks')
+const { stackTopTitle, stackTop } = require('./tasks')
 const { launchBackground, isBackgroundRunning, consumeBackgroundResult } = require('./backgroundTask')
-const { preCheck } = require('./guard')
+const { preCheck, scanHostiles } = require('./guard')
 const { FOOD_STARVING } = require('../config/safety')
 const { c, color } = require('../lib/colors')
 
 const TICK_MS = 100
-const COOLDOWN = 5000          // ms between autonomous mainLoop triggers
+const COOLDOWN = 5000          // ms between ticks (model turns); player chat zeroes it
 const MAX_NO_ACTION = 3        // after 3 rounds with no action output, pause
 
 let loopCountdown = 0          // counts down, triggers at 0. Start at 0 = first tick fires on spawn
+
+// A hostile coming into view is answered at once, like chat, not up to COOLDOWN later.
+// Only the none→some edge fires, so a mob lingering in view doesn't keep zeroing it.
+const HOSTILE_POLL_MS = 500
+let hostilePollIn = 0
+let hostileInView = false
+function pollHostileWake() {
+  if ((hostilePollIn -= TICK_MS) > 0) return
+  hostilePollIn = HOSTILE_POLL_MS
+  const seen = !!scanHostiles()
+  if (seen && !hostileInView && loopCountdown > 0) {
+    console.log(color(c.cyan, '  [LOOP] hostile came into view — turn now'))
+    loopCountdown = 0
+  }
+  hostileInView = seen
+}
 
 // No-progress watchdog: force-interrupt a TRAVEL task wedged with zero progress, for hangs
 // no one issues `stop` for. Scoped to pure-travel actions (mining/follow/sail legitimately
@@ -26,12 +42,14 @@ const TRAVEL_ACTIONS = new Set(['goto', 'goto~', 'goto!', 'digto', 'come', 'swim
 let wdBaseline = null               // { task, x, y, z, alt, t }
 
 // --- Hard interrupt: full stop (used for kicks, disconnects, etc.) ---
-function interrupt() {
+// keepResponse: a streamed [ACTION:stop] fires this mid-reply — the reply that asked
+// for the stop must keep streaming (its later actions are the requeue).
+function interrupt({ keepResponse = false } = {}) {
   state.abortSignal = true
   state.interrupted = true
   state.actionQueue = []
   stopAll()
-  abortResponse()  // cancel in-flight AI response (keeps persistent process alive)
+  if (!keepResponse) abortResponse()  // cancel in-flight AI response (keeps persistent process alive)
   try { state.bot.pathfinder.setGoal(null) } catch(e) {}
   try { state.bot.clearControlStates() } catch(e) {}
   // Do NOT fake the bg task's status here. The coroutine is still unwinding; let it report
@@ -66,7 +84,6 @@ function processActionQueue() {
   if (isBackgroundRunning() || state.actionQueue.length === 0) return
   state.abortSignal = false  // clear abort from previous interrupt — new work starts fresh
   const next = state.actionQueue.shift()
-  state.lastActionUsername = next.username
   state.consecutivePlaceFails = 0
   console.log(color(c.white, `  [BG] launching: ${next.actionStr}`))
   launchBackground(next.actionStr, next.username, executeAction)
@@ -99,8 +116,11 @@ function checkWatchdog() {
 function idleWakeReason(bgResult) {
   // A background task just finished — let the model see the outcome and decide what's next.
   if (bgResult) return 'task-finished'
-  // First idle tick after work ended (or on spawn): announce once, then go quiet.
-  if (!state.idleAnnounced) return 'going-idle'
+  // A [CTX:...] view the model asked for is still queued. renderPending() only runs
+  // while building a turn's context, so with an empty stack there is no next turn to
+  // deliver it on — the bot promises to look, goes quiet, and the request sits
+  // forever. The model asking is itself the signal that a call is worth spending.
+  if (state.ctxRequests.length > 0) return 'ctx-pending'
   // Threats / critical self-status — must react even with an empty stack. preCheck encodes
   // the same hostile-scan (range 12), low-health (<=6) and drowning rules nav uses.
   try {
@@ -112,108 +132,40 @@ function idleWakeReason(bgResult) {
   return null
 }
 
-// --- Main autonomous loop (work on task stack) ---
-async function mainLoop(wasInterrupted) {
-  const bot = state.bot
-  state.loopRunning = true
-
-  // Back off on repeated API failures
-  if (state.apiFailCount >= 3) {
-    const delaySec = Math.min(state.apiFailCount * 30, 300)
-    console.log(`  [API] skipping loop, retrying in ${delaySec}s (fail #${state.apiFailCount})`)
-    state.loopRunning = false
-    setTimeout(() => { state.apiFailCount = Math.max(state.apiFailCount - 1, 0) }, delaySec * 1000)
-    return
-  }
-
-  try {
-    const username = state.lastActionUsername || 'self'
-
-    // Auto-pop time-sensitive tasks when conditions change
-    const isDay = bot.time.timeOfDay < 12000
-    while (state.taskStack.length > 0) {
-      const top = state.taskStack[state.taskStack.length - 1]
-      const nightTask = /survive.*night|shelter.*night|hide.*night|wait.*morning|night.*safe/i.test(top.t)
-      if (nightTask && isDay) {
-        state.taskStack.pop()
-        saveStack()
-        const { logTaskAction } = require('../world/memory')
-        logTaskAction('auto-pop', top.t, 'daytime', state.taskStack.map(e => e.t).join(' > ') || '(empty)')
-        console.log(`  [STACK] auto-popped "${top.t}" (it's daytime now)`)
-      } else break
-    }
-
-    const topTitle = stackTopTitle()
-
-    // If stack is empty, report and go idle
-    if (!topTitle) {
-      console.log(color(c.yellow, '\n  [LOOP] stack empty, reporting and going idle'))
-      await handleMessage('self',
-        `[SELF-CHECK] stack=empty`,
-        username)
-      state.loopRunning = false
-      return
-    }
-
-    // Stuck detection
-    if (state.noActionRounds >= MAX_NO_ACTION) {
-      console.log(color(c.yellow, '\n  [LOOP] stuck 3x — reporting to player'))
-      state.noActionRounds = 0
-      const top = stackTop()
-      const taskDesc = top.d ? `"${top.t}" (${top.d})` : `"${top.t}"`
-      await handleMessage('self',
-        `[SELF-CHECK] stuck=${taskDesc}`,
-        username)
-      state.loopRunning = false
-      return
-    }
-
-    const top = stackTop()
-    const taskDesc = top.d ? `"${top.t}" (${top.d})` : `"${top.t}"`
-    console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (stack depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
-    const beforeQLen = state.actionQueue.length
-    await handleMessage('self',
-      `[SELF-CHECK] task=${taskDesc}`,
-      username)
-
-    // Check if Claude actually produced actions
-    if (state.actionQueue.length === beforeQLen) {
-      state.noActionRounds++
-      console.log(color(c.yellow, `\n  [LOOP] no actions produced (round ${state.noActionRounds}/${MAX_NO_ACTION})`))
-      state.loopRunning = false
-      return
-    }
-
-    state.noActionRounds = 0
-
-  } catch (err) {
-    console.error('  [LOOP] error:', err.message)
-  }
-
-  state.loopRunning = false
-}
-
-// --- Monitor mode: AI observes while actions are running ---
-async function monitorLoop() {
-  const username = state.lastActionUsername || 'self'
-  state.loopRunning = true
-  try {
+// --- The autonomous line: what the bot's own state asks of this turn ---
+// MONITOR while actions run, SELF-CHECK on the focused goal, and when fully idle
+// only if idleWakeReason finds a real signal. null = nothing of our own to raise.
+function autonomousLine(bgResult) {
+  const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
+  if (actionsRunning) {
     const { getBackgroundSummary } = require('./backgroundTask')
     const summary = getBackgroundSummary() || 'running'
     const queueLen = state.actionQueue.length
     console.log(color(c.white, `\n  [MONITOR] actions active: ${summary}, queue: ${queueLen}`))
-    const beforeQLen = state.actionQueue.length
-    await handleMessage('self',
-      `[MONITOR] task=${summary} queue=${queueLen}`,
-      username)
-    // Don't increment noActionRounds in monitor mode — no-action is expected
-  } catch (err) {
-    console.error('  [MONITOR] error:', err.message)
+    return { kind: 'monitor', line: `[MONITOR] task=${summary} queue=${queueLen}` }
   }
-  state.loopRunning = false
+  if (stackTopTitle()) {
+    const top = stackTop()
+    const taskDesc = top.d ? `"${top.t}" (${top.d})` : `"${top.t}"`
+    if (state.noActionRounds >= MAX_NO_ACTION) {
+      console.log(color(c.yellow, '\n  [LOOP] stuck 3x — reporting to player'))
+      state.noActionRounds = 0
+      return { kind: 'stuck', line: `[SELF-CHECK] stuck=${taskDesc}` }
+    }
+    console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
+    return { kind: 'task', line: `[SELF-CHECK] task=${taskDesc}` }
+  }
+  let wake = idleWakeReason(bgResult)
+  if (!wake && require('./leadMode').wantsWake()) wake = 'lead: no goal'
+  if (!wake) return null
+  console.log(color(c.cyan, `  [LOOP] idle wake: ${wake}`))
+  return { kind: 'idle', line: '[SELF-CHECK] agenda=idle' }
 }
 
 // --- Core engine loop ---
+// One tick = at most ONE model turn, carrying everything pending at once: queued
+// chat and events plus the bot's own autonomous line. Ticks are COOLDOWN apart;
+// player chat zeroes the countdown (softInterrupt) so it is answered at once.
 async function startEngine() {
   if (state.engineRunning) return
   state.engineRunning = true
@@ -222,71 +174,66 @@ async function startEngine() {
   while (state.engineRunning) {
     await sleep(TICK_MS)
     loopCountdown -= TICK_MS
+    pollHostileWake()
     if (loopCountdown > 0) continue
 
     // === TICK FIRES ===
     loopCountdown = COOLDOWN
-    const wasInterrupted = state.interrupted
     state.interrupted = false
 
-    // Skip only if mid-API-call (never skip for background tasks)
-    if (state.msgPending) continue
-
     try {
-      // Priority 1: Chat/event messages — process all queued messages
-      if (state.messageQueue.length > 0) {
-        state.msgPending = true
-        try {
-          while (state.messageQueue.length > 0) {
-            const msg = state.messageQueue.shift()
-            await handleMessage(msg.username, msg.message, msg.historyAs)
-          }
-        } finally {
-          state.msgPending = false
-        }
-      }
-
-      // Priority 2: Harvest completed background task result
+      // Bookkeeping first, so the turn sees the current state.
       const bgResult = consumeBackgroundResult()
       if (bgResult) {
         console.log(color(c.white, `  [BG] finished: ${bgResult.actionStr} → ${bgResult.status}${bgResult.error ? ': ' + bgResult.error : ''} (${Math.round((Date.now() - bgResult.startedAt) / 1000)}s)`))
       }
-
-      // Priority 2.5: No-progress watchdog — kill a travel task wedged with zero progress
       checkWatchdog()
-
-      // Priority 3: Process action queue (launch next if no bg running)
       processActionQueue()
 
-      // Priority 4: Autonomous loop — MONITOR while actions run, SELF-CHECK when there's a
-      // goal, and when fully idle call the model ONLY if idleWakeReason finds a real signal
-      // (threat, critical status, finished task, or the one-shot going-idle report). An empty
-      // stack with nothing running, no chat, and nothing wrong burns zero model calls.
-      const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
-      const hasWork = state.taskStack.length > 0 || actionsRunning
-      const canRun = state.apiFailCount < 3 && !state.msgPending
-      if (hasWork) {
-        state.idleAnnounced = false  // re-arm the one-shot idle report for when work ends
-        if (canRun) {
-          if (actionsRunning) {
-            await monitorLoop()
-          } else {
-            state.abortSignal = false
-            await mainLoop(wasInterrupted)
-            processActionQueue()
-          }
-        }
-      } else if (canRun) {
-        const wake = idleWakeReason(bgResult)
-        if (wake) {
-          state.idleAnnounced = true
-          console.log(color(c.cyan, `  [LOOP] idle wake: ${wake}`))
-          await mainLoop(wasInterrupted)
-          processActionQueue()
-        }
-        // else: nothing to do — skip the model entirely (conservative)
+      if (state.aiPaused) continue
+      // Back off on repeated API failures
+      if (state.apiFailCount >= 3) {
+        const delaySec = Math.min(state.apiFailCount * 30, 300)
+        console.log(`  [API] skipping turn, retrying in ${delaySec}s (fail #${state.apiFailCount})`)
+        loopCountdown = delaySec * 1000
+        state.apiFailCount = Math.max(state.apiFailCount - 1, 0)
+        continue
       }
 
+      const messages = state.messageQueue.splice(0)
+      const own = autonomousLine(bgResult)
+      if (!messages.length && !own) continue  // nothing to say: no model call
+      const batch = own ? [...messages, { username: 'self', message: own.line }] : messages
+      const fromPlayer = messages.some(m => m.username !== 'self' && m.username !== 'event')
+
+      const beforeActionOps = state.actionOpCount
+      const beforePlanOps = state.planOpCount
+      // A turn answering a player isn't aborted by more chat; a self-only turn is.
+      state.msgPending = fromPlayer
+      let result
+      try {
+        result = await handleMessages(batch)
+      } finally {
+        state.msgPending = false
+      }
+      if (result === 'aborted') {
+        // Chat cut in: requeue what this turn carried; the next tick runs it all again.
+        state.messageQueue.unshift(...messages)
+        continue
+      }
+      processActionQueue()
+
+      // Progress = emitted actions or a plan edit. A turn that only decomposes a
+      // goal or picks a strategy is real work, not a stall. Counted, not measured off
+      // the queue length: streamed actions launch (and leave the queue) mid-reply.
+      if (own?.kind === 'task' && !fromPlayer) {
+        if (state.actionOpCount === beforeActionOps && state.planOpCount === beforePlanOps) {
+          state.noActionRounds++
+          console.log(color(c.yellow, `\n  [LOOP] no actions or plan edits (round ${state.noActionRounds}/${MAX_NO_ACTION})`))
+        } else {
+          state.noActionRounds = 0
+        }
+      }
     } catch (err) {
       console.error(color(c.red, `[ENGINE] tick error: ${err.message}`))
     }

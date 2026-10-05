@@ -1,4 +1,6 @@
 // Entry point — PID, createBot, shutdown, signals
+require('./src/lib/chunkLightFix')   // before mineflayer builds its Chunk class
+require('./src/lib/physicsEpsilonFix')   // before mineflayer's physics: vanilla collision tolerance
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const pvp = require('mineflayer-pvp').plugin
@@ -11,8 +13,8 @@ const path = require('path')
 const state = require('./src/core/state')
 const { c, color } = require('./src/lib/colors')
 const { initDB } = require('./src/world/memory')
-const { loadStack, stackTitles } = require('./src/engine/tasks')
-const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, syncInventory, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
+const { loadAgenda, agendaTitles } = require('./src/engine/tasks')
+const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
 const { initChatLogs, initAI } = require('./src/ai/ai')
 const { setupAutonomous } = require('./src/engine/autonomous')
 const { startEngine, stopEngine, interrupt, softInterrupt } = require('./src/engine/engine')
@@ -23,6 +25,8 @@ const { stopAll } = require('./src/core/tick')
 
 // --- Bot config ---
 const DEBUG_MODE = process.argv.includes('--debug')
+// --no-ai: start with model calls paused (a debugging bot driven by !act); `!ai on` resumes.
+if (process.argv.includes('--no-ai')) state.aiPaused = true
 const nameArg = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null
 const BOT_NAME = nameArg || process.env.MC_USERNAME || (DEBUG_MODE ? 'BroDev' : 'Bro')
 state.debugMode = DEBUG_MODE
@@ -31,7 +35,7 @@ state.debugMode = DEBUG_MODE
 // Override via env for a remote/online server (e.g. MC_HOST=play.example.net MC_PORT=25565).
 const BOT_HOST = process.env.MC_HOST || 'localhost'
 const BOT_PORT = parseInt(process.env.MC_PORT || '25565', 10)
-const BOT_VERSION = process.env.MC_VERSION || '1.21.11'
+const BOT_VERSION = process.env.MC_VERSION || '26.1'
 const BOT_OPTIONS = { host: BOT_HOST, port: BOT_PORT, username: BOT_NAME, version: BOT_VERSION }
 // Auth mode ('offline' | 'microsoft'). Only set when provided, so default local offline play is unchanged.
 if (process.env.MC_AUTH) BOT_OPTIONS.auth = process.env.MC_AUTH
@@ -98,6 +102,17 @@ const logStream = fs.createWriteStream(logFile, { flags: 'a' })
 const latestLog = path.join(RUNTIME_DIR, 'bot.log')
 try { fs.unlinkSync(latestLog) } catch(e) {}
 try { fs.symlinkSync(logFile, latestLog) } catch(e) {}
+// Timestamp every log-file line with local HH:MM:SS.mmm (matches the server log's clock),
+// so slow turns and stalls can be timed from the log alone.
+let atLineStart = true
+const stamp = (s) => {
+  if (typeof s !== 'string') return s
+  const d = new Date()
+  const t = `${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, '0')} `
+  let out = ''
+  for (const part of s.split(/(?<=\n)/)) { out += (atLineStart ? t : '') + part; atLineStart = part.endsWith('\n') }
+  return out
+}
 const origStdoutWrite = process.stdout.write.bind(process.stdout)
 const origStderrWrite = process.stderr.write.bind(process.stderr)
 const stripAnsi = (s) => typeof s === 'string' ? s.replace(/\x1b\[[0-9;]*m/g, '') : s
@@ -105,7 +120,7 @@ const stripAnsi = (s) => typeof s === 'string' ? s.replace(/\x1b\[[0-9;]*m/g, ''
 // Everything always goes to the log file.
 const SHOW_RE = /\[Bot\]|Bot has joined|Shutting down|ERROR|FATAL|unhandledRejection/
 process.stdout.write = (chunk, ...args) => {
-  logStream.write(stripAnsi(chunk))
+  logStream.write(stamp(stripAnsi(chunk)))
   if (!DEBUG_MODE && typeof chunk === 'string') {
     const plain = stripAnsi(chunk)
     if (plain.trim().length > 0 && !SHOW_RE.test(plain)) return true
@@ -113,7 +128,7 @@ process.stdout.write = (chunk, ...args) => {
   return origStdoutWrite(chunk, ...args)
 }
 process.stderr.write = (chunk, ...args) => {
-  logStream.write(stripAnsi(chunk))
+  logStream.write(stamp(stripAnsi(chunk)))
   if (!DEBUG_MODE && typeof chunk === 'string') {
     const plain = stripAnsi(chunk)
     if (plain.trim().length > 0 && !SHOW_RE.test(plain)) return true
@@ -175,13 +190,25 @@ function createBot() {
       }
     })
 
+    // Difficulty: on 1.21.x the protocol already maps the difficulty packet's varint
+    // to its name ("peaceful"), and mineflayer's game.js then indexes its own name
+    // array with that string → bot.game.difficulty is always undefined. Runs after
+    // mineflayer's handler, so this assignment wins. (Upstream bug in game.js.)
+    bot._client.on('difficulty', (packet) => {
+      if (typeof packet.difficulty === 'string') bot.game.difficulty = packet.difficulty
+    })
+
     // Locator Bar (MC 1.21.6+): the server pushes tracked_waypoint for other
     // players even when they're out of render range. It carries either an exact
     // position (vec3i), a rough chunk position (chunk), or — for very distant
     // players — just a world-frame bearing (azimuth). This is the same signal a
     // human player reads off the locator bar to know which way to head. Keyed by
     // player UUID; context.js turns it into a heading + rough distance.
+    // The server sends a waypoint only when it changes (the player crosses into a new
+    // block / chunk / bearing) and removes it with 'untrack' — a player standing still
+    // gets no packets at all, so an entry stays valid until untracked, never timed out.
     bot._waypoints = new Map()
+    bot.on('playerLeft', (p) => { if (p?.uuid) bot._waypoints.delete(p.uuid) })
     bot._client.on('tracked_waypoint', (packet) => {
       try {
         const wp = packet.waypoint
@@ -204,21 +231,48 @@ function createBot() {
 
   bot.once('spawn', () => {
     reconnectAttempts = 0
+    state.joinedAt = Date.now()
     console.log('Bot has joined')
+
+    // --- Sound registry off-by-one fix ---
+    // minecraft-data's pc/<ver>/sounds.json is 1-indexed (id 0 missing) for 1.21.1+
+    // (regression; 1.20.4 was 0-indexed), but the wire protocol's sound_effect soundId
+    // is 0-indexed. mineflayer resolves names via bot.registry.sounds[soundId]
+    // (sound.js), so every heard sound is mislabeled as the NEXT sound in registry
+    // order — e.g. entity.player.hurt (1251) read as entity.player.death → "Player dies"
+    // → the AI narrates deaths that never happened. Verified against the server's own
+    // --reports dump: server[N].name === minecraft_data[N+1].name for all ids.
+    // Shift the registry down by one so mineflayer's own resolution becomes correct.
+    // Idempotent: prismarine-registry caches the registry object across reconnects, so
+    // the sounds[0]===undefined guard prevents a double shift. (Upstream bug: report to
+    // PrismarineJS/minecraft-data.)
+    const snd = bot.registry?.sounds
+    if (snd && snd[0] === undefined && snd[1] !== undefined) {
+      const fixed = {}
+      for (const k of Object.keys(snd)) {
+        const id = Number(k) - 1
+        fixed[id] = { ...snd[k], id }
+      }
+      bot.registry.sounds = fixed
+      console.log(`  [SOUND] corrected off-by-one sound registry (${Object.keys(fixed).length} ids, now 0-indexed)`)
+    }
+
     const mcData = require('minecraft-data')(bot.version)
     const mv = new Movements(bot, mcData)
     mv.allowSprinting = true
     mv.canOpenDoors = true
     mv.canDig = false
-    mv.allow1by1towers = true
+    // No scaffolding: pathfinder never picks its pillar/bridge blocks back up, so it
+    // left stray dirt and cobble all over. Pillaring and bridging are explicit actions.
+    mv.allow1by1towers = false
     mv.allowParkour = true
     mv.maxDropDown = 4
-    const scaffolds = ['cobblestone', 'dirt', 'netherrack', 'cobbled_deepslate']
-      .map(n => mcData.blocksByName[n]?.id).filter(Boolean)
-    mv.scafoldingBlocks = scaffolds
+    mv.scafoldingBlocks = []
     bot.pathfinder.setMovements(mv)
+    if (process.argv.includes('--pathfinder')) console.log(color(c.yellow, '[NAV] walk/pathfind use mineflayer-pathfinder (experiment)'))
 
-    loadStack()
+    loadAgenda()
+    require('./src/world/journalStore').loadJournal()
     clearOldPathBlocks()
     // Vision + DB updates run in small async batches to avoid blocking the event loop.
     // Blocking causes physics freezes visible as teleporting/floating every 2s.
@@ -246,11 +300,24 @@ function createBot() {
       visionBusy = false
     }, 3000)
     // Nearby blocks updated via vision system only — no direct bot.blockAt (x-ray rule)
-    bot.inventory.on('updateSlot', () => { try { syncInventory() } catch (e) { console.warn('  [INV] sync err:', e.message) } })
 
-    // Log item pickups
+    // Log item pickups. Journal records are batched: a kill's drops land within a
+    // second or two, and become one "pickup:" record instead of one per stack.
+    const pickupBatch = new Map()
+    let pickupFlush = null
+    const journalPickup = (name, count) => {
+      pickupBatch.set(name, (pickupBatch.get(name) || 0) + count)
+      if (pickupFlush) return
+      pickupFlush = setTimeout(() => {
+        pickupFlush = null
+        const { logEvent } = require('./src/core/utils')
+        logEvent(`pickup: ${[...pickupBatch].map(([n, c]) => `${c} ${n}`).join(', ')}`)
+        pickupBatch.clear()
+      }, 2000)
+    }
     bot.on('playerCollect', (collector, collected) => {
       if (collector !== bot.entity) return
+      if (collected.name === 'experience_orb') return  // its metadata slot 8 is the xp value, not an item
       try {
         const pos = collected.position
         const md = collected.metadata
@@ -288,6 +355,7 @@ function createBot() {
           const { debugChat } = require('./src/core/utils')
           debugChat(`[pickup] ${count}x ${name}`)
           logGameEvent('pickup', name, count, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
+          journalPickup(name, count)
         } else {
           console.log(`  [PICKUP] could not resolve item. md[8]=${JSON.stringify(md?.[8])?.slice(0,100)}`)
         }
@@ -345,12 +413,11 @@ function createBot() {
     logChatDB('event', bot.username, `${bot.username} joined the game`)
     state.messageQueue.push({
       username: 'event',
-      message: `[GAME EVENT] You (${bot.username}) just joined the server.`,
-      historyAs: 'self'
+      message: `[GAME EVENT] [BOOT] You (${bot.username}) just started up and joined the server.`
     })
 
-    if (state.taskStack.length > 0) {
-      console.log(`  [LOOP] resuming stack: ${stackTitles()}`)
+    if (state.agenda.entries.length > 0) {
+      console.log(`  [LOOP] resuming agenda: ${agendaTitles()}`)
     }
   })
 
@@ -369,13 +436,30 @@ function createBot() {
       return
     }
     console.log(color(c.bold + c.white, `\n<${username}> ${message}`))
+    // !nobreak / !defend / !lead on|off are for the bot, not the AI; a yes/no to a pending break request is
+    // recorded here and still reaches the AI below.
+    if (require('./src/engine/breakPermission').onPlayerChat(username, message)) return
+    if (require('./src/engine/defendMode').onPlayerChat(username, message)) return
+    if (require('./src/engine/leadMode').onPlayerChat(username, message)) return
+    // Debug-only repro hooks: `!act <action>` runs an action with no model in the loop,
+    // `!ai off|on` pauses/resumes model calls so the AI can't steer a staged scenario.
+    // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.
+    if (state.debugMode && message.startsWith('!ai ')) { state.aiPaused = message.slice(4).trim() === 'off'; console.log(`  [DEBUG] aiPaused=${state.aiPaused}`); return }
+    if (state.debugMode && message.startsWith('!act ')) {
+      state.actionQueue.push({ actionStr: message.slice(5).trim(), username })
+      require('./src/engine/engine').processActionQueue()
+      return
+    }
+    // With model calls paused nothing would answer, so say so from code. The message is still
+    // queued below and reaches the AI once it is back on.
+    if (state.aiPaused) require('./src/core/utils').sendChat(`[ai] AI is off, so I can't answer right now.${state.debugMode ? ' "!ai on" turns it back on.' : ''}`)
     logChatDB('chat', username, message)
     state.noActionRounds = 0
     // Soft interrupt: abort self-loop AI call (if running) to free the provider,
     // zero the timer so engine processes this message immediately.
     // Don't abort if already handling a player message (msgPending).
     if (!state.msgPending) softInterrupt()
-    state.messageQueue.push({ username, message, historyAs: undefined })
+    state.messageQueue.push({ username, message })
   })
 
   // System/game events
@@ -400,15 +484,20 @@ function createBot() {
     // dying + respawning — otherwise (esp. with idle skip) it could respawn and sit silent.
     if (isBotEvent) {
       logChatDB('event', bot.username, msg)
+      // Own advancement: a journal record, so the model sees the milestone in NEW=.
+      const adv = msg.match(/has (?:made the advancement|completed the challenge|reached the goal) \[(.+)\]/)
+      if (adv) require('./src/core/utils').logEvent(`advancement: ${adv[1]}`)
       // Log bot death as game event with cause
       if (/was |died|drowned|burned|fell|hit the ground|went up in flames|walked into|tried to swim|suffocated|starved|was blown|was killed|was slain|was shot/.test(msg)) {
         const pos = bot.entity?.position
         const cause = msg.replace(bot.username + ' ', '')
         logGameEvent('death', cause, 1, pos ? Math.floor(pos.x) : null, pos ? Math.floor(pos.y) : null, pos ? Math.floor(pos.z) : null, { message: msg })
+        require('./src/core/utils').logEvent(`death: ${cause}${pos ? ` at ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}` : ''}`)
+        state.diedAt = Date.now()
+        if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
         state.messageQueue.push({
           username: 'event',
-          message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`,
-          historyAs: 'self'
+          message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`
         })
       }
       return
@@ -419,11 +508,10 @@ function createBot() {
     }
     console.log(color(c.yellow, `\n  [EVENT] ${msg}`))
     logChatDB('event', eventPlayer || null, msg)
-    const histKey = state.lastActionUsername || 'self'
+    if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
     state.messageQueue.push({
       username: 'event',
-      message: `[GAME EVENT] ${msg}`,
-      historyAs: histKey
+      message: `[GAME EVENT] ${msg}`
     })
   })
 
@@ -433,7 +521,6 @@ function createBot() {
     state.currentTask = null
     state.actionQueue = []
     state.backgroundTask = null
-    state.loopRunning = false
     state.messageQueue = []
     state.portableCraftingTable = null
   })
@@ -442,10 +529,36 @@ function createBot() {
 
   bot.on('death', () => {
     state.portableCraftingTable = null
+    state.diedAt = Date.now()
     // Death reason logged via messagestr handler with full message (e.g. "Bro was slain by Zombie")
   })
 
+  // Crossing into another dimension: coordinates from the old one mean nothing
+  // here, so drop transient position state. Block memory is keyed by dimension.
+  bot.on('spawn', () => {
+    const dim = require('./src/world/memory').currentDim()
+    if (state.dim && state.dim !== dim) {
+      state.skipBlocks.clear()
+      state.portableCraftingTable = null
+      state.doorToRestore = null
+      state.prevSnapshot = null
+      const p = bot.entity.position
+      require('./src/core/utils').logEvent(`dimension: ${state.dim} → ${dim}, at ${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`)
+    }
+    state.dim = dim
+  })
+
+  // After a death, record where the bot came back and what it still carries.
+  bot.on('spawn', () => {
+    if (!state.diedAt) return
+    state.diedAt = null
+    const p = bot.entity.position
+    const items = bot.inventory.items()
+    require('./src/core/utils').logEvent(`respawn: at ${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}, inventory ${items.length ? items.map(i => `${i.count} ${i.name}`).join(', ') : 'empty'}`)
+  })
+
   bot.on('end', () => {
+    require('./src/core/utils').clearChatQueue()
     if (shuttingDown) return
     stopEngine()
     reconnectAttempts++
@@ -460,7 +573,6 @@ function createBot() {
     state.currentTask = null
     state.actionQueue = []
     state.backgroundTask = null
-    state.loopRunning = false
     state.messageQueue = []
     state.portableCraftingTable = null
     if (reconnectTimer) clearTimeout(reconnectTimer)

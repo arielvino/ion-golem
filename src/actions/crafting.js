@@ -3,8 +3,8 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { sleep } = require('../core/tick')
 const { navigateTo, digBlock } = require('../navigation/navigation')
-const { removeBlock, queryBlockMemoryFuzzy, searchContainersFor, logGameEvent, queryUtilityBlocks } = require('../world/memory')
-const { reachDbUtilityBlock } = require('./utilityBlocks')
+const { queryBlockMemoryFuzzy, searchContainersFor, logGameEvent, queryUtilityBlocks } = require('../world/memory')
+const { findKnownBlocks, reachKnownBlock } = require('../perception/touch')
 const { getInvMap, countMat, generalize, getBestRecipe } = require('../world/recipes')
 const { c, color } = require('../lib/colors')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
@@ -145,26 +145,21 @@ async function doCraft(targetName, count = 1) {
 
   // If recipe needs a crafting table, look for one nearby (but don't auto-craft/place)
   if (recipes.length === 0 && !allAre2x2) {
-    let ct = bot.findBlock({ matching: mcData.blocksByName.crafting_table?.id, maxDistance: 6 })
-
-    if (!ct) {
-      // Check DB for known tables nearby
-      const dbCt = queryUtilityBlocks(bot.entity.position, 10).filter(u => u.name === 'crafting_table')
-      if (dbCt.length > 0) {
-        const best = dbCt[0]
-        const dist = Math.round(bot.entity.position.distanceTo(new Vec3(best.x, best.y, best.z)))
-        if (dist <= 32) {
-          console.log(`  [DB] known crafting_table at ${best.x},${best.y},${best.z} (${dist}m away)`)
-          ct = await reachDbUtilityBlock('crafting_table', best, Math.max(15000, dist * 1500))
-        }
-      }
+    // A table the bot has seen (now or before), walked up to and in reach and sight.
+    let ct = null
+    let tableWhy = null
+    const known = findKnownBlocks(['crafting_table'], { maxDistance: 32, count: 1 })
+    if (known.length > 0) {
+      const k = known[0]
+      const dist = Math.round(bot.entity.position.distanceTo(k.pos))
+      console.log(`  known crafting_table at ${k.pos.x},${k.pos.y},${k.pos.z} (${dist}m, seen ${k.seen})`)
+      const r = await reachKnownBlock(k.pos, b => b.name === 'crafting_table', 'crafting_table', Math.max(15000, dist * 1500))
+      if (r.why === 'aborted') { state.currentTask = null; return false }
+      if (r.block) ct = r.block
+      else { tableWhy = r.why; console.log(`  ${r.why}`) }
     }
 
     if (ct) {
-      const ctDist = bot.entity.position.distanceTo(ct.position)
-      if (ctDist > 4) {
-        await navigateTo(ct.position.x, ct.position.y, ct.position.z, 3, 15000)
-      }
       recipes = bot.recipesFor(item.id, null, 1, ct)
       useTable = ct
     }
@@ -173,7 +168,7 @@ async function doCraft(targetName, count = 1) {
       // No table nearby — tell the AI to handle it
       const hasTableInv = bot.inventory.items().some(i => i.name === 'crafting_table')
       const hasPlanks = bot.inventory.items().filter(i => i.name.includes('planks')).reduce((s, i) => s + i.count, 0)
-      let hint = `${targetName} needs a crafting table. `
+      let hint = `${targetName} needs a crafting table. ${tableWhy ? tableWhy + '. ' : ''}`
       if (hasTableInv) hint += 'You have a crafting_table in inventory — place it first with [ACTION:place:crafting_table].'
       else if (hasPlanks >= 4) hint += 'You have planks — craft a crafting_table first (4 planks), then place it.'
       else hint += 'Craft a crafting_table (4 planks) and place it, or go to an existing one.'
@@ -185,7 +180,7 @@ async function doCraft(targetName, count = 1) {
       }
       sendChat(hint)
       console.log(`  craft ${targetName}: no crafting table nearby`)
-      recordFailure(`craft:${targetName} - need crafting table. ${hasTableInv ? 'Have one in inv.' : hasPlanks >= 4 ? 'Have planks for one.' : 'Need 4 planks.'}`)
+      recordFailure(`craft:${targetName} - need crafting table. ${tableWhy ? tableWhy + '. ' : ''}${hasTableInv ? 'Have one in inv.' : hasPlanks >= 4 ? 'Have planks for one.' : 'Need 4 planks.'}`)
       state.currentTask = null
       return false
     }

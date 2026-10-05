@@ -5,6 +5,7 @@ const { tickWait, raceAbort, AbortError, stopAll, isAborted } = require('../core
 const { navigateTo, digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
+const { approachToTouch, touchFailText } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 
@@ -50,7 +51,6 @@ async function doMine(targetName, opts = {}) {
     matchingIds = matches.map(n => mcData.blocksByName[n].id)
   }
 
-  const isWood = normalized.includes('log') || normalized.includes('wood') || normalized.includes('stem')
   let mined = 0
   let speedWarned = false  // harvest speed advisory fires at most once per mine action
 
@@ -75,22 +75,21 @@ async function doMine(targetName, opts = {}) {
   const seenKeys = new Set()
   const candidates = []
 
-  // If explicit coordinates given, verify and use as first candidate
+  // Explicit coordinates name exactly one block: mine that one or fail, never a substitute
+  // (the wood scoring below would otherwise prefer another log of the same tree).
   if (explicitPos) {
+    const at = `${explicitPos.x},${explicitPos.y},${explicitPos.z}`
     const eb = bot.blockAt(explicitPos)
-    if (eb && matchingIds.includes(eb.type)) {
-      const key = `${explicitPos.x},${explicitPos.y},${explicitPos.z}`
-      if (!state.skipBlocks.has(key)) {
-        seenKeys.add(key)
-        candidates.push(explicitPos)
-        console.log(`  using explicit coords (${explicitPos.x},${explicitPos.y},${explicitPos.z})`)
-      }
-    } else {
-      console.log(`  explicit coords (${explicitPos.x},${explicitPos.y},${explicitPos.z}) — block not found or wrong type`)
+    if (!eb || !matchingIds.includes(eb.type) || state.skipBlocks.has(at)) {
+      console.log(`  explicit coords (${at}) — block not found, wrong type or skipped`)
+      recordFailure(`mine:${targetName} - no ${rawName} at ${at} (${eb ? eb.name : 'unloaded'}). Mine by name without coords, or pick coords from VISION.`)
+      break
     }
+    console.log(`  using explicit coords (${at})`)
+    candidates.push(explicitPos)
   }
 
-  for (const pos of visionCandidates) {
+  for (const pos of explicitPos ? [] : visionCandidates) {
     const key = `${pos.x},${pos.y},${pos.z}`
     if (!seenKeys.has(key) && !state.stmts.isPlaced.get(pos.x, pos.y, pos.z)) {
       seenKeys.add(key); candidates.push(pos)
@@ -119,30 +118,10 @@ async function doMine(targetName, opts = {}) {
     break // no candidates, stop batch
   }
 
-  let block
-  if (isWood) {
-    const botY = bot.entity.position.y
-    let bestScore = Infinity
-    for (const pos of candidates) {
-      const b = bot.blockAt(pos)
-      if (!b) continue
-      let groundDist = 0
-      for (let dy = 1; dy <= 5; dy++) {
-        const below = bot.blockAt(pos.offset(0, -dy, 0))
-        if (below && below.name !== 'air' && !below.name.includes('leaves') && !below.name.includes('log')) {
-          groundDist = dy; break
-        }
-      }
-      if (groundDist === 0) groundDist = 10
-      const dist = bot.entity.position.distanceTo(pos)
-      const yPenalty = Math.max(0, pos.y - botY - 3) * 4
-      const score = dist + yPenalty + groundDist * 3
-      if (score < bestScore) { bestScore = score; block = b }
-    }
-    if (!block) block = bot.blockAt(candidates[0])
-  } else {
-    block = bot.blockAt(candidates[0])
-  }
+  // Nearest first: vision lists blocks in ray order, not by distance.
+  const here = bot.entity.position
+  const nearest = candidates.reduce((a, b) => (here.distanceTo(b) < here.distanceTo(a) ? b : a))
+  const block = bot.blockAt(nearest)
 
   const bPos = block.position
   const dist = Math.round(bot.entity.position.distanceTo(bPos))
@@ -161,19 +140,20 @@ async function doMine(targetName, opts = {}) {
   debugChat(`[mine] ${block.name} @${bPos.x},${bPos.y},${bPos.z} (${dirStr} ${dist}m)`)
   console.log(`\n  found ${blockType.name} at (${bPos.x},${bPos.y},${bPos.z}) dist=${dist}`)
 
-  // Simple navigation: pathfinder only. If it fails, report and let AI decide.
-  const reached = await navigateTo(bPos.x, bPos.y, bPos.z, 4, 15000)
-  if (isAborted()) break
-  if (!reached) {
-    const newDist = Math.round(bot.entity.position.distanceTo(bPos))
-    console.log(`  can't reach ${blockType.name} at (${bPos.x},${bPos.y},${bPos.z}), ${newDist}m away`)
-    recordFailure(`mine:${targetName} - can't reach (${bPos.x},${bPos.y},${bPos.z}), ${newDist}m away. Use [ACTION:goto:${bPos.x},${bPos.y},${bPos.z}] to get closer first.`)
+  // Walk up to it; dig only when it is in reach and in sight. Being out of reach says
+  // nothing about the block itself, so it is reported, never blacklisted.
+  const touch = await approachToTouch(bPos, 15000)
+  if (!touch || isAborted()) break
+  if (!touch.ok) {
+    const why = touchFailText(block.name, bPos, touch)
+    console.log(`  can't mine: ${why}`)
+    recordFailure(`mine:${targetName} - ${why}. Use [ACTION:goto:${bPos.x},${bPos.y},${bPos.z}] to get closer first.`)
     break
   }
 
   try {
     const target = bot.blockAt(bPos)
-    if (target && bot.canDigBlock(target)) {
+    if (target && target.diggable) {
       // The dig itself goes through the atomic. Intent 'harvest' equips a
       // drop-capable tool and REFUSES a block that would drop nothing without one
       // — unless the AI escalated with :skiptool (→ clear-no-tool, hand-mine it).
@@ -190,7 +170,7 @@ async function doMine(targetName, opts = {}) {
         mined++
         console.log(color(c.green, `\n  mined ${target.name}${batchCount > 1 ? ` (${mined}/${batchCount})` : ''}`))
         // Harvest succeeded by hand, but a tool would be much faster — note it once
-        // (HISTORY=, not a failure) so the AI can choose to craft one for the batch.
+        // (NEW=, not a failure) so the AI can choose to craft one for the batch.
         if (res.warn && !speedWarned) {
           speedWarned = true
           const { tool, factor } = res.warn
@@ -211,12 +191,15 @@ async function doMine(targetName, opts = {}) {
         break
       } else {
         console.log(`  dig failed on ${target.name} (${res.reason})`)
-        state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
+        // Only a block that can't be broken at all is skipped from now on; a refusal
+        // (not permitted yet, hazard next to it, protected path block) may change.
+        if (res.reason === 'unbreakable' || res.reason === 'not_diggable') state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
         recordFailure(`mine:${targetName} - block at ${bPos.x},${bPos.y},${bPos.z} ${res.reason === 'unbreakable' ? 'unbreakable (wrong tool?)' : `could not be dug (${res.reason})`}`)
       }
     } else {
       console.log(`  can't dig ${target?.name || 'null'}`)
       state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
+      recordFailure(`mine:${targetName} - ${target ? `${target.name} at ${bPos.x},${bPos.y},${bPos.z} can't be dug` : `block at ${bPos.x},${bPos.y},${bPos.z} is unloaded`}`)
     }
   } catch (err) {
     if (err instanceof AbortError) throw err

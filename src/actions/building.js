@@ -10,8 +10,11 @@ const { offsets } = require('../config/constants')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
 
-async function doPlace(targetName, opts = {}) {
+async function doPlace(target, opts = {}) {
   const bot = state.bot
+  // place:ITEM or place:ITEM:X,Y,Z (that exact spot)
+  const [targetName, coords] = target.split(':')
+  const at = coords?.match(/^(-?\d+),(-?\d+),(-?\d+)$/)
   state.currentTask = `placing ${targetName}`
   const normalized = normalizeItemName(targetName)
   const item = bot.inventory.items().find(i => fuzzyMatch(i.name, normalized))
@@ -159,6 +162,29 @@ async function doPlace(targetName, opts = {}) {
     await bot.equip(item, 'hand')
     const botPos = bot.entity.position.floored()
 
+    if (coords) {
+      const fail = (why) => {
+        sendChat(`Can't place ${item.name} there: ${why}`)
+        console.log(`  place ${item.name} at ${coords} FAILED — ${why}`)
+        recordFailure(`place:${item.name}:${coords} - ${why}`)
+        state.currentTask = null
+        return false
+      }
+      if (!at) return fail('coordinates must be X,Y,Z')
+      const pos = new Vec3(+at[1], +at[2], +at[3])
+      const cur = bot.blockAt(pos)
+      if (!cur || !(cur.name === 'air' || STRUCTURAL_AIR.has(cur.name) || WATER_BLOCKS.has(cur.name))) return fail(`spot is ${cur?.name || 'unloaded'}, not air`)
+      if (bot.entity.position.offset(0, 1.62, 0).distanceTo(pos.offset(0.5, 0.5, 0.5)) > 4.5) return fail('out of reach (more than 4.5 blocks) — goto closer first')
+      const placedName = await placeBlockAt(item, pos)
+      if (!placedName) return fail('no solid block next to it to place against, or something is in the way')
+      console.log(`  placed ${item.name} at ${pos} (verified: ${placedName})`)
+      trackPlacedBlock(pos.x, pos.y, pos.z)
+      logGameEvent('place', placedName, 1, pos.x, pos.y, pos.z, { reason: 'place_action' })
+      sendChat('Placed!')
+      state.consecutivePlaceFails = 0
+      return true
+    }
+
     // Helper: check if an entity (bot or other players/mobs) occupies a block position
     // Entities have ~0.6 wide hitboxes and ~1.8 tall, so they occupy 2 vertical blocks
     function isEntityBlocking(pos) {
@@ -207,6 +233,9 @@ async function doPlace(targetName, opts = {}) {
       if (isEntityBlocking(digPos)) continue
       const block = bot.blockAt(digPos)
       if (!block || block.name === 'air' || !block.diggable) continue
+      // Digging the same block to put it back changes nothing but drops an item —
+      // and tears up a wall the bot just built.
+      if (block.name === item.name) continue
       // Don't dig out blocks we're standing on
       if (dy === -1) continue
       console.log(`  place: no air spots, digging ${block.name} at ${digPos} to make room`)

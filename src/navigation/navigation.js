@@ -11,7 +11,7 @@ const { isPlaceable, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks'
 const { faces } = require('../config/constants')
 const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
-const { liveStep, followPath, dbBlock, centerInBlock } = require('./atomicSteps')
+const { liveStep, followPath, knownStraightRun, sprintRun, dbBlock, centerInBlock } = require('./atomicSteps')
 const { preCheck } = require('../engine/guard')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
@@ -19,7 +19,6 @@ const { sendChat, debugChat } = require('../core/utils')
 const { _pHazard, _pSurface, _pKnownSolid, _pKnownClear } = require('./blockquery')
 const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
 const { reachGoal, headingGoal, until } = require('./goals')
-const { _getReachVec, _reachCheck, _digToward } = require('./reachability')
 const { navMode, clearNavState } = require('./navmode')
 const { blockNeedsMissingTool, toolSpeedAdvice, equipForDig } = require('../world/tooling')
 
@@ -68,6 +67,8 @@ async function digBlock(pos, opts = {}) {
   const bot = state.bot
   const b = bot.blockAt(pos)
   if (!b || !b.diggable || STRUCTURAL_AIR.has(b.name)) return { ok: false, reason: 'not_diggable' }
+  // No-unpermitted-breaking mode: the running action must carry a player's approval.
+  if (!require('../engine/breakPermission').mayBreak(b.name, pos, opts.reason)) return { ok: false, reason: 'not_permitted' }
 
   const intent = opts.intent || state.navIntent || 'clear'
 
@@ -429,7 +430,7 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
 
   const mode = navMode()
   const stepResult = await liveStep(bot, sx, sz, { mode })
-  if (!stepResult.ok) { console.log(`  tunnelStep: liveStep blocked (${stepResult.type})`); return false }
+  if (!stepResult.ok) { console.log(`  tunnelStep: liveStep blocked (${stepResult.type})`); ctx.why = `next step blocked (${stepResult.type})`; return false }
 
   // Record floor block as path
   const afterPos = bot.entity.position
@@ -555,6 +556,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       const placeableSlot = bot.inventory.items().find(i => isPlaceable(i.name))
       if (!placeableSlot) {
         console.log('  stairUp: no blocks for step')
+        ctx.why = 'no placeable blocks to build a step up'
         return false
       }
       const placedName = await placeBlockAt(placeableSlot, stepPos)
@@ -586,6 +588,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     const upResult = await liveStep(bot, stepX, stepZ, { mode: upMode })
     if (!upResult.ok) {
       console.log(`  stairUp: liveStep failed (${upResult.type})`)
+      ctx.why = `step up blocked (${upResult.type})`
       return false
     }
     bot.clearControlStates()
@@ -621,6 +624,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       const below2 = bot.blockAt(new Vec3(cx + stepX, curY - 2, cz + stepZ))
       if (below2 && HAZARDS.has(below2.name)) {
         console.log('  staircaseDown: hazard below, aborting')
+        ctx.why = `${below2.name} under the next step`
         return false
       }
     }
@@ -631,6 +635,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       const below3 = bot.blockAt(new Vec3(cx + stepX, curY - 3, cz + stepZ))
       if (!below3 || TRANSPARENT.has(below3.name)) {
         console.log('  staircaseDown: no floor below, too deep to drop')
+        ctx.why = 'no floor ahead — open drop of 3+ blocks, nothing to cut a step into'
         return false
       }
     }
@@ -650,7 +655,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     // Step forward into the gap — bot drops 1 block
     const downMode = navMode()
     const downStep = await liveStep(bot, stepX, stepZ, { mode: downMode })
-    if (!downStep.ok) { console.log('  staircaseDown: liveStep blocked'); return false }
+    if (!downStep.ok) { console.log('  staircaseDown: liveStep blocked'); ctx.why = `next step down blocked (${downStep.type})`; return false }
     await sleep(200) // let physics settle after drop
 
     const afterY = Math.round(bot.entity.position.y)
@@ -830,13 +835,16 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
   // which findWaypoint guarantees is farther than the sub-goal, so reaching the
   // sub-goal still scores as progress.
   let gx = tx, gy = ty, gz = tz
-  let path = planFromHere(gx, gy, gz, mode, avoid)
+  // The walk is done within `range` of the real target, so plan to that; a sub-goal
+  // is a cell to stand on, planned exactly.
+  const goalRange = () => (gx === tx && gy === ty && gz === tz ? range : 0)
+  let path = planFromHere(gx, gy, gz, mode, avoid, goalRange())
   if (!path) {
     const sub = findWaypoint(target)
     if (!sub) { console.log(`  cardinalWalk: no optimistic path to ${tx},${ty},${tz} and no sub-goal`); return false }
     gx = Math.floor(sub.x); gy = Math.round(sub.y); gz = Math.floor(sub.z)
     console.log(`  cardinalWalk: no path to target → sub-goal ${gx},${gy},${gz}`)
-    path = planFromHere(gx, gy, gz, mode, avoid)
+    path = planFromHere(gx, gy, gz, mode, avoid, goalRange())
     if (!path) { console.log(`  cardinalWalk: no path to sub-goal ${gx},${gy},${gz} either`); return false }
   }
   console.log(`  cardinalWalk: optimistic path ${path.length} nodes toward ${gx},${gy},${gz}`)
@@ -884,7 +892,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
         dirs.delete(back)              // ignore the exit we came in through
         if (dirs.size === 0) {         // nothing else open ⇒ dead end
           avoid.add(vk)
-          const np = planFromHere(gx, gy, gz, mode, avoid)
+          const np = planFromHere(gx, gy, gz, mode, avoid, goalRange())
           if (!np) { console.log(`  cardinalWalk: dead end at ${vk}, region sealed → bailing`); break }
           console.log(`  cardinalWalk: dead end at ${vk} → blacklisted, backtracking`)
           path = np; idx = 0; lastCell = vk; cameFrom = null
@@ -922,11 +930,31 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
       surveyForNav({ maxDistance: 18 })
     }
 
-    const res = await liveStep(bot, dx, dz, { mode })
+    // A straight stretch the DB already confirms walkable is sprinted in one go,
+    // braking once at its end, instead of stopping at every cell.
+    const run = knownStraightRun(path, idx, cx, cy, cz, dx, dz, mode)
+    let res
+    if (run >= 2) {
+      // cells at the bot's own height: the plan's y can sit one off (e.g. on snow layers)
+      const cells = Array.from({ length: run + 1 }, (_, i) => ({ x: cx + dx * i, y: cy, z: cz + dz * i }))
+      const ok = await sprintRun(bot, cells, 0, run)
+      if (!ok) {                         // landed >1 block off — re-derive from where it stands
+        if (++replans > 6) { console.log(`  cardinalWalk: replan budget exhausted`); break }
+        continue
+      }
+      for (let i = 1; i < run; i++) seen.add(`${cx + dx * i},${cy},${cz + dz * i}`)
+      idx += run - 1                     // the run's last node, which the advance loop skips
+      res = { ok: true, steps: run }
+    } else {
+      res = await liveStep(bot, dx, dz, { mode })
+      res.steps = 1
+    }
     if (res.ok) {
-      stepsDone++
-      cameFrom = { x: cx, y: cy, z: cz }   // the cell we just left → arrival dir at the next
-      if (++sinceSurvey >= 4) {
+      stepsDone += res.steps
+      // the cell left to arrive at the run's end → arrival dir at the next
+      cameFrom = { x: cx + dx * (res.steps - 1), y: cy, z: cz + dz * (res.steps - 1) }
+      sinceSurvey += res.steps
+      if (sinceSurvey >= 4) {
         sinceSurvey = 0
         surveyForNav({ maxDistance: 28 })
         // a node still ahead turned out to be a real wall → replan
@@ -936,7 +964,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
         }
         if (blockedAhead) {
           if (++replans > 6) break
-          const np = planFromHere(gx, gy, gz, mode, avoid)
+          const np = planFromHere(gx, gy, gz, mode, avoid, goalRange())
           if (!np) break
           path = np; idx = 0
         }
@@ -950,7 +978,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
     avoid.add(`${next.x},${next.y},${next.z}`)
     if (!_pKnownClear(nx, cy, nz) || !_pKnownClear(nx, cy + 1, nz)) avoid.add(`${nx},${cy},${nz}`)
     if (++replans > 6) { console.log(`  cardinalWalk: replan budget exhausted`); break }
-    const np = planFromHere(gx, gy, gz, mode, avoid)
+    const np = planFromHere(gx, gy, gz, mode, avoid, goalRange())
     if (!np) { console.log(`  cardinalWalk: boxed in after ${replans} replans`); break }
     path = np; idx = 0
   }
@@ -959,181 +987,13 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
   return endDist < startDist - 0.5
 }
 
-// ─── Hybrid Strategy ──────────────────────────────────────────────
-// Plan path with our dbAstar (DB-only, no x-ray), execute movement
-// with mineflayer-pathfinder's GoalNear (physics-aware, smooth).
-// Pathfinder only reads blocks near the bot for local collision —
-// the bot is physically there, so this is not x-ray.
-async function execHybridPath(tx, ty, tz, range) {
-  const bot = state.bot
-  const pos = bot.entity.position
-  const sx = Math.floor(pos.x), sy = Math.round(pos.y), sz = Math.floor(pos.z)
-
-  // Plan with our A* (DB + vision, no x-ray)
-  const path = dbAstar(sx, sy, sz, tx, ty, tz)
-  if (!path || path.length < 2) return false
-
-  // Pick waypoint ~8 steps ahead on the path
-  const wpIdx = Math.min(8, path.length - 1)
-  const wp = path[wpIdx]
-
-  console.log(`  nav: strategy=hybridPath (${path.length} nodes, wp=${wp.x},${wp.y},${wp.z})`)
-  state.navigationStatus = `hybridPath → ${wp.x},${wp.y},${wp.z}`
-
-  // Execute with mineflayer pathfinder — smooth physics-aware movement
-  const wpRange = Math.min(range, 2)
-  bot.pathfinder.setGoal(new goals.GoalNear(wp.x, wp.y, wp.z, wpRange), true)
-
-  const start = Date.now()
-  let stuckCount = 0
-  let lastPos = bot.entity.position.clone()
-
-  while (true) {
-    await bot.waitForTicks(10) // 0.5s between checks
-    if (state.abortSignal) { try { bot.pathfinder.setGoal(null) } catch(e) {} return false }
-
-    const curPos = bot.entity.position
-    const curDist = curPos.distanceTo(new Vec3(wp.x, wp.y, wp.z))
-
-    // Arrived at waypoint
-    if (curDist <= wpRange + 0.5) {
-      try { bot.pathfinder.setGoal(null) } catch(e) {}
-      return true
-    }
-
-    // Timeout
-    if (Date.now() - start > 8000) {
-      try { bot.pathfinder.setGoal(null) } catch(e) {}
-      return false
-    }
-
-    // Stuck detection
-    const moved = curPos.distanceTo(lastPos)
-    if (moved < 0.15) stuckCount++
-    else stuckCount = 0
-    lastPos = curPos.clone()
-    if (stuckCount > 6) {
-      try { bot.pathfinder.setGoal(null) } catch(e) {}
-      return false
-    }
-
-    // Guard check
-    const check = preCheck({ ignoreMsgs: true })
-    if (check && (check.interrupt === 'hostile' || check.interrupt === 'drowning')) {
-      try { bot.pathfinder.setGoal(null) } catch(e) {}
-      return false
-    }
-  }
-}
-
-// Pick ordered list of strategies for a GENERAL (open-ended) navigation — no
-// strategy was requested, so "get there however you can" applies and the cascade
-// is the right behaviour. Explicit-strategy tasks do NOT come here: navigateTo
-// dispatches those straight to runStrategy with no cascade (see navigateTo).
-function pickStrategies(pos, target, failCounts) {
-  const strategies = []
-  const yDiff = Math.abs(target.y - Math.round(pos.y))
-  const underground = isUnderground()
-
-  // Walkable strategies first (free, no tools needed).
-  // 1. Cardinal walk — greedy steps toward target + obstacle circling. Sets an
-  //    internal sub-goal (findWaypoint) when it can't path to the target.
-  strategies.push({ name: 'cardinalWalk', maxFails: 3 })
-
-  // 2. DB pathfind — A* through known terrain + liveStep execution.
-  strategies.push({ name: 'dbPathfind', maxFails: 3 })
-
-  // 3. PillarUp — target above, surface, Y-diff significant.
-  if (target.y > pos.y + 3 && !underground)
-    strategies.push({ name: 'pillarUp', maxFails: 2 })
-
-  // 4. Staircase — underground only, Y-diff.
-  if (yDiff > 3 && underground)
-    strategies.push({ name: 'staircase', maxFails: 3 })
-
-  // 5. Tunnel — universal last resort (surface OR underground).
-  strategies.push({ name: 'tunnel', maxFails: 3 })
-
-  // Filter out exhausted strategies
-  return strategies.filter(s => (failCounts[s.name] || 0) < s.maxFails)
-}
-
-// Execute a single strategy by name. Returns true if progress was made.
-// ctx holds this strategy's cross-step memory for the current navigation (the
-// cascade keeps one ctx per strategy in navigateTo's ctxMap).
-async function executeStrategy(name, tx, ty, tz, range, target, timeout, startTime, lastChatStrategy, ctx = {}) {
-  const bot = state.bot
-  const pos = bot.entity.position
-  const dist = pos.distanceTo(target)
-
-  switch (name) {
-    case 'purePathfind': {
-      console.log(`  nav: strategy=purePathfind (${Math.round(dist)}m)`)
-      if (lastChatStrategy.v !== 'purePathfind') { lastChatStrategy.v = 'purePathfind' }
-      state.navigationStatus = `purePathfind ${Math.round(dist)}m`
-      bot.pathfinder.setGoal(new goals.GoalNear(tx, ty, tz, range), true)
-      const pfStart = Date.now()
-      let pfStuck = 0, pfLastPos = bot.entity.position.clone()
-      while (true) {
-        await bot.waitForTicks(10)
-        if (state.abortSignal) { try { bot.pathfinder.setGoal(null) } catch(e) {} return false }
-        const d = bot.entity.position.distanceTo(target)
-        if (d <= range + 0.5) { try { bot.pathfinder.setGoal(null) } catch(e) {} return true }
-        if (Date.now() - pfStart > 10000) { try { bot.pathfinder.setGoal(null) } catch(e) {} return false }
-        const m = bot.entity.position.distanceTo(pfLastPos)
-        if (m < 0.15) pfStuck++; else pfStuck = 0
-        pfLastPos = bot.entity.position.clone()
-        if (pfStuck > 6) { try { bot.pathfinder.setGoal(null) } catch(e) {} return false }
-      }
-    }
-    case 'hybridPath': {
-      const result = await execHybridPath(tx, ty, tz, range)
-      if (result && lastChatStrategy.v !== 'hybridPath') { lastChatStrategy.v = 'hybridPath' }
-      return result
-    }
-    case 'cardinalWalk': {
-      console.log(`  nav: strategy=cardinalWalk (${Math.round(dist)}m)`)
-      if (lastChatStrategy.v !== 'cardinalWalk') { debugChat(`[nav] cardinalWalk ${Math.round(dist)}m`); lastChatStrategy.v = 'cardinalWalk' }
-      state.navigationStatus = `cardinal walking toward ${tx},${ty},${tz}`
-      return await cardinalWalk(tx, ty, tz, 15, range)
-    }
-    case 'dbPathfind': {
-      const result = await execDbPathfind(tx, ty, tz, range, ctx)
-      if (result && lastChatStrategy.v !== 'dbPathfind') { debugChat(`[nav] dbPathfind`); lastChatStrategy.v = 'dbPathfind' }
-      return result
-    }
-    // airRope removed from strategies (function kept for future use)
-    case 'pillarUp': {
-      console.log(`  nav: strategy=pillarUp (Y=${Math.round(pos.y)}→${ty})`)
-      if (lastChatStrategy.v !== 'pillarUp') { debugChat(`[nav] pillarUp Y${Math.round(pos.y)}→${ty}`); lastChatStrategy.v = 'pillarUp' }
-      state.navigationStatus = `pillarUp Y=${Math.round(pos.y)}→${ty}`
-      return await pillarUp(ty, 5)
-    }
-    case 'staircase': {
-      console.log(`  nav: strategy=staircase (Y=${Math.round(pos.y)}→${ty})`)
-      if (lastChatStrategy.v !== 'staircase') { debugChat(`[nav] staircase Y${Math.round(pos.y)}→${ty}`); lastChatStrategy.v = 'staircase' }
-      state.navigationStatus = `staircasing Y=${Math.round(pos.y)}→${ty}`
-      return await staircaseStep(tx, ty, tz, ctx)
-    }
-    // visionWalk removed — replaced by cardinalWalk
-    case 'tunnel': {
-      console.log(`  nav: strategy=tunnel (${Math.round(dist)}m)`)
-      if (lastChatStrategy.v !== 'tunnel') { debugChat(`[nav] tunnel`); lastChatStrategy.v = 'tunnel' }
-      state.navigationStatus = `tunneling toward ${tx},${ty},${tz}`
-      return await tunnelStep(tx, ty, tz)
-    }
-    default:
-      return false
-  }
-}
-
 // ─── Isolated single-strategy driver ──────────────────────────────
 // Runs ONE strategy to completion in isolation: owns its own loop, timeout,
 // abort handling, completion check, stuck-detection, error boundary, and a FRESH
-// opaque per-run ctx. This is what makes a strategy "self-contained" — a simple
-// (explicit-strategy) task calls this directly with NO cascade and NO fallback,
-// so a deliberately-chosen strategy can never be silently overridden or undone
-// by another (the old bug: cardinalWalk/dbPathfind climbing a staircase back up).
+// opaque per-run ctx. This is what makes a strategy "self-contained" — every
+// navigation calls this directly with ONE strategy, NO cascade and NO fallback,
+// so a strategy can never be silently overridden or undone by another (the old
+// bug: cardinalWalk/dbPathfind climbing a staircase back up).
 //
 // The driver is PREDICATE-TERMINATED: it stops when goal.isDone(ctx). A coordinate
 // goal's predicate is "within range of the point"; a heading goal's predicate is
@@ -1165,6 +1025,7 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
 
     if (goal.isDone(ctx)) {
       console.log(color(c.green, `  runStrategy[${name}]: done (${goal.desc})`))
+      await require('./doors').restoreBehind(bot, null, null)   // a door we just walked through
       return { ok: true, reason: 'done' }
     }
 
@@ -1200,7 +1061,7 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
     if (p > best + 0.5) { stuck = 0; best = p }
     else if (++stuck >= stuckLimit) {
       console.log(color(c.red, `  runStrategy[${name}]: stuck — ${stuckLimit} steps with no progress (${goal.desc})`))
-      return { ok: false, reason: 'stuck' }
+      return { ok: false, reason: 'stuck', why: ctx.why }
     }
   }
 }
@@ -1238,201 +1099,126 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
     const at = `at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
     state.navFailReason = res.reason === 'need_tool'
       ? `${stratName} stopped: ${res.block || 'a block'} needs a ${res.need || 'better tool'} — hand-mining it drops nothing. Craft/equip one and re-issue, or append :skiptool to hand-mine through it anyway. ${at}`
-      : `${stratName} ${res.reason} (${goal.desc}), ${at}`
+      : `${stratName} ${res.reason}${res.why ? ` — ${res.why}` : ''} (${goal.desc}), ${at}`
     console.log(color(c.red, `  nav: ${state.navFailReason}`))
   }
   return res.ok
+}
+
+// ── Experiment: mineflayer-pathfinder as the walker (--pathfinder) ──
+// Replaces the 'walk' and 'pathfind' strategies with one bot.pathfinder.goto, using
+// the Movements configured in bot.js. Explicit tunnel/staircase/pillar stay ours.
+// The pathfinder plans from chunk data (bot.blockAt), not the vision-fed DB, so
+// this mode knowingly breaks the no-x-ray rule — it's a comparison baseline.
+const PATHFINDER_NAV = process.argv.includes('--pathfinder')
+const NO_MOVE_MS = 2000      // pathfinder walk with no movement this long → cardinalWalk instead
+const NO_MOVE_DIST = 0.3
+
+async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
+  const bot = state.bot
+  console.log(`\n  pathfinder: GoalNear ${tx},${ty},${tz} r=${range} (timeout=${Math.round(timeout / 1000)}s)`)
+  // Same hostile / critical-status guard runStrategy checks between steps, polled
+  // here since goto is one long call. Clearing the goal makes goto reject.
+  let reason = null
+  // No movement at all for NO_MOVE_MS (pinned at a wall, or thinking without a step):
+  // give up so navigateTo can fall back to cardinalWalk.
+  let anchor = bot.entity.position.clone(), anchorAt = Date.now()
+  const guard = setInterval(() => {
+    const p = bot.entity.position
+    if (p.distanceTo(anchor) >= NO_MOVE_DIST) { anchor = p.clone(); anchorAt = Date.now() }
+    else if (Date.now() - anchorAt > NO_MOVE_MS && !goal.isDone()) {
+      reason = 'no movement'
+      bot.pathfinder.setGoal(null)
+      return
+    }
+    let check = null
+    try { check = preCheck({ ignoreMsgs: true }) } catch (e) { return }   // abort: raceAbort handles it
+    if (check && (check.interrupt === 'hostile' || check.interrupt === 'low_health' || check.interrupt === 'drowning')) {
+      reason = check.interrupt
+      bot.pathfinder.setGoal(null)
+    }
+  }, 250)
+  try {
+    await raceAbort(bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, range)), timeout)
+  } catch (e) {
+    // An interrupt clears the goal itself (engine.interrupt), so goto rejects with
+    // GoalChanged before raceAbort's poll sees the abort — check the signal first.
+    if (e instanceof AbortError || state.abortSignal) { state.abortSignal = true; reason = 'abort' }
+    else if (!reason) reason = e.message === 'timeout' ? 'timeout'
+      : e.name === 'NoPath' ? 'no path'
+      : e.name === 'Timeout' ? 'no path found in time'
+      : e.message
+  } finally {
+    clearInterval(guard)
+    bot.pathfinder.setGoal(null)
+  }
+  // goto also resolves when it gives up with an empty path, so judge arrival ourselves.
+  if (goal.isDone()) {
+    console.log(color(c.green, `  pathfinder: done (${goal.desc})`))
+    return { ok: true, reason: 'done' }
+  }
+  return { ok: false, reason: reason || 'stopped short' }
 }
 
 // Main navigation function — plans route step by step
 async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
   const bot = state.bot
   const target = new Vec3(tx, ty, tz)
-  const startTime = Date.now()
-  let failCounts = {}
-  let noProgressRounds = 0
 
   state.navigationStatus = `navigating to ${tx},${ty},${tz}`
   state.navSafetyMode = opts.allowHazards ? 'hazard' : (opts.mode || 'safe')
   state.navIntent = opts.intent || 'clear'   // dig intent for any digging strategy this run picks
   state.navToolNeed = null
-  const lastChatStrategy = { v: null }  // wrapped in object for pass-by-ref
   console.log(`\n  nav: starting toward ${tx},${ty},${tz} (range=${range})`)
 
   // One clearNavState() in the finally below replaces the 7 scattered partial
   // clears that used to live on every return path (and leaked state on aborts).
   try {
-  // ── Explicit-strategy task (a "simple task") ──────────────────────
-  // The caller deliberately chose ONE method, so run only that method in
-  // isolation via runStrategy — NO cascade, NO fallback. It succeeds or fails
-  // cleanly back to the caller (the AI then decides what to do next). This is
-  // the whole point: a chosen digging strategy can never be silently undone by
-  // a walk strategy. Open-ended navigation (opts.strategy unset) falls through
-  // to the cascade below.
-  if (opts.strategy) {
-    // Coordinate target → a 'reach' goal; the driver is done when within range.
-    const goal = reachGoal(tx, ty, tz, range)
-    const EXPLICIT = {
-      staircase: [['staircase', (ctx) => staircaseStep(tx, ty, tz, ctx)]],
-      tunnel:    [['tunnel',    (ctx) => tunnelStep(tx, ty, tz)]],
-      // 'walk' = the non-digging navigators only (cardinalWalk, then dbPathfind);
-      // never staircase/tunnel. Still isolated — no digging strategy can sneak in.
-      walk:      [['cardinalWalk', (ctx) => cardinalWalk(tx, ty, tz, 15, range)],
-                  ['dbPathfind',   (ctx) => execDbPathfind(tx, ty, tz, range, ctx)]],
-    }
-    const chain = EXPLICIT[opts.strategy]
-    if (chain) {
-      let res = { ok: false, reason: 'none' }
-      for (const [nm, fn] of chain) {
-        res = await runStrategy(nm, fn, goal, { timeout, stuckLimit: opts.strategy === 'walk' ? 3 : 5 })
-        if (res.ok) break
-        // A genuine abort/hazard — or a tool-refusal bail — stops the whole chain;
-        // a 'stuck'/'timeout' on one walk executor may still let the next one try.
-        if (res.reason === 'abort' || res.reason === 'hostile' || res.reason === 'low_health' || res.reason === 'drowning' || res.reason === 'need_tool') break
-      }
-      if (!res.ok) {
-        const p = bot.entity.position
-        const toolInfo = getToolSummary(bot)
-        const at = `${Math.round(p.distanceTo(target))}m remaining, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
-        state.navFailReason = res.reason === 'need_tool'
-          ? `${opts.strategy} stopped: ${res.block || 'a block'} needs a ${res.need || 'better tool'} — hand-mining it drops nothing. Craft/equip one and re-issue, or append :skiptool to hand-mine through it anyway. ${at}`
-          : `${opts.strategy} ${res.reason}, ${at}`
-        console.log(color(c.red, `  nav: ${state.navFailReason}`))
-      }
-      return res.ok
-    }
-    // Unrecognised strategy name → fall through to the general cascade.
+  // ── One strategy per navigation, never a cascade ─────────────────
+  // Every navigation runs exactly one method in isolation via runStrategy and
+  // succeeds or fails cleanly back to the caller (the AI then decides what to do
+  // next). Unnamed navigation — every action that walks somewhere (mine, craft,
+  // chests, come, follow) — only walks: cardinalWalk never breaks or places a
+  // block. Anything that breaks or places blocks (tunnel, staircase, pillar), and
+  // A* over remembered terrain (pathfind), runs only when the model names it.
+  const strategy = opts.strategy || 'walk'
+  // Coordinate target → a 'reach' goal; the driver is done when within range.
+  const goal = reachGoal(tx, ty, tz, range)
+  const EXPLICIT = {
+    walk:      ['cardinalWalk', (ctx) => cardinalWalk(tx, ty, tz, 15, range)],
+    pathfind:  ['dbPathfind',   (ctx) => execDbPathfind(tx, ty, tz, range, ctx)],
+    pillar:    ['pillarUp',     (ctx) => pillarUp(ty, 5)],
+    staircase: ['staircase',    (ctx) => staircaseStep(tx, ty, tz, ctx)],
+    tunnel:    ['tunnel',       (ctx) => tunnelStep(tx, ty, tz)],
   }
-
-  // Per-strategy cross-step memory for the general cascade — one fresh ctx per
-  // strategy, living for this navigation only (replaces the old globals).
-  const ctxMap = {}
-
-  while (true) {
-    // Guard check
-    try { await tickWait(100) } catch (e) {
-      return false
-    }
-
-    if (state.abortSignal) {
-      console.log(color(c.yellow, '  nav: aborted'))
-      return false
-    }
-
-    if (Date.now() - startTime > timeout) {
-      const p = bot.entity.position
-      const toolInfo = getToolSummary(bot)
-      state.navFailReason = `timeout after ${Math.round(timeout/1000)}s, ${Math.round(p.distanceTo(target))}m remaining, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
-      console.log(color(c.yellow, `  nav: overall timeout (${state.navFailReason})`))
-      return false
-    }
-
-    const pos = bot.entity.position
-    const dist = pos.distanceTo(target)
-
-    // Arrival check (with last-meter reachability dig)
-    if (dist <= range + 0.5) {
-      if (!opts.noReachCheck) {
-        const rv = _getReachVec(opts, target)
-        if (!_reachCheck(bot, rv)) {
-          const dug = await _digToward(bot, rv)
-          if (dug) { failCounts = {}; continue }
-          // The last-meter blocker is tool-gated and digBlock refused it — surface
-          // the exact tool (or :skiptool) instead of spinning 5 "can't reach" rounds.
-          if (state.navToolNeed) {
-            const toolInfo = getToolSummary(bot)
-            state.navFailReason = `goto blocked: ${state.navToolNeed.block} needs a ${state.navToolNeed.need} to dig through — hand-mining drops nothing. Craft/equip one and re-issue, or append :skiptool. ${Math.round(dist)}m away, at ${Math.floor(pos.x)},${Math.round(pos.y)},${Math.floor(pos.z)}${toolInfo}`
-            console.log(color(c.red, `  nav: ${state.navFailReason}`))
-            break
-          }
-          console.log(`  nav: close (${Math.round(dist)}m) but can't reach target through blocks`)
-          noProgressRounds++
-          if (noProgressRounds >= 5) break
-          continue
-        }
-      }
-      console.log(color(c.green, `\n  nav: arrived (${Math.round(dist)}m)`))
-      return true
-    }
-
-    // Pre-check for hostiles / critical status
-    const check = preCheck({ ignoreMsgs: true })
-    if (check) {
-      if (check.interrupt === 'hostile') {
-        console.log(`  nav: hostile detected (${check.entity.name}), pausing navigation`)
-        return false
-      }
-      if (check.interrupt === 'low_health' || check.interrupt === 'drowning') {
-        console.log(`  nav: critical status (${check.interrupt}), aborting`)
-        return false
-      }
-    }
-
-    // Cascading strategy selection
-    const strategies = pickStrategies(pos, target, failCounts)
-    if (strategies.length === 0) {
-      console.log(color(c.red, '  nav: all strategies exhausted'))
-      break
-    }
-
-    let progress = false
-    const distBefore = bot.entity.position.distanceTo(target)
-    for (const s of strategies) {
-      // A raceAbort timeout/abort thrown from a wrapped mineflayer op (dig,
-      // place, equip, lookAt) inside a strategy must not reject navigateTo —
-      // treat it as a failed step and let the loop-top abortSignal check unwind.
-      let ok = false
-      try {
-        const sctx = ctxMap[s.name] || (ctxMap[s.name] = {})
-        ok = await executeStrategy(s.name, tx, ty, tz, range, target, timeout, startTime, lastChatStrategy, sctx)
-      } catch (e) {
-        if (e instanceof AbortError) { state.abortSignal = true }
-        else console.log(color(c.yellow, `  nav: strategy ${s.name} threw (${e.message})`))
-        ok = false
-      }
-
-      // Re-check arrival after every strategy (prevents overshoot)
-      const distNow = bot.entity.position.distanceTo(target)
-      if (distNow <= range + 0.5) { progress = true; break }
-
-      if (ok) {
-        if (distNow < distBefore - 0.5) {
-          progress = true
-          failCounts = {}  // reset ALL on real progress
-        } else {
-          failCounts[s.name] = (failCounts[s.name] || 0) + 1
-        }
-        break
-      }
-      failCounts[s.name] = (failCounts[s.name] || 0) + 1
-    }
-
-    // A digging strategy refused a tool-gated block — bail to the AI with the
-    // exact tool it needs (or the :skiptool escalation), like the explicit chain.
-    // Open-ended goto can't route a hand-mine on its own, so it stops here.
-    if (state.navToolNeed) {
-      const p = bot.entity.position
-      const toolInfo = getToolSummary(bot)
-      state.navFailReason = `goto blocked: ${state.navToolNeed.block} needs a ${state.navToolNeed.need} to dig through — hand-mining drops nothing. Craft/equip one and re-issue, or append :skiptool. ${Math.round(p.distanceTo(target))}m away, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
-      console.log(color(c.red, `  nav: ${state.navFailReason}`))
-      break
-    }
-
-    if (!progress) noProgressRounds++
-    else noProgressRounds = 0
-
-    if (noProgressRounds >= 3) {
-      const pos = bot.entity.position
-      const remainDist = Math.round(pos.distanceTo(target))
-      const failedStrats = Object.entries(failCounts).filter(([,c]) => c > 0).map(([n,c]) => `${n}(${c})`).join(',')
-      const toolInfo = getToolSummary(bot)
-      console.log(color(c.red, `  nav: 3 full rounds with zero progress, giving up (${remainDist}m away, failed: ${failedStrats})`))
-      state.navFailReason = `${remainDist}m away, strategies failed: ${failedStrats}, at ${Math.floor(pos.x)},${Math.round(pos.y)},${Math.floor(pos.z)}${toolInfo}`
-      break
-    }
+  const entry = EXPLICIT[strategy]
+  if (!entry) {
+    state.navFailReason = `unknown navigation strategy "${strategy}" — have: ${Object.keys(EXPLICIT).join(', ')}`
+    console.log(color(c.red, `  nav: ${state.navFailReason}`))
+    return false
   }
-
-  return false
+  const [name, stepFn] = entry
+  const startedAt = Date.now()
+  let res = PATHFINDER_NAV && (strategy === 'walk' || strategy === 'pathfind')
+    ? await pathfinderWalk(tx, ty, tz, range, timeout, goal)
+    : await runStrategy(name, stepFn, goal, { timeout, stuckLimit: strategy === 'walk' ? 3 : 5 })
+  // The pathfinder didn't move the bot at all: try our own walker for the time left.
+  if (res.reason === 'no movement' && !state.abortSignal) {
+    const left = Math.max(timeout - (Date.now() - startedAt), 3000)
+    console.log(color(c.yellow, `  nav: pathfinder made no movement in ${NO_MOVE_MS / 1000}s, falling back to cardinalWalk (${Math.round(left / 1000)}s)`))
+    res = await runStrategy('cardinalWalk', () => cardinalWalk(tx, ty, tz, 15, range), goal, { timeout: left, stuckLimit: 3 })
+    if (!res.ok) res = { ...res, reason: `${res.reason} (cardinalWalk, after the pathfinder made no movement)` }
+  }
+  if (!res.ok) {
+    const p = bot.entity.position
+    const toolInfo = getToolSummary(bot)
+    const at = `${Math.round(p.distanceTo(target))}m remaining, at ${Math.floor(p.x)},${Math.round(p.y)},${Math.floor(p.z)}${toolInfo}`
+    state.navFailReason = res.reason === 'need_tool'
+      ? `${strategy} stopped: ${res.block || 'a block'} needs a ${res.need || 'better tool'} — hand-mining it drops nothing. Craft/equip one and re-issue, or append :skiptool to hand-mine through it anyway. ${at}`
+      : `${strategy} ${res.reason}, ${at}`
+    console.log(color(c.red, `  nav: ${state.navFailReason}`))
+  }
+  return res.ok
   } finally {
     clearNavState()
   }

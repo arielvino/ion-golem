@@ -95,15 +95,13 @@ async function doWiki(query) {
     console.log(`  [WIKI] got ${info.length} chars, feeding back to AI`)
     state.messageQueue.push({
       username: 'self',
-      message: `[WIKI-RESULT for "${query}"] ${title}: ${info}\n\nUse this info to update your plan. If it shows a recipe exists, push appropriate [STACK] and [ACTION] tags. Your training data may be outdated — trust the wiki.`,
-      historyAs: state.lastActionUsername || 'self'
+      message: `[WIKI-RESULT for "${query}"] ${title}: ${info}\n\nUse this info to update your plan. If it shows a recipe exists, push appropriate [STACK] and [ACTION] tags. Your training data may be outdated — trust the wiki.`
     })
   } catch (err) {
     console.error('  [WIKI] error:', err.message)
     state.messageQueue.push({
       username: 'self',
-      message: `[WIKI-RESULT for "${query}"] Lookup failed: ${err.message}. Try the action anyway or check recipes= field.`,
-      historyAs: state.lastActionUsername || 'self'
+      message: `[WIKI-RESULT for "${query}"] Lookup failed: ${err.message}. Try the action anyway or check recipes= field.`
     })
   }
 }

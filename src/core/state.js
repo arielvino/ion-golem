@@ -4,6 +4,7 @@ module.exports = {
   // Action state
   currentTask: null,
   navigationStatus: null,
+  doorToRestore: null,   // {x,y,z,name,open} of a door liveStep toggled; put back once we're past it (doors.js)
   actionQueue: [],
   backgroundTask: null,
   // Abort/interrupt
@@ -16,27 +17,30 @@ module.exports = {
   // AI state
   apiFailCount: 0,
   lastModelCheck: Date.now(),
-  lastActionUsername: null,
-  loopRunning: false,
   msgPending: false,
   noActionRounds: 0,
-  idleAnnounced: false,  // true once the model has reported going idle; gates idle self-checks
+  aiPaused: false,       // debug `!ai off`: engine makes no model calls
 
   messageQueue: [],
-  // Tasks
+  // Tasks — agenda is the source of truth; taskStack is its derived view (engine/tasks.js)
+  agenda: null,
   taskStack: [],
+  planErrors: [],     // [PLAN:...] failures, shown to the model next turn
+  planOpCount: 0,     // successful [PLAN:...] ops ever; a planning-only turn is progress
+  actionOpCount: 0,   // [ACTION:...] tags ever dispatched; mainLoop's progress signal
+  journal: null,      // episodic memory: records + model notes (world/journal.js)
+  journalShownUpTo: 0,
+  noteErrors: [],     // [NOTE:...] failures, shown to the model next turn
   lastFailures: [],
+  pickupPausedUntil: 0,  // auto-pickup holds off until then (after a give)
+  joinedAt: 0,           // when this session spawned in the world, for online=
+  prevSnapshot: null,    // the previous turn's context values, for DELTA=
   skipBlocks: new Set(),
   pendingBlueprint: null,
   consecutivePlaceFails: 0,
   // Crafting
   portableCraftingTable: null,  // {x,y,z} of table WE placed, null if we didn't
   // Chat
-  chatHistory: new Map(),
-  MAX_HISTORY: 20,
-  // Rolling event log — concise history of what happened (actions, chat, outcomes)
-  eventLog: [],       // [{ ts, msg }]
-  MAX_EVENT_LOG: 15,
   // Claude client (claude -p child process)
   claudeChild: null,
   // Config (set by bot.js)
@@ -51,6 +55,7 @@ module.exports = {
   navToolNeed: null,     // set by digBlock when it REFUSES a tool-gated block ({need, block, pos}); nav bails so the AI crafts the tool or re-issues with :skiptool
   // (staircase direction + DB pathfind cache now live on per-run strategy ctx — see navigation.js)
   // Database (set by memory.js init)
+  dim: null,             // dimension at the last spawn; a change clears position state (bot.js)
   db: null,
   stmts: {},
   // Engine
@@ -61,4 +66,7 @@ module.exports = {
   recentSubtitles: [],  // [{ text, x, y, z, dist, age, category }]
   // Result of the last look/view/scan query, surfaced to the model as LOOKED= for one cycle
   lastObservation: null,  // { ts, text }
+  // High-resolution context views the model asked for with [CTX:...]. Rendered into the
+  // NEXT context build and cleared — one-shot, see ai/ctxProviders.js.
+  ctxRequests: [],  // [{ name, args }]
 }

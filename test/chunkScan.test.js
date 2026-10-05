@@ -2,7 +2,7 @@
 const test = require('node:test')
 const assert = require('node:assert')
 const { Vec3 } = require('vec3')
-const mcData = require('minecraft-data')('1.21.11')
+const mcData = require('minecraft-data')('26.1')
 
 const state = require('../src/core/state')
 const { resolveTargets, findByTypeMap, findByType, scanCandidates, getOpaqueSet } = require('../src/perception/chunkScan')
@@ -37,7 +37,7 @@ function makeWorld(columns) {
   return { getColumns: () => columns }
 }
 function setBot(columns, pos = new Vec3(8, 70, 8)) {
-  state.bot = { version: '1.21.11', entity: { position: pos }, world: makeWorld(columns) }
+  state.bot = { version: '26.1', entity: { position: pos }, world: makeWorld(columns) }
 }
 
 // place a block at world (wx,wy,wz) in a section array, returns {section index, sections}

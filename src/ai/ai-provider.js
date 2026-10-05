@@ -12,7 +12,6 @@
 // To add a new backend: implement the 4 methods and register in PROVIDERS below.
 
 const { spawn } = require('child_process')
-const path = require('path')
 const state = require('../core/state')
 const { c, color } = require('../lib/colors')
 
@@ -25,18 +24,37 @@ function createClaudeCodeProvider(opts = {}) {
   let responseResolve = null
   let buffer = ''
   let current = null  // { start, firstTokenMs, text, usage, apiMs, onDelta, gen }
-  let pendingAborts = 0  // # of aborted requests whose terminal `result` we must still drain
+  let pendingAborts = 0  // # of `result`s to drain unseen: aborted requests + our own /clear
   let systemPrompt = ''
-  let sessionCounter = 0
+  let reqSeq = 0  // per-request counter; names the interrupt control_request
+  // AI_TRACE=1: log every non-text CLI event with per-request counts — for diagnosing
+  // slow, stuck or drained turns (what arrived since SEND, and when).
+  let sinceSend = {}
+  const trace = process.env.AI_TRACE === '1'
+    ? (msg) => console.log(color(c.gray, `  [AI-TRACE] ${msg}`))
+    : () => {}
 
   function handleLine(line) {
     let event
-    try { event = JSON.parse(line) } catch (e) { return }
+    try { event = JSON.parse(line) } catch (e) { trace(`unparsed line: ${line.slice(0, 160)}`); return }
+    const kind = event.type === 'stream_event' ? `stream:${event.event?.type}` : `${event.type}${event.subtype ? ':' + event.subtype : ''}`
+    sinceSend[kind] = (sinceSend[kind] || 0) + 1
+    const draining = pendingAborts > 0
+    if (event.type === 'result') {
+      trace(`#${reqSeq} RESULT ${event.subtype}${event.is_error ? ' ERROR' : ''} dur=${event.duration_ms}ms api=${event.duration_api_ms}ms turns=${event.num_turns} len=${(event.result || '').length} ${draining ? `→ DRAINED (pendingAborts ${pendingAborts}→${pendingAborts - 1})` : (current ? '→ delivered' : '→ no current request')}${event.is_error ? ' body=' + JSON.stringify(event.result || '').slice(0, 200) : ''}`)
+    } else if (event.type === 'system' && event.subtype !== 'init' && event.subtype !== 'thinking_tokens') {  // thinking progress arrives ~1/s: counted in sinceSend only
+      trace(`#${reqSeq} SYSTEM ${event.subtype}: ${JSON.stringify(event).slice(0, 300)}`)
+    } else if (event.type === 'stream_event' && ['message_start', 'message_stop'].includes(event.event?.type)) {
+      trace(`#${reqSeq} ${event.event.type}${draining ? ' (draining)' : ''}`)
+    } else if (!['stream_event', 'assistant', 'user', 'system'].includes(event.type)) {
+      trace(`#${reqSeq} OTHER ${JSON.stringify(event).slice(0, 300)}`)
+    }
 
-    // Init event — process is ready
+    // Init event — process is ready. Every /clear starts a new session and emits
+    // another init, so only the first one per process is news.
     if (event.type === 'system' && event.subtype === 'init') {
+      if (!ready) console.log(color(c.gray, `  [AI] persistent process ready (${model})`))
       ready = true
-      console.log(color(c.gray, `  [AI] persistent process ready (${model})`))
       return
     }
 
@@ -57,16 +75,20 @@ function createClaudeCodeProvider(opts = {}) {
     // Streaming text deltas
     if (event.type === 'stream_event' && event.event) {
       const ev = event.event
+      // A turn that calls tools spans several assistant messages; keep their text
+      // blocks apart so a tag at the end of one can't fuse with prose opening the next.
+      if (ev.type === 'content_block_start' && ev.content_block?.type === 'text' && current.text) {
+        current.text += '\n'
+      }
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        if (!current.firstTokenMs) trace(`#${reqSeq} first text delta after ${Date.now() - current.start}ms`)
         if (!current.firstTokenMs) current.firstTokenMs = Date.now() - current.start
         current.text += ev.delta.text
         if (current.onDelta) current.onDelta(ev.delta.text, current.text)
       }
-      // Detect MCP tool calls — announce in chat
+      // Detect tool calls (web search/fetch) — announce in chat
       if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
-        const toolName = ev.content_block.name || ''
-        // Strip mcp__bot-query__ prefix for readability
-        const short = toolName.replace(/^mcp__bot-query__/, '')
+        const short = ev.content_block.name || ''
         if (short) {
           console.log(color(c.gray, `  [AI] tool call: ${short}`))
           if (current.onToolCall) current.onToolCall(short)
@@ -77,7 +99,15 @@ function createClaudeCodeProvider(opts = {}) {
     // Non-streaming fallback: full assistant message
     if (event.type === 'assistant' && event.message?.content) {
       for (const block of event.message.content) {
-        if (block.type === 'text' && block.text) current.text = block.text
+        // Full tool call with its arguments — the streamed start event only has the
+        // name, and "why did it query that?" needs the what.
+        if (block.type === 'tool_use') {
+          const short = block.name || ''
+          console.log(color(c.gray, `  [AI] tool args: ${short} ${JSON.stringify(block.input || {}).slice(0, 300)}`))
+        }
+        // Only when nothing streamed: each assistant event carries just ITS message's
+        // text, so overwriting would drop every earlier message of a tool-using turn.
+        if (block.type === 'text' && block.text && !current.firstTokenMs) current.text = block.text
       }
     }
 
@@ -99,19 +129,6 @@ function createClaudeCodeProvider(opts = {}) {
     const env = { ...process.env }
     delete env.CLAUDECODE
 
-    // MCP config for bot query tools
-    const dbPath = state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'blocks.db') : null
-    const mcpServerPath = path.join(__dirname, 'mcp-server.js')
-    const mcpConfig = dbPath ? JSON.stringify({
-      mcpServers: {
-        'bot-query': {
-          command: 'node',
-          args: [mcpServerPath],
-          env: { BOT_DB_PATH: dbPath },
-        },
-      },
-    }) : null
-
     const args = [
       '-p',
       '--input-format', 'stream-json',
@@ -119,18 +136,28 @@ function createClaudeCodeProvider(opts = {}) {
       '--verbose',
       '--model', model,
       '--tools', 'WebSearch,WebFetch',
-      '--allowedTools', 'mcp__bot-query__query_structures,mcp__bot-query__query_structure_detail,mcp__bot-query__list_biomes,mcp__bot-query__locate_biome,mcp__bot-query__find_items,mcp__bot-query__inspect_blocks,mcp__bot-query__inspect_container,mcp__bot-query__query_chat_log,mcp__bot-query__search_chat_log,mcp__bot-query__search_events,mcp__bot-query__recent_events,mcp__bot-query__event_stats,mcp__bot-query__events_near,mcp__bot-query__query_task_history',
+      // The bot's own queries (builds, chat, events, records) are [CTX:...] views
+      // answered in the next turn, not MCP tools: an in-turn tool always beats a
+      // next-turn channel, and the model spent whole turns in query sprees. Only
+      // the web tools stay in-turn.
+      '--allowedTools', 'WebSearch,WebFetch',
       '--no-session-persistence',
       '--include-partial-messages',
       // '--settings', '{"hooks":{}}',  // TODO: re-enable once confirmed stable
       '--system-prompt', systemPrompt,
+      // No --mcp-config, so this means no MCP servers at all. Without it the CLI
+      // loads the user's account-level servers, and the model wandered into those.
+      '--strict-mcp-config',
+      // Without it the CLI injects the CLAUDE.md files it finds (user-global and
+      // the repo's — our development instructions) and the auto-memory index into
+      // every turn after /clear: ~4.8k tokens the bot has no business reading.
+      // Auth and the web tools work unchanged.
+      '--safe-mode',
     ]
-    if (mcpConfig) {
-      args.push('--mcp-config', mcpConfig)
-    }
 
     console.log(color(c.gray, `  [AI] spawning persistent process (${model})...`))
     const thisProc = spawn('claude', args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    trace(`spawned pid=${thisProc.pid}`)
     proc = thisProc
     state.claudeChild = thisProc
     buffer = ''
@@ -153,6 +180,7 @@ function createClaudeCodeProvider(opts = {}) {
 
     thisProc.on('close', (code) => {
       // Only clear state if this is still the active process (not a stale one after respawn)
+      trace(`pid=${thisProc.pid} closed code=${code}${proc !== thisProc ? ' (stale process)' : ''}`)
       if (proc !== thisProc) return
       console.log(color(c.yellow, `  [AI] process exited (code=${code})`))
       proc = null; ready = false; state.claudeChild = null
@@ -183,30 +211,35 @@ function createClaudeCodeProvider(opts = {}) {
       // aborted, handleLine drains its stale events (one `result` per pending abort) before
       // collecting this response. See abort() / handleLine.
       current = { start: Date.now(), firstTokenMs: 0, text: '', usage: null, apiMs: 0, onDelta, onToolCall }
+      reqSeq++
+      sinceSend = {}
+      trace(`#${reqSeq} SEND prompt=${prompt.length}ch pendingAborts=${pendingAborts} (+1 for /clear) pid=${proc?.pid} ready=${ready}`)
 
       const responsePromise = new Promise((resolve, reject) => {
         responseResolve = { resolve, reject }
       })
 
-      // Fresh session_id per request — no stale context accumulation.
-      // System prompt stays cached by the persistent process.
-      // STACK + context + RECENT_FAILS provide all needed continuity.
-      const sid = `s${++sessionCounter}`
-      const msg = JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: prompt },
-        session_id: sid,
-      }) + '\n'
+      // Every request starts from an empty conversation: AGENDA + context + NOTES +
+      // NEW= + RECENT_FAILS carry all the continuity the model needs. A per-message session_id
+      // does NOT do this — stream-json input ignores it and the process keeps one
+      // growing conversation (measured: +~1.3k tokens/turn, 48k → 135k in ~65 turns,
+      // then 90s timeouts). `/clear` does: it costs no API call, the system prompt stays
+      // cached, and it emits one empty `result` that handleLine drains like an abort's.
+      const line = (content) => JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n'
 
       try {
-        proc.stdin.write(msg)
+        proc.stdin.write(line('/clear'))
+        pendingAborts++
+        proc.stdin.write(line(prompt))
       } catch (err) {
         responseResolve = null; current = null
         throw new Error('Failed to write to AI process: ' + err.message)
       }
 
+      let timer = null
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('AI response timeout')), 90000)
+        const mySeq = reqSeq
+        timer = setTimeout(() => { trace(`#${mySeq} TIMEOUT 90s — pendingAborts=${pendingAborts} events since send: ${JSON.stringify(sinceSend)}`); reject(new Error('AI response timeout')) }, 90000)
       })
 
       try {
@@ -219,16 +252,25 @@ function createClaudeCodeProvider(opts = {}) {
           totalMs: Date.now() - result.start,
         }
       } finally {
+        clearTimeout(timer)
         responseResolve = null
         current = null
       }
     },
 
     abort() {
+      trace(`#${reqSeq} ABORT ${responseResolve ? `in-flight → pendingAborts ${pendingAborts}→${pendingAborts + 1}` : '(nothing in flight, no-op)'} events so far: ${JSON.stringify(sinceSend)}`)
       if (responseResolve) {
-        // The CLI can't be told to stop mid-request, so it will still emit a full `result`
-        // for this aborted request. Count it so handleLine drains that stale tail instead
-        // of feeding it to (or stalling) the next request.
+        // Actually stop the CLI's turn. Without this the "aborted" request kept running to
+        // the end — measured up to 85s when it made tool calls — and the next request
+        // queued behind it until the 90s timeout killed the process. An interrupt ends the
+        // turn at once with its own `result` (subtype error_during_execution), so the
+        // one-result-per-request drain accounting below still holds.
+        try {
+          proc?.stdin.write(JSON.stringify({ type: 'control_request', request_id: `abort-${reqSeq}`, request: { subtype: 'interrupt' } }) + '\n')
+        } catch (e) { console.warn(`  [AI] interrupt write failed: ${e.message}`) }
+        // Count the interrupted request's `result` so handleLine drains that stale tail
+        // instead of feeding it to (or stalling) the next request.
         pendingAborts++
         const r = responseResolve
         responseResolve = null
@@ -250,9 +292,9 @@ function createClaudeCodeProvider(opts = {}) {
 // Placeholder for a direct Anthropic API backend (@anthropic-ai/sdk + ANTHROPIC_API_KEY).
 // The provider interface at the top of this file is deliberately backend-agnostic:
 // implement init/send/abort/destroy with client.messages.stream() for an API-auth
-// alternative to the CLI. Note the claude-code backend gets WebSearch/WebFetch + the
-// bot-query MCP tools for free via `claude -p`; an API build must add its own tool-use
-// loop (dispatch bot-query calls into mcp-server.js in-process) for parity. PRs welcome.
+// alternative to the CLI. Note the claude-code backend gets WebSearch/WebFetch for free
+// via `claude -p`; an API build must add the server-side web tools for parity (the
+// bot's own queries are [CTX:...] tags, so they need nothing). PRs welcome.
 function createAnthropicApiProvider() {
   throw new Error(
     'AI provider "anthropic-api" is not implemented — this build ships CLI-only ' +

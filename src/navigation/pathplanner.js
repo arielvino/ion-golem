@@ -10,7 +10,7 @@ const { BlockMap } = require('../world/blockmap')
 const { getNeighbors } = require('./atomicSteps')
 const { getLastVisionResult } = require('../perception/vision')
 const { surveyForNav } = require('../perception/visibility')
-const { _pPassable, _pHazard, _pSurface, _pFloor, _pKnownSolid, _pKnownClear } = require('./blockquery')
+const { _pPassable, _pHazard, _pSurface, _pOpenable, _pFloor, _pKnownSolid, _pKnownClear } = require('./blockquery')
 
 // ─── DB-Based A* Pathfinder ──────────────────────────────────────────
 
@@ -251,11 +251,14 @@ function _pNeighbors(x, y, z, mode, avoid) {
     // FLAT — optimistic over unknown. Floor support is the block BELOW the foot
     // (y-1): solid/unknown ground, or a surface block at foot level (carpet/lily).
     // Checking the foot cell itself would reject all known-air walkable space.
+    // A wooden door / fence gate counts as walkable here (liveStep opens it), at a small
+    // extra cost so open ground is still preferred.
+    const door = _pOpenable(nx, y, nz) || _pOpenable(nx, y + 1, nz)
     if (!(avoid && avoid.has(`${nx},${y},${nz}`)) &&
-        _pPassable(nx, y, nz) && _pPassable(nx, y + 1, nz) &&
+        (_pPassable(nx, y, nz) || _pOpenable(nx, y, nz)) && (_pPassable(nx, y + 1, nz) || _pOpenable(nx, y + 1, nz)) &&
         (_pFloor(nx, y - 1, nz) || _pSurface(nx, y, nz)) &&
         !_pHazard(nx, y, nz) && !_pHazard(nx, y - 1, nz)) {
-      out.push({ x: nx, y, z: nz, cost: 1 })
+      out.push({ x: nx, y, z: nz, cost: door ? 1.5 : 1 })
       continue
     }
     // STEP-UP — only onto a KNOWN solid step (flat was blocked by it)
@@ -280,8 +283,13 @@ function _pNeighbors(x, y, z, mode, avoid) {
   return out
 }
 
-// A* with optimistic neighbours. Arrives on target XZ block. Returns [{x,y,z}] or null.
-function optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, maxNodes = 6000) {
+// A* with optimistic neighbours. Arrives on the target XZ column, or — with `range` —
+// anywhere the walk would call arrived (feet within range+0.5 of the target, the same
+// test as cardinalWalk/reachGoal). The range matters when the target is a solid block
+// (a log to chop): its own column can only be "stood on" from the top of the tree, so
+// without it the planner hunts for high ground instead of walking up to the trunk.
+// Returns [{x,y,z}] or null.
+function optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, maxNodes = 6000, range = 0) {
   const key = (x, y, z) => `${x},${y},${z}`
   const h = (x, y, z) => Math.abs(x - tx) + Math.abs(y - ty) + Math.abs(z - tz)
   const open = new MinHeap()
@@ -295,7 +303,9 @@ function optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, maxNodes = 6000) {
     const cur = open.pop()
     const ck = key(cur.x, cur.y, cur.z)
     expanded++
-    if (cur.x === tx && cur.z === tz) {
+    const arrived = (cur.x === tx && cur.z === tz) ||
+      (range > 0 && Math.hypot(cur.x + 0.5 - tx, cur.y - ty, cur.z + 0.5 - tz) <= range + 0.5)
+    if (arrived) {
       const path = [{ x: cur.x, y: cur.y, z: cur.z }]
       let pk = ck
       while (cameFrom.has(pk)) { pk = cameFrom.get(pk); const [px, py, pz] = pk.split(',').map(Number); path.push({ x: px, y: py, z: pz }) }
@@ -318,13 +328,13 @@ function optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, maxNodes = 6000) {
 
 // Plan from the bot's current block. Omni-resurveys once and retries if the
 // first plan fails (a wall of seen solids may just need a fresh look).
-function planFromHere(tx, ty, tz, mode, avoid) {
+function planFromHere(tx, ty, tz, mode, avoid, range = 0) {
   const pos = state.bot.entity.position
   const sx = Math.floor(pos.x), sy = Math.round(pos.y), sz = Math.floor(pos.z)
-  let path = optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid)
+  let path = optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, undefined, range)
   if (!path || path.length < 2) {
     surveyForNav({ maxDistance: 32 })
-    path = optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid)
+    path = optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, undefined, range)
   }
   return (path && path.length >= 2) ? path : null
 }

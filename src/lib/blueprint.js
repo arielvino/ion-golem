@@ -1,4 +1,4 @@
-// Shared blueprint parser — used by ai.js (chat-driven build) and mcp-server.js
+// Shared blueprint parser — used by ai.js (chat-driven build) and ctxPast.js
 // (structure-progress query, a separate process). Pure: no logging, no throw on
 // empty input. Returns null when there's no LEGEND or no placeable blocks, else
 // { blocks: [{x,y,z,block}], materials: {name: count}, legend }.

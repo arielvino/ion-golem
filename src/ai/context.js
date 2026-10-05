@@ -3,18 +3,28 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { getLastVisionResult, formatVision, hasLineOfSight } = require('../perception/vision')
 const { getLastSurvey } = require('../perception/visibility')
+const { recognizeView, formatPlacesContext } = require('../perception/recognize')
+const { lookAround } = require('../perception/sight')
+const { summarizeSight, formatSight } = require('../perception/sightSummary')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
-const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
-const { stackTitlesWithSrc, stackTop } = require('../engine/tasks')
+const { currentDim, getStructures, getNearbyContainers, getContainerState, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
+const { renderAgenda } = require('../engine/tasks')
+const { renderNew, renderNotesBlock } = require('../world/journalStore')
+const { ago } = require('../world/journal')
 const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
+const { providerNames, renderPending, around } = require('./ctxProviders')
+const { snapshot, renderDelta } = require('./delta')
+const { entityTag } = require('../perception/entityTag')
+const { entityClass } = require('../perception/entityClass')
 
 // --- Main context builder ---
-function getBotContext(chatUsername) {
+function getBotContext() {
   const bot = state.bot
   const pos = bot.entity.position
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
+  const offhand = bot.inventory.slots[45]?.name || 'nothing'
   const inv = bot.inventory.items().map(i => `${i.name}x${i.count}`).join(', ') || 'empty'
   const armorSlots = [
     bot.inventory.slots[5], bot.inventory.slots[6],
@@ -22,34 +32,54 @@ function getBotContext(chatUsername) {
   ].filter(Boolean).map(s => s.name)
   const armorStr = armorSlots.length > 0 ? ` armor=[${armorSlots.join(',')}]` : ' armor=none'
   const eyePos = pos.offset(0, 1.62, 0)
-  const visibleUsernames = new Set()
+  const nearbyNames = []
+  const drops = {}  // drop tag → stack size, so DELTA can report a pile growing
+  const playerDist = {}  // tracked player → distance; staying in view isn't staying put
+  // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
+  const equipOf = (e) => {
+    const parts = []
+    if (e.equipment) {
+      const labels = ['hand', 'off', 'head', 'chest', 'legs', 'feet']
+      for (let i = 0; i < labels.length; i++) {
+        const item = e.equipment[i]
+        if (item && item.name) parts.push(`${labels[i]}:${item.name}`)
+      }
+    }
+    return parts.length > 0 ? `,${parts.join(',')}` : ''
+  }
+  // Every visible non-player entity, nearest first. Players have PLAYERS= below.
+  // Background mobs (fish, squid, bats) are summarized per type after the tagged
+  // list; drops only show within pickup range.
+  const background = {}  // name → { n, near }
   const nearby = Object.values(bot.entities)
-    .filter(e => e !== bot.entity && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
+    .filter(e => e !== bot.entity && !e.username && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
+    .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
+    .filter(e => {
+      const kind = entityClass(e)
+      if (kind === 'drop') return e.position.distanceTo(pos) < ranges.sight.nearbyDrops
+      if (kind !== 'background') return true
+      const b = background[e.name] || (background[e.name] = { n: 0, near: Math.round(e.position.distanceTo(pos)) })
+      b.n++
+      return false
+    })
     .map(e => {
-      let n = e.username || e.name || '?'
-      if (e.username) visibleUsernames.add(e.username)
+      const tag = entityTag(e)
       const ep = e.position
       const coord = `@${Math.round(ep.x)},${Math.round(ep.y)},${Math.round(ep.z)}`
       const dist = `${Math.round(ep.distanceTo(pos))}m`
-      if (n === 'item' || n === 'Item' || n === 'item_stack') {
-        try {
-          const drop = e.getDroppedItem()
-          if (drop) n = `drop:${drop.name}x${drop.count}`
-        } catch (_) { /* entity may lack drop data */ }
+      let count = ''
+      if (tag.startsWith('drop:')) {
+        try { drops[tag] = e.getDroppedItem().count; count = `,x${drops[tag]}` } catch (_) { /* no drop data */ }
       }
-      // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
-      const equipParts = []
-      if (e.equipment) {
-        const labels = ['hand', 'off', 'head', 'chest', 'legs', 'feet']
-        for (let i = 0; i < labels.length; i++) {
-          const item = e.equipment[i]
-          if (item && item.name) equipParts.push(`${labels[i]}:${item.name}`)
-        }
-      }
-      const equipStr = equipParts.length > 0 ? `,${equipParts.join(',')}` : ''
-      return `${n}${coord}(${dist}${equipStr})`
-    }).slice(0, 15).join(', ') || 'none'
+      nearbyNames.push(tag)
+      return `${tag}${coord}(${dist}${count}${equipOf(e)})`
+    })
+    .concat(Object.entries(background).map(([name, b]) => {
+      nearbyNames.push(name)
+      return `${name}×${b.n}(${b.near}m+)`
+    }))
+    .join(', ') || 'none'
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
   const facingDirs = ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE']
@@ -59,6 +89,7 @@ function getBotContext(chatUsername) {
   // MC ticks: 0=6:00, 6000=12:00, 12000=18:00, 18000=0:00
   const hours = Math.floor(((t + 6000) % 24000) / 1000)
   const time = `${hours}:00(${t}t)`
+  const onlineStr = state.joinedAt ? ` online=${ago(Date.now() - state.joinedAt)}` : ''
   // Sky exposure: skyLight=0 means enclosed/underground. Mob spawning at night or underground.
   let lightStr = ''
   try {
@@ -71,7 +102,8 @@ function getBotContext(chatUsername) {
       const visionResult = getLastVisionResult()
       const underground = sl === 0 && (!visionResult || !visionResult.skyVisible)
       lightStr = underground ? ' underground' : ''
-      if (underground || nightTime) lightStr += '(mobs_spawn!)'
+      // Nothing hostile spawns on peaceful, so the warning would only be noise there.
+      if ((underground || nightTime) && bot.game.difficulty !== 'peaceful') lightStr += '(mobs_spawn!)'
     }
   } catch(e) { console.warn('  [CTX] light detection err:', e.message) }
   const bgInfo = getBackgroundSummary()
@@ -82,10 +114,16 @@ function getBotContext(chatUsername) {
 
   const mcData = require('minecraft-data')(bot.version)
 
-  // Utility blocks from DB (furnaces, crafting tables, chests, etc.)
+  // Utility blocks from DB (furnaces, crafting tables, chests, etc.). A storage block
+  // with no container record has never been opened — its contents are unknown. A double
+  // chest is recorded under one half, so an opened chest beside it covers the other.
+  const STORAGE = new Set(['chest', 'trapped_chest', 'barrel'])
+  const opened = (u) => getContainerState(u.x, u.y, u.z) || (u.name !== 'barrel' &&
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => getContainerState(u.x + dx, u.y, u.z + dz)))
   const foundUtils = queryUtilityBlocks(pos, SEARCH_UTILITY).map(u => {
     const d = Math.round(pos.distanceTo(new Vec3(u.x, u.y, u.z)))
-    return `${u.name}@${u.x},${u.y},${u.z}(${d}m)`
+    const unopened = STORAGE.has(u.name) && !opened(u) ? ',unopened' : ''
+    return `${u.name}@${u.x},${u.y},${u.z}(${d}m${unopened})`
   })
 
   // Container locations from DB (contents accessible via take/deposit actions)
@@ -111,9 +149,6 @@ function getBotContext(chatUsername) {
     structParts.push(`"${s.name}"@${cx},${cy},${cz}(${d}m,${s.block_count}blk)`)
   }
   const structInfo = structParts.length > 0 ? ` MY_BUILDS=[${structParts.join(', ')}]` : ''
-  const stackInfo = state.taskStack.length > 0 ? ` STACK=[${stackTitlesWithSrc()}]` : ''
-  const topEntry = stackTop()
-  const topDetails = topEntry && topEntry.d ? ` TASK_DETAILS="${topEntry.d}"` : ''
 
   const invItems = bot.inventory.items()
   const countItem = (filter) => invItems.filter(i => filter(i.name)).reduce((s, i) => s + i.count, 0)
@@ -145,7 +180,8 @@ function getBotContext(chatUsername) {
   const obsInfo = obs && (Date.now() - obs.ts < 20000) ? ` LOOKED=[${obs.text}]` : ''
 
   const failInfo = state.lastFailures.length > 0 ? ` RECENT_FAILS=[${state.lastFailures.join(', ')}]` : ''
-  const historyInfo = state.eventLog.length > 0 ? ` HISTORY=[${state.eventLog.map(e => e.msg).join(', ')}]` : ''
+  const newRecords = renderNew()
+  const newInfo = newRecords ? ` NEW=[${newRecords}]` : ''
   // Report mineflayer's real bot.vehicle state, which is driven purely by the
   // server's set_passengers/attach_entity packets (no client-side guessing).
   // Always emit an affirmative RIDING/ON_FOOT token so the model never has to
@@ -162,9 +198,11 @@ function getBotContext(chatUsername) {
     vehicleStr = ` RIDING=${bot.vehicle.name || 'vehicle'}${seatStr}`
   }
 
-  let playerPosStr = ''
-  if (chatUsername) {
-    const pl = bot.players[chatUsername]
+  // Every online player, each with the best position the bot has: the tracked
+  // entity when in render range, else the Locator Bar fix. Which one matters is
+  // for the model to judge from the event and the agenda.
+  const describePlayer = (name) => {
+    const pl = bot.players[name]
     if (pl && pl.entity) {
       const pp = pl.entity.position
       const pdist = Math.round(pp.distanceTo(pos))
@@ -172,6 +210,8 @@ function getBotContext(chatUsername) {
       // (shorter) nearby= list range, so "can you see me?" works at distance.
       const canSee = pdist <= ranges.sight.playerVisibility &&
         hasLineOfSight(eyePos, pp, pl.entity.height || 1.8)
+      if (canSee) nearbyNames.push(name)
+      playerDist[name] = pdist
       // Player's own facing (yaw), like a human reading another player's head
       // orientation. Only available while the entity is tracked, same as a
       // vanilla client only rendering orientation for players in render range.
@@ -180,34 +220,32 @@ function getBotContext(chatUsername) {
         const pyaw = (((pl.entity.yaw + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
         pfacingStr = `,facing=${facingDirs[Math.round(pyaw / (Math.PI / 4)) % 8]}`
       }
-      playerPosStr = ` PLAYER=${chatUsername}@${Math.floor(pp.x)},${Math.floor(pp.y)},${Math.floor(pp.z)}(${pdist}m,${canSee ? 'visible' : 'NOT_VISIBLE'}${pfacingStr})`
-    } else {
-      // No tracked entity (out of render range). Fall back to the Locator Bar:
-      // the server's tracked_waypoint gives a heading — and usually a rough
-      // position — toward the player, enough to start walking the right way.
-      // Bearing yaw uses mineflayer's lookAt convention: atan2(-dx, -dz).
-      const wp = pl && pl.uuid ? bot._waypoints?.get(pl.uuid) : null
-      const fresh = wp && (Date.now() - wp.t) < 30000
-      if (fresh && (wp.type === 'vec3i' || wp.type === 'chunk')) {
-        const tx = wp.type === 'vec3i' ? wp.x : wp.chunkX * 16 + 8
-        const tz = wp.type === 'vec3i' ? wp.z : wp.chunkZ * 16 + 8
-        const dir = yawToDir(Math.atan2(-(tx - pos.x), -(tz - pos.z)))
-        const dist = Math.round(Math.hypot(tx - pos.x, tz - pos.z))
-        if (wp.type === 'vec3i') {
-          playerPosStr = ` PLAYER=${chatUsername}@${Math.floor(tx)},${wp.y},${Math.floor(tz)}(out_of_range,locator,head=${dir},~${dist}m)`
-        } else {
-          playerPosStr = ` PLAYER=${chatUsername}@~${Math.floor(tx)},~${Math.floor(tz)}(out_of_range,locator_chunk,head=${dir},~${dist}m)`
-        }
-      } else if (fresh && wp.type === 'azimuth') {
-        // Very distant: only a world-frame bearing, no distance. Rebuild a unit
-        // delta from the azimuth (atan2(dz,dx)) and reuse the same heading math.
-        const dir = yawToDir(Math.atan2(-Math.cos(wp.azimuth), -Math.sin(wp.azimuth)))
-        playerPosStr = ` PLAYER=${chatUsername}@UNKNOWN(out_of_range,locator,head=${dir},far)`
-      } else {
-        playerPosStr = ` PLAYER=${chatUsername}@UNKNOWN(not_in_range)`
-      }
+      return `${name}@${Math.floor(pp.x)},${Math.floor(pp.y)},${Math.floor(pp.z)}(${pdist}m,${canSee ? 'visible' : 'NOT_VISIBLE'}${pfacingStr}${equipOf(pl.entity)})`
     }
+    // No tracked entity (out of render range). Fall back to the Locator Bar:
+    // the server's tracked_waypoint gives a heading — and usually a rough
+    // position — toward the player, enough to start walking the right way.
+    // Bearing yaw uses mineflayer's lookAt convention: atan2(-dx, -dz).
+    const wp = pl && pl.uuid ? bot._waypoints?.get(pl.uuid) : null
+    if (wp && (wp.type === 'vec3i' || wp.type === 'chunk')) {
+      const tx = wp.type === 'vec3i' ? wp.x : wp.chunkX * 16 + 8
+      const tz = wp.type === 'vec3i' ? wp.z : wp.chunkZ * 16 + 8
+      const dir = yawToDir(Math.atan2(-(tx - pos.x), -(tz - pos.z)))
+      const dist = Math.round(Math.hypot(tx - pos.x, tz - pos.z))
+      return wp.type === 'vec3i'
+        ? `${name}@${Math.floor(tx)},${wp.y},${Math.floor(tz)}(out_of_range,locator,head=${dir},~${dist}m)`
+        : `${name}@~${Math.floor(tx)},~${Math.floor(tz)}(out_of_range,locator_chunk,head=${dir},~${dist}m)`
+    }
+    if (wp && wp.type === 'azimuth') {
+      // Very distant: only a world-frame bearing, no distance. Rebuild a unit
+      // delta from the azimuth (atan2(dz,dx)) and reuse the same heading math.
+      const dir = yawToDir(Math.atan2(-Math.cos(wp.azimuth), -Math.sin(wp.azimuth)))
+      return `${name}@UNKNOWN(out_of_range,locator,head=${dir},far)`
+    }
+    return `${name}@UNKNOWN(not_in_range)`
   }
+  const others = Object.keys(bot.players).filter(n => n !== bot.username).sort()
+  const playerPosStr = ` PLAYERS=[${others.map(describePlayer).join(', ') || 'none online'}]`
 
   // Context "see=" comes purely from the find+LOS survey (the new view) — no ray vision.
   const visionInfo = formatVision(null, { survey: getLastSurvey() })
@@ -220,6 +258,20 @@ function getBotContext(chatUsername) {
       if (biomeInfo) biomeStr = ` biome=${biomeInfo.name}`
     }
   } catch(e) { console.warn('  [CTX] biome detection err:', e.message) }
+
+  // One all-round ray view feeds both the place guesses and the material layers
+  // (BIOMES / TERRAIN / RESOURCES / UNEXPLAINED), so they always agree on what is seen.
+  let placesInfo = '', sightInfo = ''
+  try {
+    const t0 = Date.now()
+    const view = lookAround(bot, ranges.sight.viewBlocks)
+    const r = recognizeView(view, { maxDistance: ranges.sight.placesBlocks })
+    placesInfo = formatPlacesContext(r)
+    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, places: r?.places || [] })
+    sightInfo = ' ' + formatSight(summary, view.dark).split('\n').join(' ')
+    const ms = Date.now() - t0
+    if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
+  } catch (e) { console.warn('  [CTX] sight err:', e.message) }
 
   const pathCount = countNearbyPathBlocks(pos)
   const pathInfo = pathCount > 0 ? ` paths=${pathCount}` : ''
@@ -234,10 +286,33 @@ function getBotContext(chatUsername) {
     const headBlock = bot.blockAt(pos.offset(0, 1, 0))
     const feetBlock = bot.blockAt(pos)
     const floorBlock = bot.blockAt(pos.offset(0, -1, 0))
-    bodyStr = ` body=[head:${blockName(headBlock)},feet:${blockName(feetBlock)},floor:${blockName(floorBlock)}]`
+    // Lying in a bed is a body state, not a block: feet:yellow_bed alone reads the same
+    // whether the bot is asleep in it or standing on it (26.3 once hid the wake-up).
+    const bed = bot.isSleeping ? ',in_bed(asleep)' : ''
+    bodyStr = ` body=[head:${blockName(headBlock)},feet:${blockName(feetBlock)},floor:${blockName(floorBlock)}${bed}]`
   } catch(e) { console.warn('  [CTX] body block detection err:', e.message) }
 
-  return `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${pathInfo}${subsInfo}${obsInfo}${stackInfo}${topDetails}${historyInfo}${failInfo}]`
+  // Names only — the usage syntax lives in the system prompt. Generated from the
+  // provider table so a new view becomes askable the moment it is registered.
+  const ctxAvail = ` CTX_AVAIL=[${providerNames().join(',')}]`
+
+  // What changed since the context of the previous turn.
+  const invCounts = {}
+  for (const i of bot.inventory.items()) invCounts[i.name] = (invCounts[i.name] || 0) + i.count
+  const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, offhand, inv: invCounts, armor: armorSlots,
+    vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops, players: playerDist })
+  const delta = renderDelta(state.prevSnapshot, snap)
+  state.prevSnapshot = snap
+  const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
+
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} offhand=${offhand} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+
+  let aroundView = ''
+  try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }
+
+  // The surroundings, agenda and requested views hang OUTSIDE the blob: they are multi-line,
+  // and the blob is parsed elsewhere by splitting on top-level keys, which would mangle them.
+  return [blob, aroundView, renderAgenda(), renderNotesBlock(), renderPending()].filter(Boolean).join('\n')
 }
 
 module.exports = { getBotContext }

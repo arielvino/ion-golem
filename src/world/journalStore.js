@@ -1,0 +1,149 @@
+// Journal (journal.js) bound to bot state and disk.
+//
+// Records come in through logEvent/recordFailure (core/utils.js). The context
+// shows unseen records as NEW= and the notes as a NOTES block; once the model has
+// replied, the shown records are marked seen. [NOTE:...] tags from the reply are
+// applied here; failures come back next turn as NOTE_ERR, like PLAN_ERR.
+const fs = require('fs')
+const path = require('path')
+const state = require('../core/state')
+const { Journal, ago } = require('./journal')
+
+const JOURNAL_FILE = () => path.join(state.BOT_DATA_DIR, 'journal.json')
+
+function loadJournal() {
+  state.journal = new Journal()
+  try {
+    const f = JOURNAL_FILE()
+    if (fs.existsSync(f)) state.journal = Journal.fromJSON(JSON.parse(fs.readFileSync(f, 'utf-8')))
+  } catch (e) { console.warn('  [JOURNAL] load err:', e.message) }
+  // A blank memory is ambiguous — "nothing happened" or "I forgot"? The first record
+  // says which: memory begins here, and anything older lives only in the query tools.
+  if (state.journal.rseq === 0) {
+    state.journal.record('journal started — memory begins here; anything earlier is only in the past views ([CTX:records], [CTX:events], [CTX:chat]…)')
+    saveJournal()
+  }
+  if (state.journal.notes.length) console.log(`  [JOURNAL] restored ${state.journal.notes.length} notes, ${state.journal.records.length} records`)
+}
+
+function saveJournal() {
+  if (!state.journal) return
+  try { fs.writeFileSync(JOURNAL_FILE(), JSON.stringify(state.journal)) } catch (e) { console.warn('  [JOURNAL] save err:', e.message) }
+}
+
+// The node the bot is working on now — where a new note belongs.
+function currentNode() {
+  const f = state.agenda?.focus()
+  return f ? state.agenda.tree.activePath(f.id).at(-1).id : null
+}
+
+// NEW= for the context blob. Remembers how far it showed, for markShown().
+function renderNew() {
+  if (!state.journal) return ''
+  state.journalShownUpTo = state.journal.rseq
+  return state.journal.renderNew()
+}
+
+// A note's goal after it has finished or left the agenda: g2(done 1m ago), and
+// s3(g2 done 1m ago) for a node of a tree that has gone. Open nodes stay bare.
+function nodeLabel(id, now = Date.now()) {
+  const st = state.agenda?.nodeState(id)
+  if (!st) return id
+  const when = st.at ? ` ${ago(now - st.at)} ago` : ''
+  return `${id}(${st.root !== id ? st.root + ' ' : ''}${st.status}${when})`
+}
+
+// Multi-line block (NOTES + NOTE_ERR) that hangs outside the blob.
+function renderNotesBlock() {
+  if (!state.journal) return ''
+  const out = []
+  const notes = state.journal.renderNotes(undefined, undefined, nodeLabel)
+  if (notes) out.push(notes)
+  if (state.noteErrors.length) {
+    out.push(`NOTE_ERR=[${state.noteErrors.join(' | ')}]`)
+    state.noteErrors = []
+  }
+  return out.join('\n')
+}
+
+// Notes render as `n3 @g1 text`, so the model tends to open its own notes with
+// `@g1` too — which then showed twice. A leading @node is read as the model's
+// choice of where the note belongs and taken out of the text.
+function splitNode(text, fallback = null) {
+  let node = null
+  const body = text.replace(/^(?:@([gs]\d+)\s+)+/, (lead) => {
+    for (const [, id] of lead.matchAll(/@([gs]\d+)/g)) if (!node && (state.agenda?.tree?.nodes.has(id) || state.agenda?.closed?.[id])) node = id
+    return ''
+  })
+  return { body, node: node || currentNode() || fallback }
+}
+
+// `[NOTE:text [r1,r2]]` and `[NOTE:compact:n3-n9:text [r4]]`. The body may itself
+// contain one level of [...] (the citations), so a plain [^\]]+ would cut it short.
+const NOTE_TAG = /\[NOTE:((?:[^[\]]|\[[^[\]]*\])*)\]/g
+
+// Apply every [NOTE:...] in a reply.
+// nodeBefore: the node in focus when the turn began. Plan tags apply first, so a
+// reply that closes its goal and notes the outcome would otherwise leave the
+// note pointing at nothing.
+function applyNoteTags(rawReply, nodeBefore = null) {
+  if (!state.journal) return []
+  const applied = []
+  for (const m of rawReply.matchAll(NOTE_TAG)) {
+    const body = m[1].trim()
+    try {
+      const cm = /^compact:([^:]+):([\s\S]*)$/.exec(body)
+      if (cm) {
+        const t = splitNode(cm[2], nodeBefore)
+        const { note, replaced } = state.journal.compact(cm[1], t.body, t.node)
+        applied.push(`${note.id} ← ${replaced.join(',')}`)
+      } else {
+        const t = splitNode(body, nodeBefore)
+        applied.push(state.journal.note(t.body, t.node).id)
+      }
+    } catch (e) {
+      state.noteErrors.push(`${body.slice(0, 60)} → ${e.message}`)
+    }
+  }
+  if (applied.length) saveJournal()
+  return applied
+}
+
+// One record per reply: what the bot said, what it set in motion and why. Its
+// outcome arrives as records of its own, so next turn the model reads the move
+// and its result side by side — and knows what it was waiting for.
+//   me: "Digging down." → mine:dirt:108,83,80 | asked slice:ns | why: pillar over a cavern
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+function formatTurn({ said, actions = [], views = [], why }) {
+  const parts = []
+  if (said) parts.push(`me: "${clip(said.replace(/\s+/g, ' ').trim(), 220)}"`)
+  if (actions.length) parts.push(`${parts.length ? '→ ' : ''}${actions.join(', ')}`)
+  const tail = []
+  if (views.length) tail.push(`asked ${views.join(', ')}`)
+  if (why) tail.push(`why: ${clip(why.trim(), 220)}`)
+  if (!parts.length && !tail.length) return ''
+  return [parts.join(' '), ...tail].filter(Boolean).join(' | ')
+}
+
+// The "why" of a [LOG:why; used=...; missing=...] tag.
+function logWhy(rawReply) {
+  const m = /\[LOG:([^\]]*)\]/.exec(rawReply)
+  return m ? m[1].split(/;\s*used=/)[0].trim() : ''
+}
+
+function recordTurn(turn) {
+  if (!state.journal) return
+  const text = formatTurn(turn)
+  if (!text) return
+  state.journal.record(text)
+  saveJournal()
+}
+
+// After a reply: the NEW= records it was shown are now seen.
+function markShown() {
+  if (!state.journal || !state.journalShownUpTo) return
+  state.journal.markShown(state.journalShownUpTo)
+  saveJournal()
+}
+
+module.exports = { currentNode, nodeLabel, loadJournal, saveJournal, renderNew, renderNotesBlock, applyNoteTags, markShown, recordTurn, formatTurn, logWhy, NOTE_TAG }

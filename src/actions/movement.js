@@ -1,13 +1,15 @@
 // Movement actions — follow, come, goto, flee, mount, dismount, sail
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
-const { tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
+const { tick, tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
 const { navigateTo, digHeading, until } = require('../navigation/navigation')
 const { castVisionRays } = require('../perception/vision')
-const { sendChat, recordFailure, fuzzyMatch } = require('../core/utils')
-const { logGameEvent } = require('../world/memory')
+const { sendChat, recordFailure, logEvent, fuzzyMatch, resolvePlayerName } = require('../core/utils')
+const { logGameEvent, queryBlockMemory } = require('../world/memory')
+const { dbBlock } = require('../navigation/atomicSteps')
+const { tagOf, findTagged } = require('../perception/entityTag')
 const { OXYGEN_SURFACED } = require('../config/safety')
-const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
+const { WATER_BLOCKS, STRUCTURAL_AIR, PASSABLE } = require('../config/blocks')
 
 // Best-known position of a player. If their entity is in render range we have
 // exact, tracked coords. Otherwise fall back to the Locator Bar waypoint the
@@ -23,7 +25,7 @@ function resolvePlayerTarget(bot, username) {
     return { x: e.x, y: e.y, z: e.z, precise: true, tracked: true }
   }
   const wp = p?.uuid ? bot._waypoints?.get(p.uuid) : null
-  if (!wp || (Date.now() - wp.t) >= 30000) return null
+  if (!wp) return null
   const pos = bot.entity.position
   if (wp.type === 'vec3i') {
     return { x: wp.x, y: wp.y, z: wp.z, precise: true, tracked: false }
@@ -41,10 +43,16 @@ function resolvePlayerTarget(bot, username) {
   return null
 }
 
-function doFollow(username) {
+function doFollow(requested) {
+  if (!requested) { recordFailure('follow: name the player — follow:PLAYER'); return false }
   stopAll()
   const bot = state.bot
-  if (!resolvePlayerTarget(bot, username)) { sendChat("Can't see you and no locator fix on you!"); return }
+  const username = resolvePlayerName(requested)
+  if (!username || !resolvePlayerTarget(bot, username)) {
+    sendChat("Can't see you and no locator fix on you!")
+    recordFailure(`follow:${requested} failed (no such player online, or no position/locator fix)`)
+    return false
+  }
   state.currentTask = `following ${username}`
   state.followTarget = username
   let busy = false
@@ -74,11 +82,17 @@ function doFollow(username) {
   }, 1000)
 }
 
-async function doCome(username, opts = {}) {
+async function doCome(requested, opts = {}) {
+  if (!requested) { recordFailure('come: name the player — come:PLAYER'); return false }
   stopAll()
   const bot = state.bot
-  let tgt = resolvePlayerTarget(bot, username)
-  if (!tgt) { sendChat("Can't see you and no locator fix on you!"); return }
+  const username = resolvePlayerName(requested)
+  let tgt = username ? resolvePlayerTarget(bot, username) : null
+  if (!tgt) {
+    sendChat("Can't see you and no locator fix on you!")
+    recordFailure(`come:${requested} failed (no such player online, or no position/locator fix)`)
+    return false
+  }
 
   if (bot.vehicle) {
     console.log(`  come: in vehicle, using sail to ${Math.floor(tgt.x)},${Math.floor(tgt.y)},${Math.floor(tgt.z)}`)
@@ -92,14 +106,22 @@ async function doCome(username, opts = {}) {
   // precise entity tracking takes over and we do the final approach.
   const overallStart = Date.now()
   const MAX_TRIP = 180000  // hard ceiling for a long cross-terrain trek
+  const startPos = bot.entity.position.clone()
+  let ok = true
   while (!isAborted()) {
     tgt = resolvePlayerTarget(bot, username)
-    if (!tgt) { recordFailure(`come:${username} failed (lost track)`); break }
+    if (!tgt) { recordFailure(`come:${username} failed (lost track)`); ok = false; break }
     const pos = bot.entity.position
     const dist = Math.hypot(tgt.x - pos.x, tgt.y - pos.y, tgt.z - pos.z)
-    if (tgt.tracked && dist <= 3) break  // arrived — we can see them
+    if (tgt.tracked && dist <= 3) {  // arrived — we can see them
+      // Say so: a silent "done" left the model unsure it had arrived at all.
+      const walked = Math.round(pos.distanceTo(startPos))
+      logEvent(walked < 1 ? `come: already next to ${username} (${dist.toFixed(1)}m)` : `come: reached ${username} (${dist.toFixed(1)}m away, walked ${walked}m)`)
+      break
+    }
     if (Date.now() - overallStart > MAX_TRIP) {
       recordFailure(`come:${username} failed (timeout, still ${Math.round(dist)}m out)`)
+      ok = false
       break
     }
 
@@ -107,21 +129,28 @@ async function doCome(username, opts = {}) {
     // Tracked: one sized leg straight to them. Locator: short legs, re-resolve
     // often as the fix updates and the player keeps moving.
     const legTimeout = tgt.tracked ? Math.max(30000, Math.round(dist * 2000 + yD * 3000)) : 20000
-    const ok = await navigateTo(Math.floor(tgt.x), Math.floor(tgt.y), Math.floor(tgt.z),
+    const legOk = await navigateTo(Math.floor(tgt.x), Math.floor(tgt.y), Math.floor(tgt.z),
       tgt.tracked ? 2 : 6, legTimeout,
       { ...(tgt.tracked ? { reachTarget: () => bot.players[username]?.entity?.position } : { noReachCheck: true }),
         intent: opts.skipTool ? 'clear-no-tool' : 'clear' })
 
     if (tgt.tracked) {
       // We could see them and the nav still failed — that's a real, reportable failure.
-      if (!ok && !isAborted()) {
+      if (!legOk && !isAborted()) {
         const d = bot.entity.position.distanceTo(new Vec3(tgt.x, tgt.y, tgt.z))
         const reason = state.navFailReason || 'unknown'
         console.log(`  come: couldn't reach ${username} (${d.toFixed(1)}m away) — ${reason}`)
         recordFailure(`come:${username} failed (${reason})`)
         state.navFailReason = null
+        state.currentTask = null
+        return false
       }
-      break  // tracked leg is terminal whether it succeeded or failed
+      if (isAborted()) break
+      // Tracked leg is terminal: report where it left us (they may have moved).
+      const now = bot.players[username]?.entity?.position || new Vec3(tgt.x, tgt.y, tgt.z)
+      const d = bot.entity.position.distanceTo(now)
+      logEvent(`come: reached ${username} (${d.toFixed(1)}m away, walked ${Math.round(bot.entity.position.distanceTo(startPos))}m)`)
+      break
     }
     // Locator leg finished (reached the rough fix, or timed out making progress).
     // Pause a beat so entity tracking can catch up, then loop and re-resolve.
@@ -129,24 +158,27 @@ async function doCome(username, opts = {}) {
   }
   state.navFailReason = null
   state.currentTask = null
+  return ok
 }
 
 async function doFlee() {
   stopAll()
   const bot = state.bot
   state.currentTask = 'fleeing'
-  const hostile = bot.nearestEntity(e =>
-    (e.type === 'hostile' || e.type === 'mob') && e.position.distanceTo(bot.entity.position) < 32
-  )
   const pos = bot.entity.position
+  // Away from every hostile around at once, toward open floor.
+  const hostiles = Object.values(bot.entities).filter(e =>
+    e.type === 'hostile' && e.position.distanceTo(pos) < 16)
+  const { escapeDir } = require('../engine/retreat')
+  const dir = escapeDir(bot, hostiles)
   let fleeDir
-  if (hostile) {
-    fleeDir = pos.minus(hostile.position).normalize()
-    console.log(`  fleeing from ${hostile.name} at dist=${Math.round(hostile.position.distanceTo(pos))}`)
+  if (dir) {
+    fleeDir = new Vec3(dir.dx, 0, dir.dz)
+    console.log(`  fleeing from ${hostiles.length} hostile(s) toward ${dir.clear}+ blocks of open floor`)
   } else {
     const yaw = bot.entity.yaw
     fleeDir = new Vec3(-Math.sin(yaw), 0, -Math.cos(yaw))
-    console.log('  fleeing (no hostile nearby, running forward)')
+    console.log('  fleeing (no open direction known, running forward)')
   }
   const dest = pos.plus(fleeDir.scaled(30))
   bot.setControlState('sprint', true)
@@ -162,7 +194,7 @@ async function doMount(targetName) {
   const bot = state.bot
   state.currentTask = 'mounting'
   const normalized = (targetName || '').toLowerCase()
-  const entity = bot.nearestEntity(e => {
+  const entity = tagOf(targetName) ? findTagged(targetName) : bot.nearestEntity(e => {
     const n = (e.name || '').toLowerCase()
     if (normalized && normalized !== 'any') return fuzzyMatch(n, normalized)
     return n.includes('boat') || n.includes('minecart') || n.includes('horse') ||
@@ -367,7 +399,7 @@ async function doSail(target) {
   state.currentTask = null
 }
 
-const VALID_STRATEGIES = new Set(['tunnel', 'staircase', 'walk'])
+const VALID_STRATEGIES = new Set(['walk', 'pathfind', 'pillar', 'staircase', 'tunnel'])
 
 async function doGoto(target, opts = {}) {
   stopAll()
@@ -468,8 +500,8 @@ async function doStaircase(arg, opts = {}) {
   state.currentTask = `staircase ${dirName} until ${u.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await digHeading('staircase', dir, { pattern, until: u.fn, untilDesc: u.desc }, { intent })
-  if (!ok && !isAborted()) pushFail(`staircase:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
+  if (!ok && !isAborted()) { pushFail(`staircase:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
 }
 
 async function doMove(arg) {
@@ -481,8 +513,8 @@ async function doMove(arg) {
   if (!u) { pushFail(`move: bad/missing condition "${untilStr}" (use wall or Nsteps)`); return }
   state.currentTask = `move ${dirName} until ${u.desc}`
   const ok = await digHeading('move', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc })
-  if (!ok && !isAborted()) pushFail(`move:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
+  if (!ok && !isAborted()) { pushFail(`move:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
 }
 
 // Directional tunnel: dig a flat (same-Y) corridor heading DIR until a runtime
@@ -503,8 +535,8 @@ async function doTunnel(arg, opts = {}) {
   state.currentTask = `tunnel ${dirName} until ${u.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await digHeading('tunnel', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc }, { intent })
-  if (!ok && !isAborted()) pushFail(`tunnel:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`)
   state.currentTask = null
+  if (!ok && !isAborted()) { pushFail(`tunnel:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
 }
 
 const COMPASS_OFFSETS = {
@@ -564,6 +596,8 @@ async function doSwimUp() {
       const hp = headBlock.position
       if (state.stmts.isPlaced && state.stmts.isPlaced.get(hp.x, hp.y, hp.z)) {
         console.log(`  [swimup] skipping placed block at ${hp}`)
+      } else if (!require('../engine/breakPermission').mayBreak(headBlock.name, hp, 'swimup')) {
+        // no-unpermitted-breaking mode: not even to reach air
       } else {
         try { await raceAbort(bot.dig(headBlock), 30000); logGameEvent('mine', headBlock.name, 1, hp.x, hp.y, hp.z, { reason: 'swimup' }) } catch(e) { console.warn('  [SWIM] dig err:', e.message) }
       }
@@ -624,4 +658,113 @@ async function doSwimUp() {
   state.currentTask = null
 }
 
-module.exports = { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp }
+const PORTAL_SEARCH = 48
+
+// Walk straight at a block column's center until the body is within `tol` of it
+// horizontally. Plain forward-walking, so physics handles the small step-ups (a
+// chest top) that block-grid movement refuses; bumping into a full block (a
+// portal's obsidian sill seen from the ground) makes it jump.
+async function walkToColumn(bot, x, z, tol, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  try {
+    while (Date.now() < deadline) {
+      const p = bot.entity.position
+      if (Math.hypot(p.x - (x + 0.5), p.z - (z + 0.5)) <= tol) return true
+      await bot.lookAt(new Vec3(x + 0.5, p.y + 1.62, z + 0.5), true)
+      bot.setControlState('forward', true)
+      bot.setControlState('jump', bot.entity.isCollidedHorizontally)
+      await tick()
+    }
+    return false
+  } finally {
+    bot.clearControlStates()
+  }
+}
+
+// [ACTION:portal] / [ACTION:portal:X,Y,Z] — go through a nether portal. Survival
+// players only teleport after standing inside the portal for ~4s, so walking
+// through it (or stopping next to it, as goto's reach range does) never works.
+// Finds the portal in block memory, walks to the spot in front of the pane, steps
+// in, stands still and succeeds when the dimension changes.
+async function doEnterPortal(target) {
+  stopAll()
+  const bot = state.bot
+  const pos = bot.entity.position
+  const isPortal = (x, y, z) => dbBlock(x, y, z) === 'nether_portal'
+
+  let p
+  if (target) {
+    const c = target.split(',').map(Number)
+    if (c.length !== 3 || c.some(isNaN)) { recordFailure(`portal: bad coords "${target}"`); return false }
+    if (!isPortal(...c)) { recordFailure(`portal: no nether_portal known at ${target}`); return false }
+    p = { x: c[0], y: c[1], z: c[2] }
+  } else {
+    // Nearby only: block memory has no dimension, so a far "portal" may be the
+    // other dimension's portal at the same coordinates.
+    const hits = queryBlockMemory(['nether_portal'], pos).filter(h => h.dist <= PORTAL_SEARCH).sort((a, b) => a.dist - b.dist)
+    if (hits.length === 0) { recordFailure(`portal: no lit nether_portal within ${PORTAL_SEARCH}m — goto one first, or light one`); return false }
+    p = { x: hits[0].x, y: hits[0].y, z: hits[0].z }
+  }
+  // Stand in the bottom portal block of the column.
+  while (isPortal(p.x, p.y - 1, p.z)) p.y--
+
+  // You enter the pane from one of its two faces. Memory of a portal is often
+  // partial, so read the pane's axis off any portal block in the neighbouring
+  // columns (3 high), and never pick a side known to be portal or solid.
+  const portalCol = (x, z) => [0, 1, 2].some(k => isPortal(x, p.y + k, z))
+  const alongX = portalCol(p.x + 1, p.z) || portalCol(p.x - 1, p.z)
+  const alongZ = portalCol(p.x, p.z + 1) || portalCol(p.x, p.z - 1)
+  const fronts = [[0, -1], [0, 1], [-1, 0], [1, 0]]
+    .map(([dx, dz]) => ({ v: new Vec3(p.x + dx, p.y, p.z + dz), face: dx === 0 ? alongX : alongZ }))
+    .filter(({ v }) => {
+      if (portalCol(v.x, v.z)) return false
+      const n = dbBlock(v.x, v.y, v.z)
+      return n === null || PASSABLE.has(n)
+    })
+    .sort((a, b) => (b.face - a.face) || (a.v.distanceTo(pos) - b.v.distanceTo(pos)))
+    .map(f => f.v)
+
+  const startDim = bot.game.dimension
+  // Just arrived through this portal? The game won't send you back until you have
+  // stepped out of it, so leave to its face and pause before re-entering.
+  const startedInside = isPortal(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
+  state.currentTask = `entering portal at ${p.x},${p.y},${p.z}`
+  try {
+    let inFront = false
+    for (const f of fronts) {
+      const near = Math.hypot(pos.x - (f.x + 0.5), pos.z - (f.z + 0.5)) < 1.5 && Math.abs(pos.y - f.y) < 1.5
+      if (!near) {
+        const ok = await navigateTo(f.x, f.y, f.z, 1, 30000, { intent: 'clear' })
+        if (!ok) { if (isAborted()) return; continue }
+      }
+      if (await walkToColumn(bot, f.x, f.z, 0.3, 3000)) { inFront = true; break }
+    }
+    if (!inFront) { recordFailure(`portal: could not reach either face of the portal at ${p.x},${p.y},${p.z}`); return false }
+    if (startedInside) await tickWait(1500)
+
+    if (!await walkToColumn(bot, p.x, p.z, 0.25, 3000)) {
+      recordFailure(`portal: could not step into the portal at ${p.x},${p.y},${p.z}`)
+      return false
+    }
+    console.log(`  [portal] inside ${p.x},${p.y},${p.z}, waiting for the teleport`)
+    // ~4s in survival; allow for lag, and nudge back in if knocked out of the pane.
+    const deadline = Date.now() + 10000
+    while (Date.now() < deadline && bot.game.dimension === startDim) {
+      const q = bot.entity.position
+      if (Math.floor(q.x) !== p.x || Math.floor(q.z) !== p.z) await walkToColumn(bot, p.x, p.z, 0.25, 1500)
+      await tick()
+    }
+    if (bot.game.dimension === startDim) {
+      recordFailure(`portal: stood in ${p.x},${p.y},${p.z} for 10s but stayed in ${startDim} — is it still lit?`)
+      return false
+    }
+    const q = bot.entity.position
+    console.log(`  [portal] arrived in ${bot.game.dimension} at ${Math.floor(q.x)},${Math.floor(q.y)},${Math.floor(q.z)}`)
+    logEvent(`portal: ${startDim} → ${bot.game.dimension}, arrived at ${Math.floor(q.x)},${Math.floor(q.y)},${Math.floor(q.z)}`)
+    return true
+  } finally {
+    state.currentTask = null
+  }
+}
+
+module.exports = { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp, doEnterPortal }

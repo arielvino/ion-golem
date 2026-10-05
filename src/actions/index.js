@@ -3,7 +3,7 @@ const state = require('../core/state')
 const { AbortError, isAborted } = require('../core/tick')
 const { c, color } = require('../lib/colors')
 const { logEvent, normalizeItemName, recordFailure } = require('../core/utils')
-const { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp } = require('./movement')
+const { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp, doEnterPortal } = require('./movement')
 const { doAttack } = require('./combat')
 const { doMine, doCollect } = require('./mining')
 const { doDrop, doEquip, doUnequip, doGive, doRequire, doTake, doDeposit, doInspect } = require('./inventory')
@@ -13,16 +13,19 @@ const { doCraft } = require('./crafting')
 const { doSmelt } = require('./smelting')
 const { doWiki } = require('./info')
 const { doUse, doFill } = require('./interaction')
+const { doTrade } = require('./trading')
 const { doEval } = require('./eval')
+const { doDigDown, doJumpDown } = require('./descend')
 const { switchPersonality } = require('../ai/ai')
 const ranges = require('../config/ranges')
+const { entityTag } = require('../perception/entityTag')
 
 // Actions worth logging to event history (skip noisy/trivial ones)
-const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit'])
+const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit', 'trade', 'portal'])
 
 // Digging actions that accept a chained `:skiptool` suffix — the AI's escalation
 // to hand-mine through a tool-gated block instead of stopping to craft the tool.
-const SKIPTOOL_ACTIONS = new Set(['mine', 'goto', 'goto~', 'goto!', 'digto', 'come', 'staircase', 'tunnel', 'build', 'place'])
+const SKIPTOOL_ACTIONS = new Set(['mine', 'goto', 'goto~', 'goto!', 'digto', 'come', 'staircase', 'tunnel', 'digdown', 'build', 'place'])
 
 async function executeAction(actionStr, username, opts = {}) {
   // Pull a `skiptool` token out of the args wherever it sits (position-independent,
@@ -52,13 +55,13 @@ async function executeAction(actionStr, username, opts = {}) {
   let result
   try {
     switch (action) {
-      case 'follow': result = doFollow(username); break
+      case 'follow': result = doFollow(target); break
       case 'stop': {
         const engine = require('../engine/engine')
         engine.interrupt()
         break
       }
-      case 'come': result = await doCome(username, { skipTool }); break
+      case 'come': result = await doCome(target, { skipTool }); break
       case 'attack': result = await doAttack(target); break
       case 'mine': result = await doMine(target, { skipTool }); break
       case 'collect': result = await doCollect(); break
@@ -83,7 +86,7 @@ async function executeAction(actionStr, username, opts = {}) {
       case 'staircase': result = await doStaircase(target, { skipTool }); break
       case 'move': result = await doMove(target); break
       case 'tunnel': result = await doTunnel(target, { skipTool }); break
-      case 'give': result = await doGive(target, username); break
+      case 'give': result = await doGive(target); break
       case 'wiki': result = await doWiki(target); break
       case 'flee': result = await doFlee(); break
       case 'mount': result = await doMount(target); break
@@ -94,7 +97,11 @@ async function executeAction(actionStr, username, opts = {}) {
       case 'face': result = await doTurn(target); break
       case 'fill': result = await doFill(target); break
       case 'swimup': result = await doSwimUp(); break
+      case 'portal': result = await doEnterPortal(target); break
+      case 'digdown': result = await doDigDown(target, { skipTool }); break
+      case 'jumpdown': result = await doJumpDown(target); break
       case 'use': result = await doUse(target); break
+      case 'trade': result = await doTrade(target); break
       case 'eval': result = await doEval(target); break
       case 'require': result = await doRequire(target); break
       case 'take': result = await doTake(target); break
@@ -124,7 +131,7 @@ async function executeAction(actionStr, username, opts = {}) {
           const dist = lookBot.entity.position.distanceTo(e.position)
           if (dist > ranges.sight.lookEntities) continue
           const visible = hasLineOfSight(eyePos, e.position, e.height || 1.8)
-          found.push({ name: e.username || e.name, type: 'entity', x: Math.floor(e.position.x), y: Math.floor(e.position.y), z: Math.floor(e.position.z), dist: Math.round(dist), visible })
+          found.push({ name: entityTag(e), type: 'entity', x: Math.floor(e.position.x), y: Math.floor(e.position.y), z: Math.floor(e.position.z), dist: Math.round(dist), visible })
         }
 
         // Search blocks: palette-skip scan of loaded chunks (cheap to full range),
@@ -189,6 +196,20 @@ async function executeAction(actionStr, username, opts = {}) {
         } else {
           debugChat('[view] no bot/entity yet')
         }
+        break
+      }
+      case 'places': case 'recognize': {
+        // "What kind of place is around me?" — fingerprint cues, LOS-gated, grouped, guessed.
+        // target: search radius in blocks (default 48).
+        const { recognize, formatRecognition } = require('../perception/recognize')
+        const { debugChat } = require('../core/utils')
+        const r = parseInt(target, 10)
+        const result = recognize(Number.isFinite(r) ? { maxDistance: r } : {})
+        const text = formatRecognition(result)
+        state.lastObservation = { ts: Date.now(), text }
+        debugChat(`[places] ${text}`)
+        console.log(`  [places] ${text}`)
+        if (result) console.log(`  [places] ${result.visible} visible cues / ${result.losTests} los / ${result.candidates} scanned in ${result.ms}ms`)
         break
       }
       case 'personality': {

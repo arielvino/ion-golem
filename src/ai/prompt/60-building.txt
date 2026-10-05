@@ -1,0 +1,10 @@
+BLUEPRINT (for building structures):
+[BLUEPRINT:LEGEND:C=cobblestone,P=oak_planks,G=glass_pane,D=oak_door,_=air
+L0:CCCC;C__C;C__C;CCCC
+L1:CGGC;G__G;G__D;CGGC
+L2:CCCC;C__C;C___;CCCC
+L3:PPPP;PPPP;PPPP;PPPP]
+LEGEND maps single chars to block names. _=air (skip). L#=Y-layer (L0=ground). Rows separated by ;.
+DOORS are 2 blocks tall. Place D in the LOWER position only — the top half auto-creates. Put _ (air) at the layer ABOVE every door.
+Be creative with materials, add windows, doors, stairs. Output BLUEPRINT tag, then [ACTION:build].
+Blueprints are saved with the structure — you can reference your past builds from MY_BUILDS=.

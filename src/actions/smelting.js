@@ -1,10 +1,8 @@
 // Smelting actions — smelt items in a furnace, plus the smeltable-item classifier
-const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { tickWait, AbortError, isAborted } = require('../core/tick')
-const { navigateTo } = require('../navigation/navigation')
-const { saveContainerState, logGameEvent, queryUtilityBlocks } = require('../world/memory')
-const { reachDbUtilityBlock } = require('./utilityBlocks')
+const { saveContainerState, logGameEvent } = require('../world/memory')
+const { findKnownBlocks, reachKnownBlock } = require('../perception/touch')
 const { fuelRates, fuelNames } = require('../config/constants')
 const smeltableData = require('../config/smeltable.json')
 const { c, color } = require('../lib/colors')
@@ -26,35 +24,33 @@ function isSmeltable(itemName) {
 
 async function doSmelt(targetName) {
   const bot = state.bot
-  const mcData = require('minecraft-data')(bot.version)
   const normalized = normalizeItemName(targetName)
   state.currentTask = `smelting ${targetName}`
   let smeltOk = false  // set true once we successfully load the furnace and run the smelt
 
-  let furnaceBlock = bot.findBlock({ matching: mcData.blocksByName.furnace?.id, maxDistance: 64 })
-
-  if (!furnaceBlock) {
-    // Search DB for known furnaces
-    const dbFurnaces = queryUtilityBlocks(bot.entity.position, 10).filter(u => u.name === 'furnace')
-    for (const f of dbFurnaces) {
-      const dist = Math.round(bot.entity.position.distanceTo(new Vec3(f.x, f.y, f.z)))
-      console.log(`  [DB] known furnace at ${f.x},${f.y},${f.z} (${dist}m away)`)
-      if (dist < 200) {
-        const yD = Math.abs(f.y - bot.entity.position.y)
-        furnaceBlock = await reachDbUtilityBlock('furnace', f, Math.max(30000, dist * 2000 + yD * 3000))
-        if (furnaceBlock) break
-      }
-    }
-  }
-
-  if (!furnaceBlock) {
+  // A furnace the bot has seen (now or before), walked up to and in reach and sight.
+  const known = findKnownBlocks(['furnace'], { maxDistance: 200, count: 3 })
+  if (known.length === 0) {
     sendChat('No furnace found! Craft one with 8 cobblestone.')
-    recordFailure('smelt - no furnace available. Craft a furnace first (8 cobblestone).')
+    recordFailure('smelt - no furnace seen nearby. Craft a furnace (8 cobblestone), or go where one is.')
     state.currentTask = null; return false
   }
-
-  await navigateTo(furnaceBlock.position.x, furnaceBlock.position.y, furnaceBlock.position.z, 2, 45000)
-  if (isAborted()) { state.currentTask = null; return false }
+  let furnaceBlock = null
+  const why = []
+  for (const k of known) {
+    const dist = Math.round(bot.entity.position.distanceTo(k.pos))
+    const yD = Math.abs(k.pos.y - bot.entity.position.y)
+    console.log(`  known furnace at ${k.pos.x},${k.pos.y},${k.pos.z} (${dist}m, seen ${k.seen})`)
+    const r = await reachKnownBlock(k.pos, b => b.name === 'furnace', 'furnace', Math.max(30000, dist * 2000 + yD * 3000))
+    if (isAborted()) { state.currentTask = null; return false }
+    if (r.block) { furnaceBlock = r.block; break }
+    console.log(`  ${r.why}`)
+    why.push(r.why)
+  }
+  if (!furnaceBlock) {
+    recordFailure(`smelt - couldn't get to a furnace: ${why.join('; ')}`)
+    state.currentTask = null; return false
+  }
 
   function getFuelRate(name) {
     if (fuelRates[name]) return fuelRates[name]
@@ -91,7 +87,7 @@ async function doSmelt(targetName) {
     if (inputItem && !isSmeltable(inputItem.name)) {
       sendChat(`Can't smelt ${inputItem.name} — not a valid furnace input!`)
       console.log(`  rejected smelting ${inputItem.name} (not smeltable)`)
-      recordFailure(`smelt:${targetName} - ${inputItem.name} cannot be smelted. Smeltable items: raw ores, ore blocks, food (raw_beef etc), logs (→charcoal), sand, cobblestone, clay_ball, iron/gold gear (→nuggets).`)
+      recordFailure(`smelt:${targetName} - ${inputItem.name} cannot be smelted. Smeltable items: raw ores, ore blocks, raw meat and fish (porkchop, beef, chicken, mutton, rabbit, cod, salmon), potato, kelp, logs (→charcoal), sand, cobblestone, clay_ball, iron/gold gear (→nuggets).`)
       furnace.close()
       state.currentTask = null
       return false

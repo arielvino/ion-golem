@@ -2,20 +2,67 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { TRANSPARENT, NOTABLE_TRANSPARENT, PASSABLE, HAZARDS, RESOURCES } = require('../config/blocks')
+const fw = require('./fastworld')
+
+// Resolve a name Set to its state-id lookup table (see fastworld.js). Returns null for
+// an unrecognised set so callers can fall back to the original blockAt path.
+// PERCEPTION_SLOW=1 forces the original bot.blockAt path — used by tools/verify-vision.js
+// to differential-test the two implementations against each other.
+const _forceSlow = process.env.PERCEPTION_SLOW === '1'
+
+// This runs once per voxel step, so it has to be a Map hit and nothing more. An earlier
+// version called require('minecraft-data')(version) here; module resolution plus the
+// registry factory made the "fast" path 7x slower than the blockAt it replaced.
+let _mcVer = null
+let _mcData = null
+const _lutBySet = new Map()
+
+function _lutFor(nameSet) {
+  if (_forceSlow) return null
+  const v = state.bot?.version
+  if (!v) return null
+  if (v !== _mcVer) {
+    _mcVer = v
+    _lutBySet.clear()
+    try { _mcData = require('minecraft-data')(v) } catch (e) { _mcData = null }
+  }
+  if (!_mcData) return null
+  let lut = _lutBySet.get(nameSet)
+  if (lut === undefined) {
+    try { lut = fw.stateLUT(_mcData, nameSet) } catch (e) { lut = null }
+    _lutBySet.set(nameSet, lut)
+  }
+  return lut
+}
 
 // Shared diagonal-passage check for voxel raycasting.
 // Returns true if the diagonal step from (px,py,pz) to (bx,by,bz) is blocked.
 // For 2D diagonals: checks if both corner blocks are solid.
 // For 3D diagonals: checks all 6 faces of the corner cube (2 per axis pair).
-function isDiagBlocked(bot, px, py, pz, bx, by, bz, passSet) {
+// Up to 8 solidity probes per diagonal step, so this is the single largest consumer of
+// block reads in the whole perception path — it goes through fastworld, not blockAt.
+function isDiagBlocked(bot, px, py, pz, bx, by, bz, passSet, lutHint) {
   const dx = bx !== px, dy = by !== py, dz = bz !== pz
   if (dx + dy + dz < 2) return false
-  const isSolid = (x, y, z) => {
-    try {
-      const b = bot.blockAt(new Vec3(x, y, z))
-      return b && !passSet.has(b.name)
-    } catch (e) { return true }
-  }
+  // Callers in a loop (_rayClear) resolve the LUT once and pass it down; the early-out
+  // above means most steps never get here, so the lookup is only skipped where it counts.
+  const lut = lutHint !== undefined ? lutHint : _lutFor(passSet)
+  // Unloaded must read NOT-solid here: the original probe was `b && !passSet.has(b.name)`,
+  // and blockAt returns null off the loaded edge, so a missing column never blocked a
+  // diagonal. inLUT collapses unloaded and non-member to the same false, so this reads
+  // the sentinel directly rather than going through it.
+  const isSolid = lut
+    ? (x, y, z) => {
+      const id = fw.getState(x, y, z)
+      if (id < 0) return false                      // UNLOADED or EMPTY_SECTION → passable
+      return !(id < lut.length && lut[id] === 1)
+    }
+    : (x, y, z) => {
+      try {
+        const b = bot.blockAt(new Vec3(x, y, z))
+        return b && !passSet.has(b.name)
+      } catch (e) { return true }
+    }
   // XZ faces
   if (dx && dz) {
     if (isSolid(bx, py, pz) && isSolid(px, py, bz)) return true
@@ -191,6 +238,11 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
   const seen = new Set()
   const solid = new Set()
   const passThrough = mode === 'reach' ? PASSABLE : TRANSPARENT
+  // null under PERCEPTION_SLOW, which drops the loop back to bot.blockAt so
+  // tools/verify-vision.js can diff the two implementations.
+  const rayNames = _forceSlow ? null : (() => {
+    try { return fw.stateNames(require('minecraft-data')(bot.version)) } catch (e) { return null }
+  })()
   const reachMap = new Map() // key -> 'yes' | null (null = needs resolution)
 
   for (let ri = 0; ri < dirs.length; ri++) {
@@ -220,12 +272,20 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         continue
       }
 
-      let block
-      try { block = bot.blockAt(new Vec3(bx, by, bz)) } catch(e) { break }
-      if (!block) break
+      // Only `.name` is ever read from the block here, so this goes through fastworld
+      // rather than building a full prismarine Block per ray step. Both return
+      // null/undefined for an unloaded column, which ends the ray exactly as before.
+      let name
+      if (rayNames) {
+        name = fw.nameAt(rayNames, bx, by, bz)
+        if (!name) break
+      } else {
+        let block
+        try { block = bot.blockAt(new Vec3(bx, by, bz)) } catch(e) { break }
+        if (!block) break
+        name = block.name
+      }
       seen.add(key)
-
-      const name = block.name
       if (passThrough.has(name)) {
         if (passageBlocked) break
         airCount++
@@ -395,7 +455,7 @@ function formatVision(v, opts = {}) {
     const blockStrs = entries.slice(0, 20).map(([name, r]) => {
       const at = r.nearest
       return r.count > 1
-        ? `${_shorten(name)}x${r.count}@${at.x},${at.y},${at.z}`
+        ? `${_shorten(name)}x${r.many ? 'many' : r.count}@${at.x},${at.y},${at.z}`
         : `${_shorten(name)}@${at.x},${at.y},${at.z}`
     })
     if (blockStrs.length) parts.push(`see=[${blockStrs.join(',')}]`)
@@ -469,13 +529,23 @@ function formatVision(v, opts = {}) {
 function _rayClear(from, to, blockSet) {
   const allowSet = blockSet || TRANSPARENT
   const bot = state.bot
+  const lut = _lutFor(allowSet)
   for (const [bx, by, bz, lastBx, lastBy, lastBz] of voxelCells(from, to)) {
-    if (isDiagBlocked(bot, lastBx, lastBy, lastBz, bx, by, bz, allowSet)) return false
-    try {
-      const b = bot.blockAt(new Vec3(bx, by, bz))
-      if (!b) return false
-      if (!allowSet.has(b.name)) return false
-    } catch (e) { return false }
+    if (isDiagBlocked(bot, lastBx, lastBy, lastBz, bx, by, bz, allowSet, lut)) return false
+    if (lut) {
+      // Sentinels preserve the original behaviour exactly: a null blockAt (unloaded
+      // column) blocked the ray, an air section did not.
+      const id = fw.getState(bx, by, bz)
+      if (id === fw.EMPTY_SECTION) continue
+      if (id < 0) return false
+      if (!(id < lut.length && lut[id] === 1)) return false
+    } else {
+      try {
+        const b = bot.blockAt(new Vec3(bx, by, bz))
+        if (!b) return false
+        if (!allowSet.has(b.name)) return false
+      } catch (e) { return false }
+    }
   }
   return true
 }

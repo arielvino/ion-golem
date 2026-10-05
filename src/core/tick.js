@@ -72,13 +72,14 @@ function isAborted() { return state.abortSignal }
 // timer are cleaned up automatically on natural settle; callers that race this
 // against abort (via raceAbort) should also call the returned promise's .cancel()
 // in a finally so the abort path doesn't leak the listener/timer. Returns the
-// awaitable promise, with a .cancel() method attached.
-function waitForEventOrTimeout(bot, event, ms, onTimeout) {
+// awaitable promise, with a .cancel() method attached. accept (optional) filters
+// events: one it rejects is ignored and the wait goes on.
+function waitForEventOrTimeout(bot, event, ms, onTimeout, accept) {
   let timer = null, onEvent = null
   const promise = new Promise((resolve) => {
-    onEvent = () => resolve()
+    onEvent = (...args) => { if (!accept || accept(...args)) resolve() }
     timer = setTimeout(() => { if (onTimeout) onTimeout(); resolve() }, ms)
-    bot.once(event, onEvent)
+    bot.on(event, onEvent)
   })
   promise.cancel = () => {
     if (timer) { clearTimeout(timer); timer = null }

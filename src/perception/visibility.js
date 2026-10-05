@@ -13,9 +13,11 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { rayClear, hasLineOfSight } = require('./vision')
 const { scanCandidates } = require('./chunkScan')
+const fw = require('./fastworld')
 const { HAZARDS, RESOURCES } = require('../config/blocks')
 
 const DEG = Math.PI / 180
+const _slow = process.env.PERCEPTION_SLOW === '1'   // see vision.js — differential-test escape hatch
 
 // Mineflayer's authoritative view direction (node_modules/mineflayer/lib/plugins/ray_trace.js:29).
 function viewVector(bot) {
@@ -45,7 +47,8 @@ function inFov(eye, look, point, cosHalf) {
 // block from occluding itself, and (vs corners) avoids 1px-sliver false positives.
 // This is an approximation of true per-pixel visibility, deliberately: a block that is
 // ~95% occluded may read as unseen, which is harmless for awareness/navigation.
-function blockVisible(eye, bx, by, bz) {
+// `passSet` overrides which blocks the sightline passes through (default: see-through).
+function blockVisible(eye, bx, by, bz, passSet) {
   const faces = []
   if (eye.x > bx + 1) faces.push({ d: eye.x - (bx + 1), p: new Vec3(bx + 1, by + 0.5, bz + 0.5) })
   else if (eye.x < bx) faces.push({ d: bx - eye.x, p: new Vec3(bx, by + 0.5, bz + 0.5) })
@@ -57,7 +60,7 @@ function blockVisible(eye, bx, by, bz) {
   if (faces.length === 0) return true // eye sits within the block's cell on every axis
   faces.sort((a, b) => b.d - a.d) // most face-on first → best early-exit odds
   for (const f of faces) {
-    if (rayClear(eye, f.p)) return true
+    if (rayClear(eye, f.p, passSet)) return true
   }
   return false
 }
@@ -147,7 +150,7 @@ function getLastSurvey() { return _lastSurvey }
 
 // Voxel-walk the clear sightline eye→(block center), recording the real name of
 // each integer cell strictly before the solid. Cells already in `seen` are skipped.
-function _markSightline(eye, cnd, seen, writes) {
+function _markSightline(eye, cnd, seen, writes, names) {
   const bot = state.bot
   const tx = cnd.x + 0.5, ty = cnd.y + 0.5, tz = cnd.z + 0.5
   const dx = tx - eye.x, dy = ty - eye.y, dz = tz - eye.z
@@ -164,24 +167,47 @@ function _markSightline(eye, cnd, seen, writes) {
     lastKey = key
     if (seen.has(key)) continue
     seen.add(key)
-    let name = 'air'
-    try { const b = bot.blockAt(new Vec3(bx, by, bz)); if (b) name = b.name } catch (e) { continue }
+    // Was bot.blockAt per cell purely to read `.name`. fastworld returns null for an
+    // unloaded column, which the old code also recorded as 'air' (blockAt → null left
+    // the initialiser untouched), so the fallback preserves that.
+    let name
+    if (_slow) {
+      name = 'air'
+      try { const b = bot.blockAt(new Vec3(bx, by, bz)); if (b) name = b.name } catch (e) { continue }
+    } else {
+      name = fw.nameAt(names, bx, by, bz) || 'air'
+    }
     writes.push({ x: bx, y: by, z: bz, name })
     n++
   }
   return n
 }
 
-function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = 2000 } = {}) {
+// The candidate cap, not maxDistance, bounds how much the bot actually learns per survey:
+// scanCandidates sorts nearest-first and slices to `count`, so once the cap binds, extra
+// radius is scanned and thrown away (measured: at cap 2000, r16 and r64 returned the
+// identical 2000 candidates while scan cost went 3.1ms -> 81.0ms).
+//
+// Raised 2000 -> 4000 now that the fastworld rewrite made the per-candidate cost ~5x
+// cheaper. Effect by call site: the r16-r20 surveys in navigation.js stop being capped at
+// all (only ~2400 exposed candidates exist within r16, so they now get complete coverage),
+// and the r32 surveys double their coverage. Measured r32/cap4000 = ~62ms, still below the
+// ~82ms the ORIGINAL r32/cap2000 cost before the perf work.
+const NAV_CANDIDATE_CAP = 4000
+
+function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = NAV_CANDIDATE_CAP } = {}) {
   const bot = state.bot
   if (!bot?.entity || !state.stmts?.upsertBlock || !state.db) return null
   const eye = bot.entity.position.offset(0, 1.62, 0)
 
+  const t0 = performance.now()
   let candidates = []
   try { candidates = scanCandidates({ origin: eye, cosHalf: -1, maxDistance, count: maxCandidates }) }
   catch (e) { return null }
 
+  const t1 = performance.now()
   const tick = bot.time?.age || 0
+  const names = fw.stateNames(require('minecraft-data')(bot.version))
   const writes = []         // {x,y,z,name}
   const seen = new Set()    // "x,y,z" dedup across solids + sightline cells
   let solids = 0, passables = 0, losTests = 0
@@ -190,16 +216,23 @@ function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = 20
     if (!blockVisible(eye, cnd.x, cnd.y, cnd.z)) continue
     const sk = cnd.x + ',' + cnd.y + ',' + cnd.z
     if (!seen.has(sk)) { seen.add(sk); writes.push({ x: cnd.x, y: cnd.y, z: cnd.z, name: cnd.name }); solids++ }
-    if (cnd.dist <= passableRange) passables += _markSightline(eye, cnd, seen, writes)
+    if (cnd.dist <= passableRange) passables += _markSightline(eye, cnd, seen, writes, names)
   }
 
+  const t2 = performance.now()
   try {
     state.db.transaction(() => {
       for (const w of writes) state.stmts.upsertBlock.run(w.x, w.y, w.z, w.name, tick)
     })()
   } catch (e) { console.warn('  [navSurvey] upsert err:', e.message); return null }
+  const t3 = performance.now()
 
-  return { solids, passables, losTests, candidates: candidates.length, writes: writes.length }
+  return {
+    solids, passables, losTests, candidates: candidates.length, writes: writes.length,
+    // phase timings (ms) — scan = chunk candidate discovery, los = visibility raycasts
+    // + sightline marking, write = the sqlite upsert transaction.
+    tScan: t1 - t0, tLos: t2 - t1, tWrite: t3 - t2, tTotal: t3 - t0,
+  }
 }
 
 const SHORTEN = (n) => n.replace('deepslate_', 'deep_').replace('_leaves', '_leaf').replace('_planks', '_plk')
