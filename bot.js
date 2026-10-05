@@ -450,6 +450,9 @@ function createBot() {
       require('./src/engine/engine').processActionQueue()
       return
     }
+    // With model calls paused nothing would answer, so say so from code. The message is still
+    // queued below and reaches the AI once it is back on.
+    if (state.aiPaused) require('./src/core/utils').sendChat(`[ai] AI is off, so I can't answer right now.${state.debugMode ? ' "!ai on" turns it back on.' : ''}`)
     logChatDB('chat', username, message)
     state.noActionRounds = 0
     // Soft interrupt: abort self-loop AI call (if running) to free the provider,
