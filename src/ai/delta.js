@@ -4,13 +4,13 @@
 // is simply stated. Pure: snapshot in, one line out.
 
 // The fields worth diffing, from values context.js already computes.
-function snapshot({ pos, hp, food, held, inv, armor, vehicle, task, seen, drops = {}, players = {}, now = Date.now() }) {
+function snapshot({ pos, hp, food, held, offhand, inv, armor, vehicle, task, seen, drops = {}, players = {}, now = Date.now() }) {
   return {
     t: now,
     pos: { x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) },
     // A running task shows its elapsed time ('bg:goto:… (13s, walking)'); drop it,
     // or the same task reads as changed every turn.
-    hp: Math.round(hp), food: Math.round(food), held, task: String(task).replace(/\(\d+s,\s*/, '('), vehicle,
+    hp: Math.round(hp), food: Math.round(food), held, offhand, task: String(task).replace(/\(\d+s,\s*/, '('), vehicle,
     inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(), drops: { ...drops }, players: { ...players },
   }
 }
@@ -40,6 +40,7 @@ function renderDelta(prev, cur) {
   if (items.length) parts.push(items.join(', '))
 
   if (cur.held !== prev.held) parts.push(`held ${prev.held}→${cur.held}`)
+  if (cur.offhand !== prev.offhand) parts.push(`offhand ${prev.offhand}→${cur.offhand}`)
   if (cur.armor.join() !== prev.armor.join()) parts.push(`armor [${prev.armor.join(',') || 'none'}]→[${cur.armor.join(',') || 'none'}]`)
   if (cur.vehicle !== prev.vehicle) parts.push(`${prev.vehicle}→${cur.vehicle}`)
   if (cur.task !== prev.task) parts.push(`task ${prev.task}→${cur.task}`)

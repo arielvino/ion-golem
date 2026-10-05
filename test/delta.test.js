@@ -3,7 +3,7 @@ const test = require('node:test')
 const assert = require('node:assert')
 const { snapshot, renderDelta } = require('../src/ai/delta')
 
-const base = { pos: { x: 108.5, y: 118, z: 108.5 }, hp: 19, food: 20, held: 'stone_pickaxe',
+const base = { pos: { x: 108.5, y: 118, z: 108.5 }, hp: 19, food: 20, held: 'stone_pickaxe', offhand: 'nothing',
   inv: { stone_pickaxe: 1, dirt: 3 }, armor: [], vehicle: 'ON_FOOT', task: 'idle', seen: ['Sargon564', 'cow'], now: 1000 }
 
 test('no previous turn → no delta; identical → says nothing changed', () => {
@@ -19,6 +19,12 @@ test('a fall, an item change and a mob coming into view read as one line', () =>
   assert.strictEqual(renderDelta(a, b),
     'since last turn (12s): moved 108,118,108→109,101,108 (17m, -17y) | HP 19→5 | -2 dirt, +1 copper_pickaxe | ' +
     'held stone_pickaxe→copper_pickaxe | task idle→bg:goto | new nearby: zombie | gone from nearby: Sargon564')
+})
+
+test('a shield moved to the off-hand reads as moved, not lost', () => {
+  const a = snapshot({ ...base, inv: { stone_pickaxe: 1, dirt: 3, shield: 1 } })
+  const b = snapshot({ ...base, offhand: 'shield', now: 3000 })
+  assert.strictEqual(renderDelta(a, b), 'since last turn (2s): -1 shield | offhand nothing→shield')
 })
 
 test('a running task is the same task while only its timer moves', () => {

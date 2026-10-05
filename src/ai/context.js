@@ -24,6 +24,7 @@ function getBotContext() {
   const bot = state.bot
   const pos = bot.entity.position
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
+  const offhand = bot.inventory.slots[45]?.name || 'nothing'
   const inv = bot.inventory.items().map(i => `${i.name}x${i.count}`).join(', ') || 'empty'
   const armorSlots = [
     bot.inventory.slots[5], bot.inventory.slots[6],
@@ -292,13 +293,13 @@ function getBotContext() {
   // What changed since the context of the previous turn.
   const invCounts = {}
   for (const i of bot.inventory.items()) invCounts[i.name] = (invCounts[i.name] || 0) + i.count
-  const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, inv: invCounts, armor: armorSlots,
+  const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, offhand, inv: invCounts, armor: armorSlots,
     vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops, players: playerDist })
   const delta = renderDelta(state.prevSnapshot, snap)
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} offhand=${offhand} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }
