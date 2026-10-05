@@ -65,7 +65,8 @@ function initDB() {
       name TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       blueprint TEXT,
-      origin_x INTEGER, origin_y INTEGER, origin_z INTEGER
+      origin_x INTEGER, origin_y INTEGER, origin_z INTEGER,
+      dim TEXT NOT NULL DEFAULT 'overworld'
     );
     CREATE TABLE IF NOT EXISTS containers (
       dim TEXT NOT NULL,
@@ -119,7 +120,8 @@ function initDB() {
       target TEXT NOT NULL,
       count INTEGER DEFAULT 1,
       x INTEGER, y INTEGER, z INTEGER,
-      detail TEXT
+      detail TEXT,
+      dim TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_events_tick ON events(game_tick);
     CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
