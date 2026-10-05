@@ -1,9 +1,9 @@
 // defendMode.js — "defend" mode: strike hostiles first instead of waiting to be hit.
 //
-// Off by default. When a player switches it on (`!defend on`), the autonomous layer
-// attacks any hostile that comes within DEFEND_RANGE in line of sight, with no model
-// turn in between. Off, the bot only fights back once it takes damage. Persisted per
-// bot like the break mode.
+// On by default: the autonomous layer attacks any hostile that comes within
+// DEFEND_RANGE in line of sight, with no model turn in between. A player can switch it
+// off (`!defend off`); off, the bot only fights back once it takes damage. Persisted
+// per bot like the break mode.
 const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
@@ -14,8 +14,8 @@ function modeFile() { return state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 
 
 function isOn() {
   if (state.defendMode === undefined) {
-    state.defendMode = false
-    try { const f = modeFile(); if (f && fs.existsSync(f)) state.defendMode = JSON.parse(fs.readFileSync(f, 'utf8')).on === true } catch (e) {}
+    state.defendMode = true
+    try { const f = modeFile(); if (f && fs.existsSync(f)) state.defendMode = JSON.parse(fs.readFileSync(f, 'utf8')).on !== false } catch (e) {}
   }
   return state.defendMode
 }
