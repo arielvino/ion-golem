@@ -9,7 +9,7 @@ const { logGameEvent, queryBlockMemory } = require('../world/memory')
 const { dbBlock } = require('../navigation/atomicSteps')
 const { tagOf, findTagged } = require('../perception/entityTag')
 const { OXYGEN_SURFACED } = require('../config/safety')
-const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
+const { WATER_BLOCKS, STRUCTURAL_AIR, PASSABLE } = require('../config/blocks')
 
 // Best-known position of a player. If their entity is in render range we have
 // exact, tracked coords. Otherwise fall back to the Locator Bar waypoint the
@@ -708,12 +708,21 @@ async function doEnterPortal(target) {
   // Stand in the bottom portal block of the column.
   while (isPortal(p.x, p.y - 1, p.z)) p.y--
 
-  // The pane runs along x or z; you enter it from either face, along the other axis.
-  const alongX = isPortal(p.x + 1, p.y, p.z) || isPortal(p.x - 1, p.y, p.z)
-  const fronts = (alongX
-    ? [new Vec3(p.x, p.y, p.z - 1), new Vec3(p.x, p.y, p.z + 1)]
-    : [new Vec3(p.x - 1, p.y, p.z), new Vec3(p.x + 1, p.y, p.z)]
-  ).sort((a, b) => a.distanceTo(pos) - b.distanceTo(pos))
+  // You enter the pane from one of its two faces. Memory of a portal is often
+  // partial, so read the pane's axis off any portal block in the neighbouring
+  // columns (3 high), and never pick a side known to be portal or solid.
+  const portalCol = (x, z) => [0, 1, 2].some(k => isPortal(x, p.y + k, z))
+  const alongX = portalCol(p.x + 1, p.z) || portalCol(p.x - 1, p.z)
+  const alongZ = portalCol(p.x, p.z + 1) || portalCol(p.x, p.z - 1)
+  const fronts = [[0, -1], [0, 1], [-1, 0], [1, 0]]
+    .map(([dx, dz]) => ({ v: new Vec3(p.x + dx, p.y, p.z + dz), face: dx === 0 ? alongX : alongZ }))
+    .filter(({ v }) => {
+      if (portalCol(v.x, v.z)) return false
+      const n = dbBlock(v.x, v.y, v.z)
+      return n === null || PASSABLE.has(n)
+    })
+    .sort((a, b) => (b.face - a.face) || (a.v.distanceTo(pos) - b.v.distanceTo(pos)))
+    .map(f => f.v)
 
   const startDim = bot.game.dimension
   // Just arrived through this portal? The game won't send you back until you have
