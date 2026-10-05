@@ -54,11 +54,12 @@ function setupAutonomous(interruptFn) {
   // No cooldown between fights: the next hostile is engaged as soon as pvp drops the
   // last one. Only an attack still launching (target alive) holds off a second one.
   let pending = null, pendingAt = 0
+  // True when it launched an attack.
   function autoFight(attacker, logLine, chatLine) {
     // Running from a swarm (the reflex or a flee action) beats turning to fight.
-    if (bot.pvp.target || state.retreating || state.currentTask === 'fleeing') return
-    if (state.creeperReflex) return   // a creeper is fusing: block or run first, fight after
-    if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return
+    if (bot.pvp.target || state.retreating || state.currentTask === 'fleeing') return false
+    if (state.creeperReflex) return false   // a creeper is fusing: block or run first, fight after
+    if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return false
     pending = attacker; pendingAt = Date.now()
     console.log(`  [AUTO] ${logLine}`)
     require('../core/utils').logEvent(`reflex: ${logLine} → attack:${entityTag(attacker)}`)
@@ -70,6 +71,7 @@ function setupAutonomous(interruptFn) {
       state.actionQueue.unshift({ actionStr: `attack:${entityTag(attacker)}`, username: 'auto' })
       require('./engine').processActionQueue()
     }, T.QUEUE_PREPEND_DELAY)
+    return true
   }
 
   // --- DEFEND MODE (opt-in, !defend on): strike a hostile on sight, before it hits ---
@@ -88,6 +90,20 @@ function setupAutonomous(interruptFn) {
   let lastEnvDamage = 0
   bot.on('entityHurt', (entity) => {
     if (entity !== bot.entity) return
+
+    // A projectile: the guard knows what it was, where it came from and who shot it,
+    // at any range. Fight back if the shooter is a mob.
+    const shot = require('./projectileGuard').takeShot()
+    if (shot) {
+      const s = shot.shooter
+      const fought = s && !s.username && (s.type === 'hostile' || s.type === 'mob') &&
+        autoFight(s, `hit by ${shot.text}`, `Hit by a ${shot.name} from ${shot.from}!`)
+      if (!fought) {
+        console.log(`  [AUTO] hit by ${shot.text}, HP=${Math.round(bot.health)}`)
+        require('../core/utils').logEvent(`hit by ${shot.text}`)
+      }
+      return
+    }
 
     // Check for nearby hostile attacker (mineflayer doesn't provide source)
     // An archer hits from range: one in sight counts too.
@@ -114,7 +130,8 @@ function setupAutonomous(interruptFn) {
     const onCactus = belowBlock && belowBlock.name === 'cactus'
     const onMagma = belowBlock && belowBlock.name === 'magma_block'
     const vel = bot.entity.velocity
-    const wasFall = vel && vel.y > -0.1 && !inFire && !inLava && !onCactus && !onMagma && bot.oxygenLevel > OXYGEN_FALL_SAFE
+    const burning = (bot.entity.metadata?.[0] & 1) === 1   // shared flags: on fire
+    const wasFall = vel && vel.y > -0.1 && !inFire && !inLava && !onCactus && !onMagma && !burning && bot.oxygenLevel > OXYGEN_FALL_SAFE
 
     if (inLava) {
       console.log(`  [AUTO] LAVA DAMAGE! HP=${Math.round(bot.health)}, fleeing`)
@@ -150,6 +167,8 @@ function setupAutonomous(interruptFn) {
       console.log(`  [AUTO] cactus damage, stepping away`)
       bot.setControlState('back', true)
       setTimeout(() => { try { bot.setControlState('back', false) } catch(e) {} }, 500)
+    } else if (burning) {
+      console.log(`  [AUTO] burning, HP=${Math.round(bot.health)}`)
     } else if (wasFall) {
       console.log(`  [AUTO] fall damage, HP=${Math.round(bot.health)}`)
     } else {

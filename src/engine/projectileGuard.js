@@ -32,6 +32,23 @@ const DODGE_LEAD = 20     // start sidestepping this many ticks before impact
 const DODGE_MAX = 20      // never strafe longer than this for one projectile
 const SHIELD_HOLD_MS = 300
 const SUMMARY_AFTER_MS = 3000
+const GONE_KEEP_MS = 2000   // a destroyed projectile stays known this long, for its damage_event
+const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']   // +x east, +z south
+
+// Which way it came from: against its flight, 'the E', or 'above' if it fell steeply.
+function cameFrom(vel) {
+  const s = vel.norm()
+  if (s < 1e-9) return 'nowhere'
+  if (vel.y < -0.7 * s) return 'above'
+  if (vel.y > 0.7 * s) return 'below'
+  const a = Math.atan2(-vel.z, -vel.x)
+  return 'the ' + COMPASS[(Math.round(a / (Math.PI / 4)) + 8) % 8]
+}
+
+// The projectile behind the bot's latest damage, set by the guard's damage_event
+// listener just before mineflayer emits entityHurt for the same packet.
+let lastShot = null
+function takeShot() { const s = lastShot; lastShot = null; return s }
 
 // Ticks into the segment p→q at which it enters the box, or null. Slab test.
 function segmentHitsBox(p, q, min, max) {
@@ -70,12 +87,12 @@ function setupProjectileGuard() {
   const tracked = new Map()   // id → { name, owner, pos, vel, at, seen, origin, answered, swings, dodged }
   let raised = false, lastShieldThreat = 0
   let dodge = null            // { id, dir: Vec3, until }
-  let lastHurtTick = -100
+  const gone = new Map()      // id → tracked entry, kept GONE_KEEP_MS after entity_destroy
   // Per shooter, one journal record per encounter rather than one per projectile.
   const tally = new Map()     // owner tag → { kind, shield, dodge, returned, hit, last }
   const count = (t, key) => {
     const r = tally.get(t.ownerTag) || { kind: t.name, shield: 0, dodge: 0, returned: 0, hit: 0, last: 0 }
-    r[key]++; r.last = Date.now(); tally.set(t.ownerTag, r)
+    r[key]++; r.last = Date.now(); r.from = cameFrom(t.vel); tally.set(t.ownerTag, r)
   }
 
   const raw = (v) => new Vec3(v.x, v.y, v.z)
@@ -109,13 +126,27 @@ function setupProjectileGuard() {
       const t = tracked.get(id)
       if (!t) continue
       tracked.delete(id)
-      if (t.answered && !t.returned && tick - lastHurtTick <= 3) count(t, 'hit')
+      t.goneAt = Date.now()
+      gone.set(id, t)
       if (dodge?.id === id) endDodge()
     }
   })
-  let lastHealth = bot.health
-  bot.on('health', () => { if (bot.health < lastHealth) lastHurtTick = tick; lastHealth = bot.health })
-  bot.on('death', () => { tracked.clear(); raised = false; dodge = null })
+  // Damage to the bot names the projectile that did it (sourceDirectId) and its
+  // shooter (sourceCauseId), each as id + 1. Ahead of mineflayer's own listener,
+  // which turns the packet into entityHurt.
+  bot._client.prependListener('damage_event', (p) => {
+    if (p.entityId !== bot.entity?.id) return
+    const id = p.sourceDirectId - 1
+    const t = tracked.get(id) || gone.get(id)
+    if (!t) { lastShot = null; return }
+    count(t, 'hit')
+    const shooter = bot.entities[p.sourceCauseId - 1] || bot.entities[t.owner]
+    const from = cameFrom(t.vel)
+    const dist = shooter?.isValid ? `, ${Math.round(shooter.position.distanceTo(bot.entity.position))}m` : ''
+    lastShot = { name: t.name, from, shooter: shooter?.isValid ? shooter : null,
+      text: `${t.name} from ${from} (${t.ownerTag}${dist})` }
+  })
+  bot.on('death', () => { tracked.clear(); gone.clear(); raised = false; dodge = null })
 
   // Where it is now and the tick it meets the bot's hitbox (from now), or null.
   function predict(t) {
@@ -168,13 +199,14 @@ function setupProjectileGuard() {
     tick++
     if (!bot.entity || bot.health <= 0) return
     const now = Date.now()
+    for (const [id, t] of gone) if (now - t.goneAt > GONE_KEEP_MS) gone.delete(id)
     for (const [owner, r] of tally) {
       if (now - r.last < SUMMARY_AFTER_MS) continue
       tally.delete(owner)
       const did = [r.returned && `returned ${r.returned}`, r.shield && `blocked ${r.shield}`,
         r.dodge && `sidestepped ${r.dodge}`, r.hit && `took ${r.hit} hit${r.hit > 1 ? 's' : ''}`].filter(Boolean).join(', ')
-      logEvent(`reflex: ${did} vs ${owner}'s ${r.kind}`)
-      console.log(`  [PROJ] ${did} vs ${owner}'s ${r.kind}`)
+      logEvent(`reflex: ${did} vs ${owner}'s ${r.kind} from ${r.from}`)
+      console.log(`  [PROJ] ${did} vs ${owner}'s ${r.kind} from ${r.from}`)
     }
 
     // Re-anchor on fresh server positions; pick the projectile that lands first.
@@ -241,4 +273,4 @@ function setupProjectileGuard() {
   })
 }
 
-module.exports = { setupProjectileGuard }
+module.exports = { setupProjectileGuard, takeShot }
