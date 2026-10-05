@@ -1,11 +1,12 @@
 // Movement actions — follow, come, goto, flee, mount, dismount, sail
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
-const { tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
+const { tick, tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
 const { navigateTo, digHeading, until } = require('../navigation/navigation')
 const { castVisionRays } = require('../perception/vision')
 const { sendChat, recordFailure, logEvent, fuzzyMatch, resolvePlayerName } = require('../core/utils')
-const { logGameEvent } = require('../world/memory')
+const { logGameEvent, queryBlockMemory } = require('../world/memory')
+const { dbBlock } = require('../navigation/atomicSteps')
 const { tagOf, findTagged } = require('../perception/entityTag')
 const { OXYGEN_SURFACED } = require('../config/safety')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
@@ -657,4 +658,104 @@ async function doSwimUp() {
   state.currentTask = null
 }
 
-module.exports = { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp }
+const PORTAL_SEARCH = 48
+
+// Walk straight at a block column's center until the body is within `tol` of it
+// horizontally. Plain forward-walking, so physics handles the small step-ups (a
+// chest top) that block-grid movement refuses; bumping into a full block (a
+// portal's obsidian sill seen from the ground) makes it jump.
+async function walkToColumn(bot, x, z, tol, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  try {
+    while (Date.now() < deadline) {
+      const p = bot.entity.position
+      if (Math.hypot(p.x - (x + 0.5), p.z - (z + 0.5)) <= tol) return true
+      await bot.lookAt(new Vec3(x + 0.5, p.y + 1.62, z + 0.5), true)
+      bot.setControlState('forward', true)
+      bot.setControlState('jump', bot.entity.isCollidedHorizontally)
+      await tick()
+    }
+    return false
+  } finally {
+    bot.clearControlStates()
+  }
+}
+
+// [ACTION:portal] / [ACTION:portal:X,Y,Z] — go through a nether portal. Survival
+// players only teleport after standing inside the portal for ~4s, so walking
+// through it (or stopping next to it, as goto's reach range does) never works.
+// Finds the portal in block memory, walks to the spot in front of the pane, steps
+// in, stands still and succeeds when the dimension changes.
+async function doEnterPortal(target) {
+  stopAll()
+  const bot = state.bot
+  const pos = bot.entity.position
+  const isPortal = (x, y, z) => dbBlock(x, y, z) === 'nether_portal'
+
+  let p
+  if (target) {
+    const c = target.split(',').map(Number)
+    if (c.length !== 3 || c.some(isNaN)) { recordFailure(`portal: bad coords "${target}"`); return false }
+    if (!isPortal(...c)) { recordFailure(`portal: no nether_portal known at ${target}`); return false }
+    p = { x: c[0], y: c[1], z: c[2] }
+  } else {
+    // Nearby only: block memory has no dimension, so a far "portal" may be the
+    // other dimension's portal at the same coordinates.
+    const hits = queryBlockMemory(['nether_portal'], pos).filter(h => h.dist <= PORTAL_SEARCH).sort((a, b) => a.dist - b.dist)
+    if (hits.length === 0) { recordFailure(`portal: no lit nether_portal within ${PORTAL_SEARCH}m — goto one first, or light one`); return false }
+    p = { x: hits[0].x, y: hits[0].y, z: hits[0].z }
+  }
+  // Stand in the bottom portal block of the column.
+  while (isPortal(p.x, p.y - 1, p.z)) p.y--
+
+  // The pane runs along x or z; you enter it from either face, along the other axis.
+  const alongX = isPortal(p.x + 1, p.y, p.z) || isPortal(p.x - 1, p.y, p.z)
+  const fronts = (alongX
+    ? [new Vec3(p.x, p.y, p.z - 1), new Vec3(p.x, p.y, p.z + 1)]
+    : [new Vec3(p.x - 1, p.y, p.z), new Vec3(p.x + 1, p.y, p.z)]
+  ).sort((a, b) => a.distanceTo(pos) - b.distanceTo(pos))
+
+  const startDim = bot.game.dimension
+  // Just arrived through this portal? The game won't send you back until you have
+  // stepped out of it, so leave to its face and pause before re-entering.
+  const startedInside = isPortal(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
+  state.currentTask = `entering portal at ${p.x},${p.y},${p.z}`
+  try {
+    let inFront = false
+    for (const f of fronts) {
+      const near = Math.hypot(pos.x - (f.x + 0.5), pos.z - (f.z + 0.5)) < 1.5 && Math.abs(pos.y - f.y) < 1.5
+      if (!near) {
+        const ok = await navigateTo(f.x, f.y, f.z, 1, 30000, { intent: 'clear' })
+        if (!ok) { if (isAborted()) return; continue }
+      }
+      if (await walkToColumn(bot, f.x, f.z, 0.3, 3000)) { inFront = true; break }
+    }
+    if (!inFront) { recordFailure(`portal: could not reach either face of the portal at ${p.x},${p.y},${p.z}`); return false }
+    if (startedInside) await tickWait(1500)
+
+    if (!await walkToColumn(bot, p.x, p.z, 0.25, 3000)) {
+      recordFailure(`portal: could not step into the portal at ${p.x},${p.y},${p.z}`)
+      return false
+    }
+    console.log(`  [portal] inside ${p.x},${p.y},${p.z}, waiting for the teleport`)
+    // ~4s in survival; allow for lag, and nudge back in if knocked out of the pane.
+    const deadline = Date.now() + 10000
+    while (Date.now() < deadline && bot.game.dimension === startDim) {
+      const q = bot.entity.position
+      if (Math.floor(q.x) !== p.x || Math.floor(q.z) !== p.z) await walkToColumn(bot, p.x, p.z, 0.25, 1500)
+      await tick()
+    }
+    if (bot.game.dimension === startDim) {
+      recordFailure(`portal: stood in ${p.x},${p.y},${p.z} for 10s but stayed in ${startDim} — is it still lit?`)
+      return false
+    }
+    const q = bot.entity.position
+    console.log(`  [portal] arrived in ${bot.game.dimension} at ${Math.floor(q.x)},${Math.floor(q.y)},${Math.floor(q.z)}`)
+    logEvent(`portal: ${startDim} → ${bot.game.dimension}, arrived at ${Math.floor(q.x)},${Math.floor(q.y)},${Math.floor(q.z)}`)
+    return true
+  } finally {
+    state.currentTask = null
+  }
+}
+
+module.exports = { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp, doEnterPortal }

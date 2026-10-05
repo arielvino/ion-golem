@@ -3,7 +3,7 @@ const state = require('../core/state')
 const { AbortError, isAborted } = require('../core/tick')
 const { c, color } = require('../lib/colors')
 const { logEvent, normalizeItemName, recordFailure } = require('../core/utils')
-const { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp } = require('./movement')
+const { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp, doEnterPortal } = require('./movement')
 const { doAttack } = require('./combat')
 const { doMine, doCollect } = require('./mining')
 const { doDrop, doEquip, doUnequip, doGive, doRequire, doTake, doDeposit, doInspect } = require('./inventory')
@@ -21,7 +21,7 @@ const ranges = require('../config/ranges')
 const { entityTag } = require('../perception/entityTag')
 
 // Actions worth logging to event history (skip noisy/trivial ones)
-const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit', 'trade'])
+const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit', 'trade', 'portal'])
 
 // Digging actions that accept a chained `:skiptool` suffix — the AI's escalation
 // to hand-mine through a tool-gated block instead of stopping to craft the tool.
@@ -97,6 +97,7 @@ async function executeAction(actionStr, username, opts = {}) {
       case 'face': result = await doTurn(target); break
       case 'fill': result = await doFill(target); break
       case 'swimup': result = await doSwimUp(); break
+      case 'portal': result = await doEnterPortal(target); break
       case 'digdown': result = await doDigDown(target, { skipTool }); break
       case 'jumpdown': result = await doJumpDown(target); break
       case 'use': result = await doUse(target); break
