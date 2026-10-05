@@ -55,6 +55,7 @@ module.exports = {
   navToolNeed: null,     // set by digBlock when it REFUSES a tool-gated block ({need, block, pos}); nav bails so the AI crafts the tool or re-issues with :skiptool
   // (staircase direction + DB pathfind cache now live on per-run strategy ctx — see navigation.js)
   // Database (set by memory.js init)
+  dim: null,             // dimension at the last spawn; a change clears position state (bot.js)
   db: null,
   stmts: {},
   // Engine

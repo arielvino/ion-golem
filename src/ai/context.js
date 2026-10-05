@@ -8,7 +8,7 @@ const { lookAround } = require('../perception/sight')
 const { summarizeSight, formatSight } = require('../perception/sightSummary')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
-const { getStructures, getNearbyContainers, getContainerState, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
+const { currentDim, getStructures, getNearbyContainers, getContainerState, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
 const { renderAgenda } = require('../engine/tasks')
 const { renderNew, renderNotesBlock } = require('../world/journalStore')
 const { ago } = require('../world/journal')
@@ -305,7 +305,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} offhand=${offhand} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} offhand=${offhand} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }

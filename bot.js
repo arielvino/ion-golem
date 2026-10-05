@@ -530,6 +530,21 @@ function createBot() {
     // Death reason logged via messagestr handler with full message (e.g. "Bro was slain by Zombie")
   })
 
+  // Crossing into another dimension: coordinates from the old one mean nothing
+  // here, so drop transient position state. Block memory is keyed by dimension.
+  bot.on('spawn', () => {
+    const dim = require('./src/world/memory').currentDim()
+    if (state.dim && state.dim !== dim) {
+      state.skipBlocks.clear()
+      state.portableCraftingTable = null
+      state.doorToRestore = null
+      state.prevSnapshot = null
+      const p = bot.entity.position
+      require('./src/core/utils').logEvent(`dimension: ${state.dim} → ${dim}, at ${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`)
+    }
+    state.dim = dim
+  })
+
   // After a death, record where the bot came back and what it still carries.
   bot.on('spawn', () => {
     if (!state.diedAt) return

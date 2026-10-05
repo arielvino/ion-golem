@@ -87,7 +87,7 @@ function structures() {
   const rows = stmt(`SELECT s.id, s.name, s.blueprint IS NOT NULL AS bp, s.origin_x, s.origin_y, s.origin_z,
       MIN(p.x) x1, MAX(p.x) x2, MIN(p.y) y1, MAX(p.y) y2, MIN(p.z) z1, MAX(p.z) z2, COUNT(p.x) n
     FROM structures s LEFT JOIN placed_blocks p ON p.structure_id = s.id
-    GROUP BY s.id ORDER BY s.created_at DESC`).all()
+    WHERE s.dim = cur_dim() GROUP BY s.id ORDER BY s.created_at DESC`).all()
   return block('structures (newest first):', rows.slice(0, MAX_ROWS).map(s => {
     const origin = s.origin_x != null ? ` origin=${s.origin_x},${s.origin_y},${s.origin_z}` : ''
     const box = s.x1 != null ? ` box=${s.x1},${s.y1},${s.z1}..${s.x2},${s.y2},${s.z2}` : ''
@@ -117,7 +117,7 @@ function structure(args) {
 // ── biomes ───────────────────────────────────────────────────────────────
 function biomes() {
   const rows = stmt(`SELECT biome, COUNT(*) n, MIN(chunk_x) x1, MAX(chunk_x) x2, MIN(chunk_y) y1, MAX(chunk_y) y2,
-      MIN(chunk_z) z1, MAX(chunk_z) z2 FROM chunk_biomes GROUP BY biome ORDER BY n DESC`).all()
+      MIN(chunk_z) z1, MAX(chunk_z) z2 FROM chunk_biomes WHERE dim = cur_dim() GROUP BY biome ORDER BY n DESC`).all()
   return block('biomes explored (16³ sections; block ranges):', rows.slice(0, MAX_ROWS).map(r =>
     `${r.biome} ×${r.n} x${r.x1 * 16}..${r.x2 * 16 + 15} y${r.y1 * 16}..${r.y2 * 16 + 15} z${r.z1 * 16}..${r.z2 * 16 + 15}`),
   'none explored yet')
@@ -128,7 +128,7 @@ function biome(args) {
   if (!name) throw new Error('give a biome name, e.g. biome:desert')
   const p = botPos()
   const cx = Math.floor(p.x / 16), cz = Math.floor(p.z / 16)
-  const rows = stmt(`SELECT chunk_x, chunk_y, chunk_z FROM chunk_biomes WHERE biome LIKE ?
+  const rows = stmt(`SELECT chunk_x, chunk_y, chunk_z FROM chunk_biomes WHERE dim = cur_dim() AND biome LIKE ?
     ORDER BY (chunk_x - ?) * (chunk_x - ?) + (chunk_z - ?) * (chunk_z - ?) ASC LIMIT ?`)
     .all(`%${name}%`, cx, cx, cz, cz, clampLimit(args[1], 5))
   return block(`nearest explored "${name}" sections (centers):`, rows.map(r => {
@@ -141,7 +141,7 @@ function biome(args) {
 function container(args) {
   const c = parseXYZ(args[0])
   if (!c) throw new Error('give coords, e.g. container:12,64,-30')
-  const row = stmt('SELECT type, contents, updated_at FROM containers WHERE x=? AND y=? AND z=?').get(c.x, c.y, c.z)
+  const row = stmt('SELECT type, contents, updated_at FROM containers WHERE dim = cur_dim() AND x=? AND y=? AND z=?').get(c.x, c.y, c.z)
   if (!row) return `container ${c.x},${c.y},${c.z}: never opened`
   let items
   try { items = JSON.parse(row.contents) } catch { return `${row.type} ${c.x},${c.y},${c.z}: ${row.contents}` }
@@ -210,7 +210,7 @@ function near(args) {
   const at = parseXYZ(rest[0]) ? parseXYZ(rest.shift()) : botPos()
   const r = isInt(rest[0]) ? Math.max(1, Math.min(64, intArg(rest.shift(), 16))) : 16
   const type = rest[0] || null
-  let rows = stmt(`SELECT ${EVENT_COLS} FROM events WHERE x IS NOT NULL
+  let rows = stmt(`SELECT ${EVENT_COLS} FROM events WHERE x IS NOT NULL AND dim = cur_dim()
       AND (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ? ORDER BY game_tick DESC LIMIT ?`)
     .all(at.x, at.x, at.y, at.y, at.z, at.z, r * r, type ? 500 : MAX_ROWS)
   if (type) rows = rows.filter(e => e.type === type).slice(0, MAX_ROWS)

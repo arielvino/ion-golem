@@ -8,6 +8,9 @@ const state = require('../core/state')
 // Helper: get current game tick (world age). Returns 0 if bot not connected yet.
 function gameTick() { return state.bot?.time?.age || 0 }
 function gameDay() { return state.bot?.time?.day || 0 }
+// The dimension the bot is in now ('overworld', 'the_nether', 'the_end'), keying
+// every spatial row. Before login there is no bot; assume the overworld.
+function currentDim() { return (state.bot?.game?.dimension || 'overworld').replace(/^minecraft:/, '') }
 
 function initDB() {
   const DB_PATH = path.join(state.BOT_DATA_DIR, 'blocks.db')
@@ -15,18 +18,47 @@ function initDB() {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = NORMAL')
 
+  // Every coordinate belongs to a dimension: the Nether and the overworld share
+  // x,y,z ranges, so spatial rows carry `dim` and every spatial statement filters
+  // on cur_dim() — the dimension the bot is in now. Callers never pass it.
+  db.function('cur_dim', { deterministic: false }, currentDim)
+
+  // Migration: coordinate-keyed tables gain `dim` in their primary key. SQLite
+  // can't alter a PK, so a pre-dim table is renamed aside, recreated below and
+  // refilled; old rows are assumed overworld.
+  const DIM_TABLES = ['blocks', 'placed_blocks', 'containers', 'path_blocks', 'chunk_biomes']
+  const colsOf = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name)
+  const toRefill = []
+  for (const t of DIM_TABLES) {
+    const cols = colsOf(t)
+    if (cols.length > 0 && !cols.includes('dim')) {
+      db.exec(`ALTER TABLE ${t} RENAME TO ${t}_predim`)
+      toRefill.push([t, cols])
+    }
+  }
+  // Indexes follow a renamed table, so drop them or CREATE INDEX IF NOT EXISTS
+  // below would see the name taken and skip the new table.
+  for (const [t] of toRefill) {
+    for (const ix of db.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL`).all(`${t}_predim`)) {
+      db.exec(`DROP INDEX ${ix.name}`)
+    }
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS blocks (
+      dim TEXT NOT NULL,
       x INTEGER, y INTEGER, z INTEGER,
       name TEXT NOT NULL, seen_at INTEGER NOT NULL,
-      PRIMARY KEY (x, y, z)
+      reachable TEXT DEFAULT 'unknown',
+      PRIMARY KEY (dim, x, y, z)
     );
-    CREATE INDEX IF NOT EXISTS idx_blocks_name ON blocks(name);
+    CREATE INDEX IF NOT EXISTS idx_blocks_name ON blocks(dim, name);
     CREATE TABLE IF NOT EXISTS placed_blocks (
+      dim TEXT NOT NULL,
       x INTEGER, y INTEGER, z INTEGER,
       structure_id INTEGER,
       bp_x INTEGER, bp_y INTEGER, bp_z INTEGER,
-      PRIMARY KEY (x, y, z)
+      PRIMARY KEY (dim, x, y, z)
     );
     CREATE TABLE IF NOT EXISTS structures (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,25 +68,28 @@ function initDB() {
       origin_x INTEGER, origin_y INTEGER, origin_z INTEGER
     );
     CREATE TABLE IF NOT EXISTS containers (
+      dim TEXT NOT NULL,
       x INTEGER, y INTEGER, z INTEGER,
       type TEXT NOT NULL,
       contents TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
-      PRIMARY KEY (x, y, z)
+      PRIMARY KEY (dim, x, y, z)
     );
     CREATE TABLE IF NOT EXISTS path_blocks (
+      dim TEXT NOT NULL,
       x INTEGER, y INTEGER, z INTEGER,
       path_type TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      PRIMARY KEY (x, y, z)
+      PRIMARY KEY (dim, x, y, z)
     );
     CREATE TABLE IF NOT EXISTS chunk_biomes (
+      dim TEXT NOT NULL,
       chunk_x INTEGER, chunk_y INTEGER, chunk_z INTEGER,
       biome TEXT NOT NULL,
       seen_at INTEGER NOT NULL,
-      PRIMARY KEY (chunk_x, chunk_y, chunk_z, biome)
+      PRIMARY KEY (dim, chunk_x, chunk_y, chunk_z, biome)
     );
-    CREATE INDEX IF NOT EXISTS idx_chunk_biomes_biome ON chunk_biomes(biome);
+    CREATE INDEX IF NOT EXISTS idx_chunk_biomes_biome ON chunk_biomes(dim, biome);
     CREATE TABLE IF NOT EXISTS chat_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       game_tick INTEGER NOT NULL,
@@ -108,40 +143,51 @@ function initDB() {
   if (addColIfMissing('structures', 'origin_y', 'INTEGER')) migrated = true
   if (addColIfMissing('structures', 'origin_z', 'INTEGER')) migrated = true
   if (addColIfMissing('blocks', 'reachable', "TEXT DEFAULT 'unknown'")) migrated = true
+  if (addColIfMissing('structures', 'dim', "TEXT NOT NULL DEFAULT 'overworld'")) migrated = true
+  if (addColIfMissing('events', 'dim', 'TEXT')) {
+    db.exec(`UPDATE events SET dim = 'overworld' WHERE x IS NOT NULL`)
+    migrated = true
+  }
+  for (const [t, cols] of toRefill) {
+    const keep = cols.filter(c => colsOf(t).includes(c)).join(', ')
+    db.exec(`INSERT INTO ${t} (dim, ${keep}) SELECT 'overworld', ${keep} FROM ${t}_predim; DROP TABLE ${t}_predim`)
+    console.log(`  [MEMORY] ${t}: added dim (old rows → overworld)`)
+    migrated = true
+  }
   if (migrated) console.log('  [MEMORY] DB schema migrated')
   db.exec('CREATE INDEX IF NOT EXISTS idx_placed_structure ON placed_blocks(structure_id)')
 
   // Prepared statements
   const stmts = {
-    upsertBlock: db.prepare(`INSERT INTO blocks (x,y,z,name,seen_at) VALUES (?,?,?,?,?)
-      ON CONFLICT(x,y,z) DO UPDATE SET name=excluded.name, seen_at=excluded.seen_at`),
-    removeBlock: db.prepare(`DELETE FROM blocks WHERE x=? AND y=? AND z=?`),
-    queryByName: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE name=?
+    upsertBlock: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at) VALUES (cur_dim(),?,?,?,?,?)
+      ON CONFLICT(dim,x,y,z) DO UPDATE SET name=excluded.name, seen_at=excluded.seen_at`),
+    removeBlock: db.prepare(`DELETE FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    queryByName: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE dim=cur_dim() AND name=?
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
-    isPlaced: db.prepare(`SELECT 1 FROM placed_blocks WHERE x=? AND y=? AND z=? AND structure_id IS NOT NULL`),
-    addPlaced: db.prepare(`INSERT OR IGNORE INTO placed_blocks (x,y,z,structure_id,bp_x,bp_y,bp_z) VALUES (?,?,?,?,?,?,?)`),
-    removePlaced: db.prepare(`DELETE FROM placed_blocks WHERE x=? AND y=? AND z=?`),
-    createStructure: db.prepare(`INSERT INTO structures (name, created_at, blueprint, origin_x, origin_y, origin_z) VALUES (?, ?, ?, ?, ?, ?)`),
+    isPlaced: db.prepare(`SELECT 1 FROM placed_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=? AND structure_id IS NOT NULL`),
+    addPlaced: db.prepare(`INSERT OR IGNORE INTO placed_blocks (dim,x,y,z,structure_id,bp_x,bp_y,bp_z) VALUES (cur_dim(),?,?,?,?,?,?,?)`),
+    removePlaced: db.prepare(`DELETE FROM placed_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    createStructure: db.prepare(`INSERT INTO structures (dim, name, created_at, blueprint, origin_x, origin_y, origin_z) VALUES (cur_dim(), ?, ?, ?, ?, ?, ?)`),
     getStructures: db.prepare(`SELECT s.id, s.name, s.created_at,
       MIN(p.x) as x1, MAX(p.x) as x2, MIN(p.y) as y1, MAX(p.y) as y2, MIN(p.z) as z1, MAX(p.z) as z2,
       COUNT(p.x) as block_count
       FROM structures s LEFT JOIN placed_blocks p ON p.structure_id = s.id
-      GROUP BY s.id ORDER BY s.created_at DESC`),
-    tagBlock: db.prepare(`UPDATE placed_blocks SET structure_id=? WHERE x=? AND y=? AND z=?`),
-    blockStructure: db.prepare(`SELECT s.name FROM placed_blocks p JOIN structures s ON p.structure_id = s.id WHERE p.x=? AND p.y=? AND p.z=?`),
-    upsertContainer: db.prepare(`INSERT INTO containers (x,y,z,type,contents,updated_at) VALUES (?,?,?,?,?,?)
-      ON CONFLICT(x,y,z) DO UPDATE SET type=excluded.type, contents=excluded.contents, updated_at=excluded.updated_at`),
-    getContainer: db.prepare(`SELECT type, contents, updated_at FROM containers WHERE x=? AND y=? AND z=?`),
-    removeContainer: db.prepare(`DELETE FROM containers WHERE x=? AND y=? AND z=?`),
+      WHERE s.dim = cur_dim() GROUP BY s.id ORDER BY s.created_at DESC`),
+    tagBlock: db.prepare(`UPDATE placed_blocks SET structure_id=? WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    blockStructure: db.prepare(`SELECT s.name FROM placed_blocks p JOIN structures s ON p.structure_id = s.id WHERE p.dim=cur_dim() AND p.x=? AND p.y=? AND p.z=?`),
+    upsertContainer: db.prepare(`INSERT INTO containers (dim,x,y,z,type,contents,updated_at) VALUES (cur_dim(),?,?,?,?,?,?)
+      ON CONFLICT(dim,x,y,z) DO UPDATE SET type=excluded.type, contents=excluded.contents, updated_at=excluded.updated_at`),
+    getContainer: db.prepare(`SELECT type, contents, updated_at FROM containers WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    removeContainer: db.prepare(`DELETE FROM containers WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     getNearbyContainers: db.prepare(`SELECT x,y,z,type,contents,updated_at FROM containers
-      WHERE (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ? ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT 20`),
-    queryByNameLike: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE name LIKE ?
+      WHERE dim=cur_dim() AND (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ? ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT 20`),
+    queryByNameLike: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE dim=cur_dim() AND name LIKE ?
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
-    queryUtilBlocks: db.prepare(`SELECT x,y,z,name FROM blocks WHERE name IN ('furnace','crafting_table','chest','trapped_chest','barrel','anvil','smoker','blast_furnace','enchanting_table','brewing_stand')
+    queryUtilBlocks: db.prepare(`SELECT x,y,z,name FROM blocks WHERE dim=cur_dim() AND name IN ('furnace','crafting_table','chest','trapped_chest','barrel','anvil','smoker','blast_furnace','enchanting_table','brewing_stand')
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
-    getBlockAt: db.prepare(`SELECT name, reachable FROM blocks WHERE x=? AND y=? AND z=?`),
-    upsertBlockReach: db.prepare(`INSERT INTO blocks (x,y,z,name,seen_at,reachable) VALUES (?,?,?,?,?,?)
-      ON CONFLICT(x,y,z) DO UPDATE SET
+    getBlockAt: db.prepare(`SELECT name, reachable FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    upsertBlockReach: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at,reachable) VALUES (cur_dim(),?,?,?,?,?,?)
+      ON CONFLICT(dim,x,y,z) DO UPDATE SET
         name=excluded.name, seen_at=excluded.seen_at,
         reachable = CASE
           WHEN blocks.name != excluded.name THEN excluded.reachable
@@ -150,23 +196,23 @@ function initDB() {
         END`),
     // Region query (bounding box)
     queryRegion: db.prepare(`SELECT x, y, z, name FROM blocks
-      WHERE x BETWEEN ? AND ? AND y BETWEEN ? AND ? AND z BETWEEN ? AND ?`),
+      WHERE dim=cur_dim() AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? AND z BETWEEN ? AND ?`),
     // Path blocks
-    addPathBlock: db.prepare(`INSERT OR REPLACE INTO path_blocks (x,y,z,path_type,created_at) VALUES (?,?,?,?,?)`),
-    isPathBlock: db.prepare(`SELECT 1 FROM path_blocks WHERE x=? AND y=? AND z=?`),
-    removePathBlock: db.prepare(`DELETE FROM path_blocks WHERE x=? AND y=? AND z=?`),
+    addPathBlock: db.prepare(`INSERT OR REPLACE INTO path_blocks (dim,x,y,z,path_type,created_at) VALUES (cur_dim(),?,?,?,?,?)`),
+    isPathBlock: db.prepare(`SELECT 1 FROM path_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    removePathBlock: db.prepare(`DELETE FROM path_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     countPathBlocksNear: db.prepare(`SELECT COUNT(*) as c FROM path_blocks
-      WHERE (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ?`),
+      WHERE dim=cur_dim() AND (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ?`),
     clearOldPathBlocks: db.prepare(`DELETE FROM path_blocks WHERE created_at < ?`),
     // Chunk biomes
-    upsertChunkBiome: db.prepare(`INSERT INTO chunk_biomes (chunk_x, chunk_y, chunk_z, biome, seen_at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(chunk_x, chunk_y, chunk_z, biome) DO UPDATE SET seen_at=excluded.seen_at`),
+    upsertChunkBiome: db.prepare(`INSERT INTO chunk_biomes (dim, chunk_x, chunk_y, chunk_z, biome, seen_at) VALUES (cur_dim(), ?, ?, ?, ?, ?)
+      ON CONFLICT(dim, chunk_x, chunk_y, chunk_z, biome) DO UPDATE SET seen_at=excluded.seen_at`),
     // Chat log
     insertChatLog: db.prepare(`INSERT INTO chat_log (game_tick, game_day, type, username, message) VALUES (?, ?, ?, ?, ?)`),
     // Task log
     insertTaskLog: db.prepare(`INSERT INTO task_log (game_tick, game_day, action, task, detail, stack_after) VALUES (?, ?, ?, ?, ?, ?)`),
     // Events
-    insertEvent: db.prepare(`INSERT INTO events (game_tick, game_day, type, target, count, x, y, z, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    insertEvent: db.prepare(`INSERT INTO events (game_tick, game_day, type, target, count, dim, x, y, z, detail) VALUES (?, ?, ?, ?, ?, cur_dim(), ?, ?, ?, ?)`),
   }
 
   const upsertBatch = db.transaction((blocks) => {
@@ -516,7 +562,7 @@ function logGameEvent(type, target, count, x, y, z, detail) {
 }
 
 module.exports = {
-  initDB, updateBlockMemoryReach, queryBlockMemory, queryBlockMemoryFuzzy,
+  initDB, currentDim, updateBlockMemoryReach, queryBlockMemory, queryBlockMemoryFuzzy,
   trackPlacedBlock, createStructure, getStructures, removeBlock, queryUtilityBlocks,
   saveContainerState, getContainerState, removeContainerState, getNearbyContainers, searchContainersFor,
   queryRegion,
