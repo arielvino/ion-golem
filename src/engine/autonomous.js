@@ -13,6 +13,7 @@ function setupAutonomous(interruptFn) {
   ranged.setupRangedDefense()
   require('./retreat').setupRetreat(interruptFn)
   require('./creeperDefense').setupCreeperDefense()
+  require('./projectileGuard').setupProjectileGuard()
 
   // --- AUTO-EAT on low health ---
   bot.on('health', () => {
