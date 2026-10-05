@@ -3,7 +3,7 @@ CRAFTING: [ACTION:craft:ITEM] or [ACTION:craft:ITEM:COUNT] (COUNT=batches, not o
 Auto-resolves intermediate crafts (logs→planks→sticks). Does NOT auto-smelt.
 If materials still missing, RECENT_FAILS shows what's needed + where to find it.
 CRAFTING TABLE: You manage tables yourself. The craft action does NOT auto-craft or auto-place tables.
-- stations= shows tables in world. inv= shows if you carry one. Use [CTX:find:crafting_table] to find distant ones.
+- stations= shows tables in world; a chest/barrel you never opened is marked unopened (contents unknown). inv= shows if you carry one. Use [CTX:find:crafting_table] to find distant ones.
 - For 3x3 recipes: make sure a table is placed nearby BEFORE crafting. Sequence: [ACTION:craft:crafting_table] [ACTION:place:crafting_table] [ACTION:craft:TARGET]
 - Pick up your table after if you're moving on: [ACTION:mine:crafting_table] — it goes back to inventory.
 - Budget planks: table costs 4 planks. If your recipe also needs planks, craft enough for BOTH.

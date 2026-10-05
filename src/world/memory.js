@@ -518,7 +518,7 @@ function logGameEvent(type, target, count, x, y, z, detail) {
 module.exports = {
   initDB, updateBlockMemoryReach, queryBlockMemory, queryBlockMemoryFuzzy,
   trackPlacedBlock, createStructure, getStructures, removeBlock, queryUtilityBlocks,
-  saveContainerState, removeContainerState, getNearbyContainers, searchContainersFor,
+  saveContainerState, getContainerState, removeContainerState, getNearbyContainers, searchContainersFor,
   queryRegion,
   trackPathBlock, isPathBlock, clearOldPathBlocks, countNearbyPathBlocks,
   updateChunkBiomes, logChatDB, logGameEvent, logTaskAction, upsertVisionChunked,

@@ -8,7 +8,7 @@ const { lookAround } = require('../perception/sight')
 const { summarizeSight, formatSight } = require('../perception/sightSummary')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
-const { getStructures, getNearbyContainers, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
+const { getStructures, getNearbyContainers, getContainerState, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
 const { renderAgenda } = require('../engine/tasks')
 const { renderNew, renderNotesBlock } = require('../world/journalStore')
 const { ago } = require('../world/journal')
@@ -114,10 +114,16 @@ function getBotContext() {
 
   const mcData = require('minecraft-data')(bot.version)
 
-  // Utility blocks from DB (furnaces, crafting tables, chests, etc.)
+  // Utility blocks from DB (furnaces, crafting tables, chests, etc.). A storage block
+  // with no container record has never been opened — its contents are unknown. A double
+  // chest is recorded under one half, so an opened chest beside it covers the other.
+  const STORAGE = new Set(['chest', 'trapped_chest', 'barrel'])
+  const opened = (u) => getContainerState(u.x, u.y, u.z) || (u.name !== 'barrel' &&
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => getContainerState(u.x + dx, u.y, u.z + dz)))
   const foundUtils = queryUtilityBlocks(pos, SEARCH_UTILITY).map(u => {
     const d = Math.round(pos.distanceTo(new Vec3(u.x, u.y, u.z)))
-    return `${u.name}@${u.x},${u.y},${u.z}(${d}m)`
+    const unopened = STORAGE.has(u.name) && !opened(u) ? ',unopened' : ''
+    return `${u.name}@${u.x},${u.y},${u.z}(${d}m${unopened})`
   })
 
   // Container locations from DB (contents accessible via take/deposit actions)
