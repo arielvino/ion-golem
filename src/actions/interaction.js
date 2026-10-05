@@ -27,15 +27,16 @@ async function doUse(target) {
     const names = Object.keys(mcData.blocksByName).filter(name => fuzzyMatch(name, normalized))
     if (names.length === 0) {
       sendChat(`Don't know block "${target}"!`)
+      recordFailure(`use:${target} - not a block; use works on blocks only (trade with villagers, mount vehicles)`)
       state.currentTask = null
-      return
+      return false
     }
     const known = findKnownBlocks(names, { maxDistance: 32, count: 1 })
     if (known.length === 0) {
       sendChat(`Can't find ${target} nearby!`)
       recordFailure(`use:${target} - none seen within 32 blocks`)
       state.currentTask = null
-      return
+      return false
     }
     pos = known[0].pos
     accept = b => names.includes(b.name)
@@ -45,9 +46,11 @@ async function doUse(target) {
   // Walk up to it; use it only when it is in reach and in sight
   const r = await reachKnownBlock(pos, accept, label, 30000)
   if (!r.block) {
-    if (r.why !== 'aborted') { sendChat(`Can't use ${label}!`); recordFailure(`use:${target} - ${r.why}`) }
     state.currentTask = null
-    return
+    if (r.why === 'aborted') return
+    sendChat(`Can't use ${label}!`)
+    recordFailure(`use:${target} - ${r.why}`)
+    return false
   }
   const block = r.block
 
@@ -58,6 +61,8 @@ async function doUse(target) {
   } catch (err) {
     console.error(`  use err: ${err.message}`)
     sendChat(`Failed to use ${block.name}!`)
+    state.currentTask = null
+    return false
   }
   state.currentTask = null
 }

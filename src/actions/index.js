@@ -13,6 +13,7 @@ const { doCraft } = require('./crafting')
 const { doSmelt } = require('./smelting')
 const { doWiki } = require('./info')
 const { doUse, doFill } = require('./interaction')
+const { doTrade } = require('./trading')
 const { doEval } = require('./eval')
 const { doDigDown, doJumpDown } = require('./descend')
 const { switchPersonality } = require('../ai/ai')
@@ -20,7 +21,7 @@ const ranges = require('../config/ranges')
 const { entityTag } = require('../perception/entityTag')
 
 // Actions worth logging to event history (skip noisy/trivial ones)
-const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit'])
+const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit', 'trade'])
 
 // Digging actions that accept a chained `:skiptool` suffix — the AI's escalation
 // to hand-mine through a tool-gated block instead of stopping to craft the tool.
@@ -99,6 +100,7 @@ async function executeAction(actionStr, username, opts = {}) {
       case 'digdown': result = await doDigDown(target, { skipTool }); break
       case 'jumpdown': result = await doJumpDown(target); break
       case 'use': result = await doUse(target); break
+      case 'trade': result = await doTrade(target); break
       case 'eval': result = await doEval(target); break
       case 'require': result = await doRequire(target); break
       case 'take': result = await doTake(target); break
