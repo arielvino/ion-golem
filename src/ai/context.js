@@ -19,18 +19,29 @@ const { snapshot, renderDelta } = require('./delta')
 const { entityTag } = require('../perception/entityTag')
 const { entityClass } = require('../perception/entityClass')
 
+// Item name with remaining durability for damageable items: iron_pickaxe(212/250).
+// Stackables keep the xN count instead (withCount).
+function itemLabel(item, withCount = false) {
+  if (!item) return 'nothing'
+  if (item.maxDurability) return `${item.name}(${item.maxDurability - (item.durabilityUsed || 0)}/${item.maxDurability})`
+  return withCount ? `${item.name}x${item.count}` : item.name
+}
+
 // --- Main context builder ---
 function getBotContext() {
   const bot = state.bot
   const pos = bot.entity.position
+  // DELTA compares bare names; durability only goes in the rendered blob, so
+  // every swing doesn't read as a held/armor change.
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
   const offhand = bot.inventory.slots[45]?.name || 'nothing'
-  const inv = bot.inventory.items().map(i => `${i.name}x${i.count}`).join(', ') || 'empty'
-  const armorSlots = [
+  const inv = bot.inventory.items().map(i => itemLabel(i, true)).join(', ') || 'empty'
+  const armorItems = [
     bot.inventory.slots[5], bot.inventory.slots[6],
     bot.inventory.slots[7], bot.inventory.slots[8]
-  ].filter(Boolean).map(s => s.name)
-  const armorStr = armorSlots.length > 0 ? ` armor=[${armorSlots.join(',')}]` : ' armor=none'
+  ].filter(Boolean)
+  const armorSlots = armorItems.map(s => s.name)
+  const armorStr = armorItems.length > 0 ? ` armor=[${armorItems.map(s => itemLabel(s)).join(',')}]` : ' armor=none'
   const eyePos = pos.offset(0, 1.62, 0)
   const nearbyNames = []
   const drops = {}  // drop tag → stack size, so DELTA can report a pile growing
@@ -305,7 +316,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${held} offhand=${offhand} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20 held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/leadMode').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }
@@ -315,4 +326,4 @@ function getBotContext() {
   return [blob, aroundView, renderAgenda(), renderNotesBlock(), renderPending()].filter(Boolean).join('\n')
 }
 
-module.exports = { getBotContext }
+module.exports = { getBotContext, itemLabel }
