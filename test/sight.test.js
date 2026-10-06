@@ -65,23 +65,31 @@ test('sky darkening follows the day', () => {
   assert.ok(skyDarken(13000) > 0 && skyDarken(13000) < 11)   // dusk
 })
 
-test('dark summary counts what was reached unlit, and where', () => {
-  const { darkSummary } = require('../src/perception/sight')
-  const c = scene()                                  // whole wall dark
-  const { seen, dark } = castRays(c, opaque, R, emits)
-  const reg = { blocksByStateId: { 0: { name: 'air' }, 1: { name: 'stone' } } }
-  const eye = { x: c.ox, y: c.oy, z: c.oz }
-  const d = darkSummary({ ...c, x0: 0, y0: 0, z0: 0 }, seen, dark, reg, eye)
-  assert.ok(d.count > 0)
-  assert.strictEqual(d.here, 0)
-  assert.strictEqual(d.dirs[0][0], 'E')              // the wall is at +x
+test('dark around: share and sides of the near space that are unlit', () => {
+  const c = scene({ lightAll: 15 })
+  for (let y = -R; y <= R; y++) for (let z = -R; z <= R; z++) for (let x = 1; x < 4; x++) c.light[idx(x, y, z)] = 0  // dark gap east, before the wall
+  const d = castRays(c, opaque, R, emits).near
+  assert.strictEqual(d.here, 15)
+  assert.strictEqual(d.dirs.find(([k]) => k === 'E')[1], 1)   // east is dark through and through
+  assert.strictEqual(d.dirs.find(([k]) => k === 'W')[1], 0)
+  assert.ok(d.share > 0.2 && d.share < 0.6)
 })
 
-test('DARK= line only when something reached is dark', () => {
+test('dark around: a dark gap with light beyond still counts dark; standing in the dark is all dark', () => {
+  const c = scene({ lightAll: 15 })
+  for (let y = -R; y <= R; y++) for (let z = -R; z <= R; z++) c.light[idx(-2, y, z)] = 0   // one dark slab west
+  assert.ok(castRays(c, opaque, R, emits).near.dirs.find(([k]) => k === 'W')[1] > 0.9)
+  assert.strictEqual(castRays(scene({ lightAll: 0 }), opaque, R, emits).near.share, 1)
+  assert.strictEqual(castRays(scene({ withLight: false }), opaque, R, emits).near, null)
+})
+
+test('DARK= line: plain words, left out when the surroundings are lit', () => {
   const { formatSight } = require('../src/perception/sightSummary')
   const s = { seen: 30, biomes: [], terrain: [], resources: [], unexplained: [] }
   assert.ok(!formatSight(s, null).includes('DARK'))
-  assert.ok(!formatSight(s, { count: 0, here: 15, dirs: [] }).includes('DARK'))
-  assert.strictEqual(formatSight(s, { count: 70, here: 0, dirs: [['E', 0.8], ['down', 0.1]] }),
-    'DARK=[light here 0 | 70 blocks in reach too dark to see (70% of the view), mostly E]')
+  assert.ok(!formatSight(s, { here: 15, share: 0.01, dirs: [['down', 0.1]] }).includes('DARK'))
+  assert.strictEqual(formatSight(s, { here: 15, share: 0.3, dirs: [['E', 0.9], ['down', 0.4], ['N', 0.1]] }),
+    'DARK=[you stand in light (15/15) | 30% of the space within 8 blocks of you is dark — dark: east; partly dark: below]')
+  assert.strictEqual(formatSight(s, { here: 0, share: 1, dirs: [['E', 1], ['W', 1]] }),
+    'DARK=[you stand in darkness (0/15) | 100% of the space within 8 blocks of you is dark]')
 })
