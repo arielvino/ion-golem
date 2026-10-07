@@ -62,6 +62,8 @@ function setupRangedDefense() {
 
   bot.on('physicsTick', () => {
     if (!bot.entity || bot.health <= 0) return
+    // Drawing a bow: the shield would cancel the draw and facing would spoil the aim.
+    if (state.shootingBow) { raised = false; return }
     const now = Date.now()
     if (tally.size) flushTally(now)
     const threat = nearestArcher(bot, THREAT_RANGE, true)
