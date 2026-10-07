@@ -5,6 +5,7 @@ const { c, color } = require('../lib/colors')
 const { logEvent, normalizeItemName, recordFailure } = require('../core/utils')
 const { doFollow, doCome, doFlee, doMount, doDismount, doSail, doGoto, doStaircase, doMove, doTunnel, doTurn, doSwimUp, doEnterPortal } = require('./movement')
 const { doAttack } = require('./combat')
+const { doShoot, doPearl } = require('./ranged')
 const { doMine, doCollect } = require('./mining')
 const { doDrop, doEquip, doUnequip, doGive, doRequire, doTake, doDeposit, doInspect } = require('./inventory')
 const { doEat, doSleep } = require('./vitals')
@@ -21,7 +22,7 @@ const ranges = require('../config/ranges')
 const { entityTag } = require('../perception/entityTag')
 
 // Actions worth logging to event history (skip noisy/trivial ones)
-const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit', 'trade', 'portal'])
+const LOG_ACTIONS = new Set(['mine', 'craft', 'smelt', 'build', 'place', 'attack', 'shoot', 'pearl', 'give', 'equip', 'goto', 'fill', 'require', 'take', 'deposit', 'trade', 'portal'])
 
 // Digging actions that accept a chained `:skiptool` suffix — the AI's escalation
 // to hand-mine through a tool-gated block instead of stopping to craft the tool.
@@ -63,6 +64,8 @@ async function executeAction(actionStr, username, opts = {}) {
       }
       case 'come': result = await doCome(target, { skipTool }); break
       case 'attack': result = await doAttack(target); break
+      case 'shoot': result = await doShoot(target); break
+      case 'pearl': result = await doPearl(target); break
       case 'mine': result = await doMine(target, { skipTool }); break
       case 'collect': result = await doCollect(); break
       case 'drop': result = await doDrop(target); break

@@ -1,0 +1,716 @@
+// Ranged actions — shoot a bow or crossbow, or throw a trident, snowball, egg,
+// potion or wind charge, at a mob or a block.
+//
+// Aim is solved, not guessed: the projectile is simulated tick by tick with the
+// server's own physics (measured on 26.1 from server-side Pos/Motion samples: an
+// arrow or trident moves, then drag ×0.99, then gravity −0.05; a snowball or egg
+// first takes gravity −0.03, then drag, then moves; a wind charge flies straight
+// at constant speed), and the
+// pitch is bisected until the arc passes through the aim point. Moving targets are
+// led by their observed velocity times the flight time. The arc, not the sightline,
+// must be clear of blocks: a flat shot that clips cover tries the head, the legs,
+// then a lob. Only a target in sight is shot at.
+const { Vec3 } = require('vec3')
+const state = require('../core/state')
+const { raceAbort, AbortError, stopAll } = require('../core/tick')
+const { sendChat, fuzzyMatch, logEvent } = require('../core/utils')
+const { logGameEvent } = require('../world/memory')
+const { entityTag, tagOf, findTagged } = require('../perception/entityTag')
+const { dbBlock } = require('../navigation/atomicSteps')
+const { blockVisible } = require('../perception/visibility')
+
+const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
+const DRAG = 0.99
+// Launch speed in blocks/tick (a fully drawn bow; a crossbow is always full power),
+// gravity, whether gravity and drag apply before the move (throwables) or after it
+// (arrows, tridents), and what flies. `items` = the inventory items it throws (a
+// thrown weapon is its own ammo); `harmless` = does no damage, so one throw by default.
+const ARROW = { gravity: 0.05, updateFirst: false }
+const THROWN = { speed: 1.5, gravity: 0.03, updateFirst: true }
+const WEAPONS = {
+  bow: { ...ARROW, speed: 3.0, projectiles: ARROWS },
+  crossbow: { ...ARROW, speed: 3.15, projectiles: ARROWS },
+  trident: { ...ARROW, speed: 2.5, projectiles: ['trident'] },
+  snowball: { ...THROWN, projectiles: ['snowball'], items: ['snowball'], harmless: true },
+  egg: { ...THROWN, projectiles: ['egg'], items: ['egg', 'blue_egg', 'brown_egg'], harmless: true },
+  // Thrown 20° above the look direction (vertical component only) at 0.5 b/t: ~5m
+  // reach on level ground. `splash` = how far from us the potion must break to spare
+  // us (a splash reaches 4 blocks; a lingering cloud starts at radius 3).
+  splash_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['splash_potion'], items: ['splash_potion'], potion: true, splash: 4 },
+  lingering_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['lingering_potion'], items: ['lingering_potion'], potion: true, splash: 3.5, effectDelay: 30 },
+  // No gravity, no drag (velocity measured constant), launched from the eye itself.
+  // Bursts on whatever it hits and knocks back what's near: `burst` = how far from us
+  // it must break so it doesn't fling us too.
+  wind_charge: { speed: 1.5, gravity: 0, drag: 1, updateFirst: true, fromEye: true, projectiles: ['wind_charge'], items: ['wind_charge'], harmless: true, burst: 2.5 },
+  ender_pearl: { ...THROWN, projectiles: ['ender_pearl'], items: ['ender_pearl'] }
+}
+const PEARL_DAMAGE = 5
+
+// The potion registry by id (static in vanilla; checked on 26.1 at healing=24,
+// harming=26, poison=28).
+const POTIONS = ['water', 'mundane', 'thick', 'awkward', 'night_vision', 'long_night_vision',
+  'invisibility', 'long_invisibility', 'leaping', 'long_leaping', 'strong_leaping',
+  'fire_resistance', 'long_fire_resistance', 'swiftness', 'long_swiftness', 'strong_swiftness',
+  'slowness', 'long_slowness', 'strong_slowness', 'turtle_master', 'long_turtle_master',
+  'strong_turtle_master', 'water_breathing', 'long_water_breathing', 'healing', 'strong_healing',
+  'harming', 'strong_harming', 'poison', 'long_poison', 'strong_poison', 'regeneration',
+  'long_regeneration', 'strong_regeneration', 'strength', 'long_strength', 'strong_strength',
+  'weakness', 'long_weakness', 'luck', 'slow_falling', 'long_slow_falling', 'wind_charged',
+  'weaving', 'oozing', 'infested']
+const potionOf = (item) => {
+  const id = item?.components?.find(c => c.type === 'potion_contents')?.data?.potionId
+  return id == null ? 'custom' : (POTIONS[id] || `potion#${id}`)
+}
+const base = (potion) => potion.replace(/^(long|strong)_/, '')
+const UNDEAD = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'zombified_piglin', 'zoglin',
+  'skeleton', 'stray', 'wither_skeleton', 'bogged', 'parched', 'phantom', 'wither',
+  'skeleton_horse', 'zombie_horse', 'zombie_nautilus'])
+// Potions that hurt or hinder what they splash. Healing hurts the undead, harming
+// heals them, and they shrug off poison and regeneration.
+const HARMFUL = new Set(['harming', 'poison', 'weakness', 'slowness', 'infested', 'oozing', 'weaving'])
+function potionUse(potion, entity) {
+  const b = base(potion)
+  const undead = entity && UNDEAD.has(entity.name)
+  if (undead && b === 'healing') return 'harm'
+  if (undead && b === 'harming') return 'help'
+  if (undead && ['poison', 'regeneration'].includes(b)) return 'useless'
+  if (HARMFUL.has(b)) return 'harm'
+  return 'help'
+}
+// The potion to throw at a target: the one named by `filter` if given (thrown as
+// asked, whatever it does), else the most damaging one for it (strong first).
+function choosePotion(bot, kind, entity, filter) {
+  const pots = bot.inventory.items().filter(i => i.name === kind)
+  if (filter) return pots.find(i => potionOf(i).includes(filter))
+  const rank = (i) => {
+    const p = potionOf(i)
+    if (potionUse(p, entity) !== 'harm') return -1
+    const order = ['healing', 'harming', 'poison', 'weakness', 'slowness']
+    const r = order.indexOf(base(p))
+    return (r < 0 ? 0 : 10 - r) + (p.startsWith('strong_') ? 0.5 : 0)
+  }
+  const best = pots.reduce((a, b) => (rank(b) > rank(a) ? b : a), null)
+  return best && rank(best) >= 0 ? best : null
+}
+const FULL_DRAW_TICKS = 20   // bow power reaches 1.0 after 20 ticks of drawing
+const CHARGE_TICKS = 27      // crossbow loads after 25 ticks held (less with Quick Charge)
+const TRIDENT_WINDUP_TICKS = 11  // a trident throws if released after 10+ ticks
+const TRIDENT_RETURN_TICKS = 200 // how long to wait for a loyal trident to come back
+const MAX_FLIGHT_TICKS = 200
+const MAX_SHOTS = 10
+
+// One tick of velocity change: gravity and drag, in the projectile's order.
+function decay(v, phys) {
+  const drag = phys.drag ?? DRAG
+  if (phys.updateFirst) { v.y = (v.y - phys.gravity) * drag; v.x *= drag }
+  else { v.x *= drag; v.y = v.y * drag - phys.gravity }
+}
+
+// Height of the projectile when it has flown `h` blocks horizontally, launched at
+// `pitch` (radians, up positive) with weapon physics `phys`. null if it never gets
+// that far.
+function heightAt(h, pitch, phys) {
+  let x = 0, y = 0
+  const v = { x: phys.speed * Math.cos(pitch), y: phys.speed * Math.sin(pitch) }
+  for (let t = 1; t <= MAX_FLIGHT_TICKS; t++) {
+    if (phys.updateFirst) decay(v, phys)
+    const nx = x + v.x, ny = y + v.y
+    if (nx >= h) {
+      const f = v.x > 0 ? (h - x) / v.x : 0
+      return { y: y + v.y * f, ticks: t - 1 + f, slope: v.y / v.x }
+    }
+    x = nx; y = ny
+    if (!phys.updateFirst) decay(v, phys)
+    if (y < -200) return null
+  }
+  return null
+}
+
+// Every pitch whose arc passes through (h, dy) relative to the launch point: the
+// flat shot first, then the lob, if they exist. Height at distance h rises with
+// pitch up to the max-range angle and falls after it, so there are at most two
+// crossings; scan for the brackets and bisect each.
+function solvePitches(h, dy, phys) {
+  const err = (p) => { const r = heightAt(h, p, phys); return r ? r.y - dy : -Infinity }
+  const STEP = Math.PI / 360
+  const out = []
+  let lo = -Math.PI / 2 + 0.01, elo = err(lo)
+  for (let p = lo + STEP; p < Math.PI / 2 - 0.01 && out.length < 2; p += STEP) {
+    const e = err(p)
+    // Only a real crossing: a pitch that never gets that far (-Infinity) next to one
+    // that does isn't one (a steep wind charge never covers the distance).
+    if (Number.isFinite(elo) && Number.isFinite(e) && (elo < 0) !== (e < 0)) {
+      let a = lo, b = p
+      const rising = elo < 0
+      for (let i = 0; i < 30; i++) {
+        const m = (a + b) / 2
+        if ((err(m) < 0) === rising) a = m; else b = m
+      }
+      const pitch = (a + b) / 2
+      const end = heightAt(h, pitch, phys)
+      out.push({ pitch, ticks: end.ticks, slope: end.slope })
+    }
+    lo = p; elo = e
+  }
+  return out
+}
+
+// Projectiles leave from 0.1 below the eye; a wind charge from the eye itself.
+function launchPoint(bot, phys) {
+  return bot.entity.position.offset(0, (bot.entity.eyeHeight ?? 1.62) - (phys?.fromEye ? 0 : 0.1), 0)
+}
+
+// Collision height of a block for an arrow: 0 = it flies through (air, plants,
+// torches, liquids), 1.5 = fence/wall, 1 = anything else. A block in sight is read as
+// it is now (and memory updated); one out of sight is what memory says, and unknown
+// counts as clear: we only refuse a shot over what we've seen. Cached for a second,
+// since the plan is redone every tick of the draw.
+const heightCache = new Map()
+let heightCacheAt = 0
+function blockHeight(bot, x, y, z) {
+  const now = Date.now()
+  if (now - heightCacheAt > 1000) { heightCache.clear(); heightCacheAt = now }
+  const k = `${x},${y},${z}`
+  if (heightCache.has(k)) return heightCache.get(k)
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0)
+  let name = dbBlock(x, y, z)
+  if (blockVisible(eye, x, y, z)) {
+    const live = bot.blockAt(new Vec3(x, y, z))?.name
+    if (live && live !== name) {
+      try { state.stmts.upsertBlock.run(x, y, z, live, now) } catch (e) {}
+      name = live
+    }
+  }
+  let hgt = name === null ? UNKNOWN : 0
+  if (name && bot.registry.blocksByName[name]?.boundingBox === 'block') {
+    hgt = /(_fence|_wall)$/.test(name) ? 1.5 : 1
+  }
+  heightCache.set(k, hgt)
+  return hgt
+}
+const UNKNOWN = -1   // blockHeight of a block neither seen now nor remembered
+
+// Walk the arc in ≤0.25-block steps from the launch point until it reaches the aim
+// point; the first sample inside a block's collision box is the obstruction. `skip`
+// is the target block itself. An unknown block counts as clear, except on a lob's
+// last few blocks down onto the target (`strictTop`): a lob drops in from where we
+// often haven't looked, and a roof we don't know about stops it (it did: a pen's
+// slab roof hidden behind an overhang).
+const LOB_KNOWN_ABOVE = 5
+function arcObstruction(bot, from, yaw, pitch, h, skip, phys, point, strictTop) {
+  const dirX = -Math.sin(yaw), dirZ = -Math.cos(yaw)
+  let x = 0, y = 0
+  const v = { x: phys.speed * Math.cos(pitch), y: phys.speed * Math.sin(pitch) }
+  for (let t = 0; t < MAX_FLIGHT_TICKS && x < h; t++) {
+    if (phys.updateFirst) decay(v, phys)
+    const n = Math.max(1, Math.ceil(Math.hypot(v.x, v.y) / 0.25))
+    for (let i = 1; i <= n; i++) {
+      const sx = x + v.x * i / n
+      const px = from.x + dirX * sx, py = from.y + y + v.y * i / n, pz = from.z + dirZ * sx
+      // At the target: past it horizontally, or within its centre (a steep lob
+      // covers 2 blocks of height in the last 0.3 horizontal).
+      if (sx >= h || Math.hypot(px - point.x, py - point.y, pz - point.z) < 0.4) break
+      const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz)
+      if (skip && bx === skip.x && by === skip.y && bz === skip.z) continue
+      const hgt = blockHeight(bot, bx, by, bz)
+      if (hgt === UNKNOWN && strictTop && v.y < 0 && py - point.y < LOB_KNOWN_ABOVE) return new Vec3(bx, by, bz)
+      if (hgt > py - by) return new Vec3(bx, by, bz)
+      // A fence/wall reaches half a block into the cell above it.
+      if (py - by < 0.5 && blockHeight(bot, bx, by - 1, bz) > 1) return new Vec3(bx, by - 1, bz)
+    }
+    x += v.x; y += v.y
+    if (!phys.updateFirst) decay(v, phys)
+  }
+  return null
+}
+
+// Where a thrown potion will break: the start of the tick whose move reaches the
+// target. A projectile hits a mob within 0.3 of its hitbox (plus its own 0.125
+// half-size) and breaks where that tick began, so the burst sits ~1 block short of
+// the mob, toward the thrower — measured: a harming potion at a zombie 4.7m away
+// splashed the thrower.
+function breakPoint(bot, shot, phys, entity) {
+  const from = launchPoint(bot, phys)
+  const dirX = -Math.sin(shot.yaw), dirZ = -Math.cos(shot.yaw)
+  const pad = 0.3 + 0.125
+  const hw = entity ? (entity.width || 0.6) / 2 + pad : 0
+  const inside = (x, y, z) => entity && Math.abs(x - entity.position.x) <= hw && Math.abs(z - entity.position.z) <= hw &&
+    y >= entity.position.y - pad && y <= entity.position.y + (entity.height || 1.8) + pad
+  let h = 0, y = 0
+  const v = { x: phys.speed * Math.cos(shot.pitch), y: phys.speed * Math.sin(shot.pitch) }
+  for (let t = 0; t < MAX_FLIGHT_TICKS; t++) {
+    if (phys.updateFirst) decay(v, phys)
+    const start = new Vec3(from.x + dirX * h, from.y + y, from.z + dirZ * h)
+    for (let i = 1; i <= 8; i++) {
+      const sh = h + v.x * i / 8, sy = y + v.y * i / 8
+      if (inside(from.x + dirX * sh, from.y + sy, from.z + dirZ * sh) || t + i / 8 >= shot.ticks) return start
+    }
+    h += v.x; y += v.y
+    if (!phys.updateFirst) decay(v, phys)
+  }
+  return shot.point
+}
+
+// Every way to put an arrow through `point`, flat shot first:
+// [{ yaw, pitch, ticks, blocked }] in mineflayer's yaw/pitch convention.
+function arcsTo(bot, point, skip, phys) {
+  const from = launchPoint(bot, phys)
+  const d = point.minus(from)
+  const h = Math.sqrt(d.x * d.x + d.z * d.z)
+  const yaw = Math.atan2(-d.x, -d.z)
+  return solvePitches(h, d.y, phys).map((s, i) => ({
+    yaw, pitch: s.pitch, ticks: s.ticks, slope: s.slope, point,
+    blocked: arcObstruction(bot, from, yaw, s.pitch, h, skip, phys, point, i === 1)
+  }))
+}
+
+function findTarget(bot, targetName) {
+  if (['self', 'me', bot.username.toLowerCase()].includes(targetName.toLowerCase())) return { self: true }
+  const m = targetName.match(/^(-?\d+),(-?\d+),(-?\d+)$/)
+  if (m) {
+    const cell = new Vec3(+m[1], +m[2], +m[3])
+    return { block: cell.offset(0.5, 0.5, 0.5), cell }
+  }
+  const normalized = targetName.toLowerCase().replace(/s$/, '')
+  // A bare name means the nearest one in sight: a mob behind a wall can't be shot.
+  const { hasLineOfSight } = require('../perception/vision')
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0)
+  const entity = tagOf(targetName) ? findTagged(targetName) : bot.nearestEntity(e => {
+    if (e === bot.entity) return false
+    const eName = (e.name || '').toLowerCase()
+    const eUser = (e.username || '').toLowerCase()
+    return ((eName && fuzzyMatch(eName, normalized)) || (eUser && fuzzyMatch(eUser, normalized))) &&
+      hasLineOfSight(eye, e.position, e.height || 1.8)
+  })
+  return entity ? { entity } : null
+}
+
+// Where to put the arrow on a mob, best first: chest, then head over low cover, then
+// legs under an overhang.
+const BODY_AIMS = [['chest', 0.7], ['head', 0.9], ['legs', 0.35]]
+// A potion acts on everything near where it breaks: landing at the feet is a full
+// dose and reaches farther than a body hit.
+const POTION_AIMS = [['feet', 0.05], ['chest', 0.7]]
+
+// The shot to take now: the first clear arc over the aim points, flat before lob.
+// A mob is led by its velocity over that arc's flight time. Returns
+// { yaw, pitch, ticks, point, arc } or { blocked } (the first obstruction) or null
+// (out of range).
+function planShot(bot, target, vel, phys) {
+  const firstBlock = { blocked: null }
+  if (target.block) {
+    const arcs = arcsTo(bot, target.block, target.cell, phys)
+    arcs.forEach((a, i) => { a.arc = i ? 'lob' : 'flat' })
+    if (!arcs.length) return null
+    // Landing on a top face (a pearl) needs the arc coming down onto it, not
+    // rising into its side: at least ~1 in 4 at the end.
+    const ok = arcs.filter(a => !target.landOn || a.slope < -0.25)
+    if (!ok.length) return { blocked: target.cell, rising: true }
+    return ok.find(a => !a.blocked) || { blocked: ok[0].blocked }
+  }
+  const e = target.entity
+  let anyArc = false
+  // Every flat option before any lob: a lob flies ~5s and scatters by metres.
+  for (const arc of [0, 1]) {
+    for (const [part, frac] of (phys.potion ? POTION_AIMS : BODY_AIMS)) {
+      const base = e.position.offset(0, (e.height || 1.8) * frac, 0)
+      let point = base, a = null
+      for (let i = 0; i < 3; i++) {   // flight time depends on the led point: iterate
+        a = arcsTo(bot, point, null, phys)[arc]
+        if (!a) break
+        point = base.plus(new Vec3(vel.x, 0, vel.z).scaled(a.ticks))
+      }
+      if (!a) continue
+      anyArc = true
+      if (!a.blocked) { a.arc = arc ? 'lob' : 'flat'; a.part = part; a.flatBlocked = arc ? firstBlock.blocked : null; return a }
+      if (!firstBlock.blocked) firstBlock.blocked = a.blocked
+    }
+  }
+  return anyArc ? firstBlock : null
+}
+
+const ammoCount = (bot) => bot.inventory.items().filter(i => ARROWS.includes(i.name)).reduce((n, i) => n + i.count, 0)
+
+// Put the bow down without firing: switching hotbar slots cancels a draw.
+function cancelDraw(bot) {
+  const slot = bot.quickBarSlot
+  bot.setQuickBarSlot((slot + 1) % 9)
+  bot.setQuickBarSlot(slot)
+}
+
+// Track the target and keep looking down the current clear arc every tick. Resolves
+// with the shot once at least `minTicks` have passed, the arc is clear and the target
+// isn't falling or jumping (the lead only covers horizontal movement); throws why
+// not if that doesn't happen within 40 ticks more. The caller fires one tick after
+// the last look, so the server has our rotation.
+async function aim(bot, target, phys, minTicks) {
+  const vel = new Vec3(0, 0, 0)
+  let lastPos = target.entity?.position.clone()
+  let shot = null, ticks = 0, onTick = null
+  const why = await raceAbort(new Promise((resolve) => {
+    onTick = () => {
+      if (target.entity) {
+        if (!target.entity.isValid) return resolve('target gone')
+        // Smoothed per-tick velocity from observed positions.
+        const p = target.entity.position
+        vel.scale(0.6).add(p.minus(lastPos).scaled(0.4))
+        lastPos = p.clone()
+      }
+      const plan = planShot(bot, target, vel, phys)
+      shot = plan && !plan.blocked ? plan : null
+      if (shot) bot.look(shot.yaw, lookPitchFor(shot.pitch, phys), true)
+      const steady = !target.entity || Math.abs(vel.y) < 0.2
+      if (++ticks > minTicks && shot && steady) resolve(null)
+      else if (ticks > minTicks + 40) {
+        resolve(plan ? `no clear shot (blocked at ${plan.blocked})` : 'out of range')
+      }
+    }
+    bot.on('physicsTick', onTick)
+  }), 10000).finally(() => bot.removeListener('physicsTick', onTick))
+  if (why) throw new Error(why)
+  return shot
+}
+
+function enchantLevel(bot, item, name) {
+  const id = bot.registry.enchantmentsByName[name]?.id
+  const list = item?.components?.find(c => c.type === 'enchantments')?.data?.enchantments || []
+  return list.find(e => e.id === id)?.level || 0
+}
+
+// The pitch to look at so a weapon with a vertical launch offset (potions) leaves at
+// launch pitch `theta`: its direction is (cos p, sin(p + offset)), normalised.
+function lookPitchFor(theta, phys) {
+  if (!phys.pitchOffset) return theta
+  const launch = (p) => Math.atan2(Math.sin(p + phys.pitchOffset), Math.cos(p))
+  let a = -Math.PI / 2, b = Math.PI / 2
+  for (let i = 0; i < 40; i++) {
+    const m = (a + b) / 2
+    if (launch(m) < theta) a = m; else b = m
+  }
+  return (a + b) / 2
+}
+
+const isLoaded = (item) => !!item?.components?.some(c => c.type === 'charged_projectiles' && c.data?.projectiles?.length)
+
+// Draw the bow fully while aiming, release. Resolves with the shot's outcome.
+async function shootBow(bot, target) {
+  bot.activateItem()
+  let shot
+  try { shot = await aim(bot, target, WEAPONS.bow, FULL_DRAW_TICKS + 1) } catch (e) { cancelDraw(bot); throw e }
+  bot.deactivateItem()
+  return watchArrow(bot, target, shot)
+}
+
+// Load the crossbow if it isn't (hold use until charged, release), aim, fire. A
+// loaded crossbow stays loaded, so an abort mid-aim loses nothing.
+async function shootCrossbow(bot, target) {
+  if (!isLoaded(bot.heldItem)) {
+    bot.activateItem()
+    try {
+      await raceAbort(bot.waitForTicks(CHARGE_TICKS), 5000)
+    } catch (e) { cancelDraw(bot); throw e }
+    bot.deactivateItem()
+    for (let i = 0; i < 10 && !isLoaded(bot.heldItem); i++) await raceAbort(bot.waitForTicks(1), 2000)
+    if (!isLoaded(bot.heldItem)) {
+      // Not reproduced yet (seen once after a failed walk): record the circumstances.
+      const ammo = bot.inventory.items().filter(i => ARROWS.includes(i.name)).map(i => `${i.name}x${i.count}`).join(',') || 'none'
+      console.log(`  [CROSSBOW] load failed: held=${bot.heldItem?.name} slot=${bot.quickBarSlot} using=${bot.usingHeldItem} ammo=${ammo} components=${JSON.stringify(bot.heldItem?.components)}`)
+      throw new Error('crossbow did not load')
+    }
+  }
+  const shot = await aim(bot, target, WEAPONS.crossbow, 2)
+  bot.activateItem()     // a loaded crossbow fires on use
+  bot.deactivateItem()
+  return watchArrow(bot, target, shot)
+}
+
+// Wind up, aim, release. A Loyalty trident flies back after it lands or hits and is
+// picked up on contact: wait for it and take it in hand again. Without Loyalty it
+// stays where it fell, and the caller stops.
+async function throwTrident(bot, target) {
+  const loyal = enchantLevel(bot, bot.heldItem, 'loyalty') > 0
+  bot.activateItem()
+  let shot
+  try { shot = await aim(bot, target, WEAPONS.trident, TRIDENT_WINDUP_TICKS) } catch (e) { cancelDraw(bot); throw e }
+  bot.deactivateItem()
+  const r = await watchArrow(bot, target, shot, WEAPONS.trident.projectiles)
+  if (!loyal) {
+    const at = r.projectile?.isValid ? r.projectile.position.floored() : null
+    return { ...r, lost: at ? `the trident has no Loyalty and lies at ${at}` : 'the trident has no Loyalty and is out of sight' }
+  }
+  for (let t = 0; t < TRIDENT_RETURN_TICKS; t++) {
+    const back = bot.inventory.items().find(i => i.name === 'trident')
+    if (back) {
+      if (bot.heldItem?.name !== 'trident') await raceAbort(bot.equip(back, 'hand'), 5000)
+      return r
+    }
+    await raceAbort(bot.waitForTicks(1), 2000)
+  }
+  return { ...r, lost: 'the trident did not come back' }
+}
+
+// Snowball, egg: aim, then one use throws it. The item is its own ammo, so the next
+// one of the stack (or another stack) is in hand for the next throw.
+async function throwItem(bot, target, name, pick) {
+  const w = WEAPONS[name]
+  const next = pick()
+  if (!next) throw new Error(`out of ${name}s`)
+  if (bot.heldItem !== next) await raceAbort(bot.equip(next, 'hand'), 5000)
+  if (target.self) {   // straight down at our own feet
+    await bot.look(bot.entity.yaw, -Math.PI / 2, true)
+    await raceAbort(bot.waitForTicks(2), 2000)
+    bot.activateItem()
+    bot.deactivateItem()
+    return watchArrow(bot, target, { arc: 'down', pitch: -Math.PI / 2, ticks: 6, point: bot.entity.position }, w.projectiles, w.effectDelay)
+  }
+  const shot = await aim(bot, target, w, 2)
+  bot.activateItem()
+  bot.deactivateItem()
+  return watchArrow(bot, target, shot, w.projectiles, w.effectDelay)
+}
+
+// Where our arrow ended up, and whether the target took damage meanwhile. The server
+// sends an arrow's position only about once a second, so it can't be tracked in
+// flight: wait past its flight time and read where it came to rest.
+function watchArrow(bot, target, aim, projectiles = ARROWS, grace = 6) {
+  return new Promise((resolve) => {
+    let arrow = null, ticks = 0, hit = false, goneAt = null
+    const settle = Math.ceil(aim.ticks) + Math.max(25, grace + 5)
+    const onSpawn = (e) => {
+      if (!arrow && projectiles.includes(e.name) && e.position.distanceTo(launchPoint(bot)) < 3) arrow = e
+    }
+    const victim = target.self ? bot.entity : target.entity
+    const onHurt = (e) => { if (victim && e === victim) hit = true }
+    // Instant health on ourselves sends no effect: it shows as health going up.
+    const hp0 = bot.health
+    const onHealth = () => { if (target.self && bot.health > hp0) hit = true }
+    // The server tells only the player itself about its effects; on a mob, an effect
+    // shows as new effect particles in its metadata.
+    const particles = (e) => {
+      const idx = bot.registry.entitiesByName[e.name]?.metadataKeys?.indexOf('effect_particles')
+      return idx >= 0 ? JSON.stringify(e.metadata?.[idx] || []) : '[]'
+    }
+    // An instant heal shows neither: only the mob's synced health going up does.
+    const health = (e) => {
+      const idx = bot.registry.entitiesByName[e.name]?.metadataKeys?.indexOf('health')
+      return idx >= 0 ? e.metadata?.[idx] : undefined
+    }
+    const particles0 = victim && !target.self ? particles(victim) : null
+    const health0 = victim && !target.self ? health(victim) : undefined
+    const onUpdate = (e) => {
+      if (e !== victim || particles0 === null) return
+      if (particles(e) !== particles0 && particles(e) !== '[]') hit = true
+      if (health0 !== undefined && health(e) > health0) hit = true
+    }
+    const onTick = () => {
+      // An arrow that hits a mob is removed, and the hurt can arrive a tick or two
+      // later: give it a few ticks before calling the arrow lost (a lingering
+      // potion's cloud waits ~10 ticks before it acts).
+      if (arrow && !arrow.isValid && goneAt === null) goneAt = ticks
+      if (!hit && ++ticks < settle && (goneAt === null || ticks - goneAt < grace)) return
+      bot.removeListener('entitySpawn', onSpawn)
+      bot.removeListener('entityHurt', onHurt)
+      bot.removeListener('entityEffect', onHurt)
+      bot.removeListener('health', onHealth)
+      bot.removeListener('entityUpdate', onUpdate)
+      bot.removeListener('physicsTick', onTick)
+      resolve({ hit, miss: arrow?.isValid ? arrow.position.distanceTo(aim.point) : null, aim, projectile: arrow })
+    }
+    bot.on('entitySpawn', onSpawn)
+    bot.on('entityHurt', onHurt)
+    bot.on('entityEffect', onHurt)   // a potion's hit on us is its effect
+    bot.on('health', onHealth)
+    bot.on('entityUpdate', onUpdate)
+    bot.on('physicsTick', onTick)
+  })
+}
+
+// shoot:TARGET[:COUNT][:bow|crossbow] — TARGET is a mob name, a nearby= tag, or X,Y,Z
+// of a block. A mob is shot until it dies (at most COUNT arrows); a block gets COUNT
+// arrows. Without a weapon named: the one in hand, else a bow, else a crossbow.
+async function doShoot(arg) {
+  stopAll()
+  const bot = state.bot
+  const parts = arg.split(':')
+  const targetName = parts[0]
+  const asked = parts.slice(1).find(p => WEAPONS[p])
+  // Any other word names the potion: shoot:zombie:splash_potion:strong_healing.
+  const potionFilter = parts.slice(1).find(p => !WEAPONS[p] && !/^\d+$/.test(p))
+  const countArg = parts.slice(1).find(p => /^\d+$/.test(p))
+  const items = bot.inventory.items()
+  const itemsOf = (n) => WEAPONS[n].items || [n]
+  const inHand = Object.keys(WEAPONS).find(n => itemsOf(n).includes(bot.heldItem?.name))
+  const weaponName = asked || inHand || ['bow', 'crossbow', 'trident'].find(n => items.some(i => i.name === n))
+  const weapon = weaponName && items.find(i => itemsOf(weaponName).includes(i.name))
+  if (!weapon) {
+    const why = asked ? `no ${asked}` : 'no bow, crossbow or trident'
+    sendChat(`I have ${why}.`); logEvent(`shoot: ${why}`); return false
+  }
+  const creative = bot.game.gameMode === 'creative'
+  const usesArrows = WEAPONS[weaponName].projectiles === ARROWS
+  if (usesArrows && !creative && ammoCount(bot) === 0) { sendChat('I have no arrows.'); logEvent('shoot: no arrows'); return false }
+  if (weaponName === 'trident' && enchantLevel(bot, weapon, 'riptide') > 0) {
+    sendChat("A Riptide trident can't be thrown."); logEvent("shoot: a Riptide trident can't be thrown"); return false
+  }
+  const target = findTarget(bot, targetName)
+  if (!target) { sendChat(`No ${targetName} nearby!`); logEvent(`shoot: no ${targetName} nearby`); return false }
+  // A harmless throw (snowball, egg) is one throw unless asked for more; a snowball
+  // does hurt a blaze.
+  const harmless = WEAPONS[weaponName].harmless && !(weaponName === 'snowball' && target.entity?.name === 'blaze')
+  const count = Math.max(1, parseInt(countArg, 10) || (target.block || target.self || harmless || WEAPONS[weaponName].potion ? 1 : MAX_SHOTS))
+  if (target.self && !WEAPONS[weaponName].potion) { sendChat("I can only splash a potion on myself."); return false }
+  const label = target.self ? 'myself' : target.entity ? entityTag(target.entity) : targetName
+  // A potion: the one to throw, and whether it does what we want to this target.
+  let pick = () => bot.inventory.items().find(i => itemsOf(weaponName).includes(i.name))
+  let potion = null
+  if (WEAPONS[weaponName].potion) {
+    const victim = target.self ? bot.entity : target.entity
+    if (target.self && !potionFilter) { sendChat('Name the potion to splash on myself.'); return false }
+    const first = choosePotion(bot, weaponName, target.self ? null : victim, potionFilter)
+    if (!first) {
+      const why = potionFilter ? `no ${weaponName} of ${potionFilter}` : `no ${weaponName} that hurts ${label} (name one to throw it anyway)`
+      sendChat(`I have ${why}.`); logEvent(`shoot: ${why}`); return false
+    }
+    potion = potionOf(first)
+    pick = () => bot.inventory.items().find(i => i.name === weaponName && potionOf(i) === potion)
+  }
+  state.currentTask = `shooting ${label}`
+
+  // Only a death counts as a kill: a mob that despawns or leaves tracking range is
+  // gone from bot.entities too.
+  let died = false
+  const onDead = (e) => { if (e === target.entity) died = true }
+  bot.on('entityDead', onDead)
+  const { hasLineOfSight } = require('../perception/vision')
+  const inSight = () => {
+    if (target.self) return true
+    const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0)
+    return target.entity
+      ? hasLineOfSight(eye, target.entity.position, target.entity.height || 1.8)
+      : blockVisible(eye, target.cell.x, target.cell.y, target.cell.z)
+  }
+
+  state.shooting = true
+  let hits = 0, shots = 0, stop = null
+  try {
+    if (!itemsOf(weaponName).includes(bot.heldItem?.name)) await raceAbort(bot.equip(weapon, 'hand'), 5000)
+    bot.deactivateItem()   // drop a raised shield; the draw needs the hands
+    while (shots < count) {
+      if (usesArrows && !creative && ammoCount(bot) === 0) { stop = 'out of arrows'; break }
+      if (target.entity && !target.entity.isValid) break
+      if (WEAPONS[weaponName].potion && !pick()) { stop = `out of ${potion} ${weaponName}s`; break }
+      if (target.self) {
+        const r = await throwItem(bot, target, weaponName, pick)
+        shots++; if (r.hit) hits++
+        console.log(`  [${weaponName.toUpperCase()}] ${potion} on myself → ${r.hit ? 'took effect' : 'no effect seen'}`)
+        continue
+      }
+      if (!inSight()) { stop = shots ? `lost sight of ${label}` : `can't see ${label} from here`; break }
+      const plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS[weaponName])
+      if (!plan) { stop = `${label} is out of ${weaponName} range`; break }
+      if (plan.blocked) {
+        stop = `no clear shot at ${label}: the arc hits ${dbBlock(plan.blocked.x, plan.blocked.y, plan.blocked.z)} at ${plan.blocked}`
+        break
+      }
+      const w = WEAPONS[weaponName]
+      const reach = w.burst || (w.splash && potionUse(potion, bot.entity) === 'harm' ? w.splash : 0)
+      if (reach && breakPoint(bot, plan, w, target.entity).distanceTo(bot.entity.position) < reach) {
+        stop = `${label} is too close: the ${potion || weaponName} would ${w.burst ? 'blast' : 'splash'} me too (it bursts ~1 block in front of the target; step back)`
+        break
+      }
+      const fire = { bow: shootBow, crossbow: shootCrossbow, trident: throwTrident }[weaponName]
+      const r = await (fire ? fire(bot, target) : throwItem(bot, target, weaponName, pick))
+      shots++
+      if (r.hit) hits++
+      const dist = r.aim.point.distanceTo(launchPoint(bot))
+      if (r.lost) stop = r.lost
+      const why = r.aim.flatBlocked ? ` (flat blocked by ${dbBlock(r.aim.flatBlocked.x, r.aim.flatBlocked.y, r.aim.flatBlocked.z)} at ${r.aim.flatBlocked})` : ''
+      console.log(`  [${weaponName.toUpperCase()}] shot ${shots} at ${label} ${dist.toFixed(1)}m ${r.aim.arc}${why}${r.aim.part ? ` at ${r.aim.part}` : ''} pitch=${(r.aim.pitch * 180 / Math.PI).toFixed(1)}° → ${r.hit ? 'HIT' : r.miss === null ? 'miss (out of sight)' : `landed ${r.miss.toFixed(2)}m from aim`}`)
+      if (r.lost) break
+    }
+  } catch (err) {
+    if (err instanceof AbortError) throw err
+    if (err.message !== 'target gone') stop = err.message
+  } finally {
+    state.shooting = false
+    bot.removeListener('entityDead', onDead)
+  }
+  const killed = died
+  if (killed) {
+    const pos = target.entity.position
+    logGameEvent('kill', target.entity.name || target.entity.username, 1, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), { weapon: weaponName, tag: label, uuid: target.entity.uuid })
+  } else if (target.entity && !target.entity.isValid) {
+    stop = `lost track of ${label}: it is gone but didn't die in view (despawned or out of range)`
+  }
+  if (stop) console.log(`  [${weaponName.toUpperCase()}] ${stop}`)
+  const what = WEAPONS[weaponName].projectiles === ARROWS ? `${weaponName} arrows`
+    : WEAPONS[weaponName].potion ? `${potion} ${weaponName}s` : `${weaponName} throws`
+  logEvent(`shoot: ${shots} ${what} at ${label}, ${hits} hit${killed ? ', killed it' : ''}${stop ? ` — stopped: ${stop}` : ''}`)
+  if (killed) sendChat('Got it!')
+  state.currentTask = null
+  return target.entity && !harmless && !WEAPONS[weaponName].potion ? killed : shots > 0
+}
+
+// pearl:X,Y,Z — throw an ender pearl onto the top of block X,Y,Z and be teleported
+// there (5 damage). The block must be known solid with room above, and the arc must
+// come down onto its top: one that hits the side drops us beside it.
+async function doPearl(arg) {
+  stopAll()
+  const bot = state.bot
+  const m = arg.match(/^(-?\d+),(-?\d+),(-?\d+)$/)
+  if (!m) { logEvent(`pearl: expected X,Y,Z, got "${arg}"`); return false }
+  const cell = new Vec3(+m[1], +m[2], +m[3])
+  const where = `${cell.x},${cell.y},${cell.z}`
+  const fail = (why) => { console.log(`  [PEARL] ${why}`); logEvent(`pearl: ${why}`); return false }
+  if (!bot.inventory.items().some(i => i.name === 'ender_pearl')) return fail('no ender pearl')
+  if (bot.health <= PEARL_DAMAGE + 1) return fail(`HP ${Math.round(bot.health)} is too low for the ${PEARL_DAMAGE} damage a pearl costs`)
+  const solid = (x, y, z) => blockHeight(bot, x, y, z) >= 1
+  const seen = blockVisible(bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0), cell.x, cell.y, cell.z)
+  if (blockHeight(bot, cell.x, cell.y, cell.z) === UNKNOWN) return fail(`I don't know what is at ${where}`)
+  if (!solid(cell.x, cell.y, cell.z)) return fail(`${where} is ${seen ? '' : 'out of sight and I remember it as '}${dbBlock(cell.x, cell.y, cell.z) || 'air'}, nothing to land on`)
+  if (solid(cell.x, cell.y + 1, cell.z) || solid(cell.x, cell.y + 2, cell.z)) return fail(`no room to stand on ${where}`)
+  // Aim just above the top face. We land where the pearl was at the start of the
+  // tick it hits (measured: 0.3m short on a lob, 0.7m on a flat throw, toward us),
+  // so move the aim point until that spot is over the block's centre.
+  const centre = cell.offset(0.5, 1.05, 0.5)
+  const target = { block: centre, cell, landOn: true }
+  let plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS.ender_pearl)
+  for (let i = 0; i < 4 && plan && !plan.blocked; i++) {
+    const land = breakPoint(bot, plan, WEAPONS.ender_pearl, null)
+    target.block = target.block.plus(new Vec3(centre.x - land.x, 0, centre.z - land.z))
+    plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS.ender_pearl)
+  }
+  if (!plan) return fail(`${where} is out of pearl range`)
+  if (plan.rising) return fail(`can't come down onto ${where} from here (the arc would hit its side)`)
+  if (plan.blocked) return fail(`no clear throw to ${where}: the arc hits ${dbBlock(plan.blocked.x, plan.blocked.y, plan.blocked.z)} at ${plan.blocked}`)
+
+  state.currentTask = `pearling to ${where}`
+  const from = bot.entity.position.clone(), hp0 = bot.health
+  try {
+    const pearl = bot.inventory.items().find(i => i.name === 'ender_pearl')
+    if (bot.heldItem !== pearl) await raceAbort(bot.equip(pearl, 'hand'), 5000)
+    const shot = await aim(bot, target, WEAPONS.ender_pearl, 2)
+    // The teleport arrives as a forced move once the pearl lands.
+    const landed = new Promise((resolve) => {
+      const onMove = () => { bot.removeListener('forcedMove', onMove); resolve(true) }
+      bot.on('forcedMove', onMove)
+      setTimeout(() => { bot.removeListener('forcedMove', onMove); resolve(false) }, (shot.ticks + 40) * 50)
+    })
+    bot.activateItem()
+    bot.deactivateItem()
+    const moved = await raceAbort(landed, (shot.ticks + 60) * 50)
+    const at = bot.entity.position
+    const off = Math.hypot(at.x - centre.x, at.z - centre.z)
+    console.log(`  [PEARL] ${shot.arc} pitch=${(shot.pitch * 180 / Math.PI).toFixed(1)}° from ${from.floored()} → ${moved ? `landed at ${at.floored()} (${off.toFixed(2)}m from the centre)` : 'no teleport'}`)
+    if (!moved) return fail(`the pearl to ${where} didn't teleport me (missed, or hit something on the way)`)
+    logEvent(`pearl: to ${where}, landed at ${at.floored()} (${off.toFixed(1)}m from its centre), HP ${Math.round(hp0)}→${Math.round(bot.health)}`)
+    return off < 2
+  } catch (err) {
+    if (err instanceof AbortError) throw err
+    return fail(err.message)
+  } finally {
+    state.currentTask = null
+  }
+}
+
+module.exports = { doShoot, doPearl, solvePitches, heightAt }

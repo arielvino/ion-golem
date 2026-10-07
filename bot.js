@@ -321,11 +321,13 @@ function createBot() {
         const pos = collected.position
         const md = collected.metadata
         let name = null, count = 1
+        // A stuck arrow or a returning trident is picked up as itself, not an item stack.
+        if (['arrow', 'spectral_arrow', 'trident'].includes(collected.name)) name = collected.name
 
         // metadata is object keyed by index. Key 8 = "item" (item_stack) for item entities.
         // The value is the raw protocol item_stack: { itemId, itemCount, ... }
         // or on some versions: { present, itemId, itemCount }
-        if (md) {
+        if (md && !name) {
           // Try key 8 first (standard item entity metadata slot)
           const itemData = md[8]
           if (itemData && typeof itemData === 'object') {
@@ -364,6 +366,7 @@ function createBot() {
     bot.once('end', () => { clearInterval(visionInterval) })
 
     setupAutonomous(interrupt)
+    require('./src/perception/effects').bind(bot)
 
     // --- Accessibility subtitles from sound events ---
     const langData = (() => {
