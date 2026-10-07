@@ -170,31 +170,40 @@ function blockHeight(bot, x, y, z) {
       name = live
     }
   }
-  let hgt = 0
+  let hgt = name === null ? UNKNOWN : 0
   if (name && bot.registry.blocksByName[name]?.boundingBox === 'block') {
     hgt = /(_fence|_wall)$/.test(name) ? 1.5 : 1
   }
   heightCache.set(k, hgt)
   return hgt
 }
+const UNKNOWN = -1   // blockHeight of a block neither seen now nor remembered
 
-// Walk the arc in ≤0.25-block steps from the launch point until it has covered the
-// horizontal distance to the aim point; the first sample inside a block's collision
-// box is the obstruction. `skip` is the target block itself.
-function arcObstruction(bot, from, yaw, pitch, h, skip, phys) {
+// Walk the arc in ≤0.25-block steps from the launch point until it reaches the aim
+// point; the first sample inside a block's collision box is the obstruction. `skip`
+// is the target block itself. An unknown block counts as clear, except on a lob's
+// last few blocks down onto the target (`strictTop`): a lob drops in from where we
+// often haven't looked, and a roof we don't know about stops it (it did: a pen's
+// slab roof hidden behind an overhang).
+const LOB_KNOWN_ABOVE = 5
+function arcObstruction(bot, from, yaw, pitch, h, skip, phys, point, strictTop) {
   const dirX = -Math.sin(yaw), dirZ = -Math.cos(yaw)
   let x = 0, y = 0
   const v = { x: phys.speed * Math.cos(pitch), y: phys.speed * Math.sin(pitch) }
-  for (let t = 0; t < MAX_FLIGHT_TICKS && x < h - 0.3; t++) {
+  for (let t = 0; t < MAX_FLIGHT_TICKS && x < h; t++) {
     if (phys.updateFirst) decay(v, phys)
     const n = Math.max(1, Math.ceil(Math.hypot(v.x, v.y) / 0.25))
     for (let i = 1; i <= n; i++) {
       const sx = x + v.x * i / n
-      if (sx >= h - 0.3) break   // at the target
       const px = from.x + dirX * sx, py = from.y + y + v.y * i / n, pz = from.z + dirZ * sx
+      // At the target: past it horizontally, or within its centre (a steep lob
+      // covers 2 blocks of height in the last 0.3 horizontal).
+      if (sx >= h || Math.hypot(px - point.x, py - point.y, pz - point.z) < 0.4) break
       const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz)
       if (skip && bx === skip.x && by === skip.y && bz === skip.z) continue
-      if (blockHeight(bot, bx, by, bz) > py - by) return new Vec3(bx, by, bz)
+      const hgt = blockHeight(bot, bx, by, bz)
+      if (hgt === UNKNOWN && strictTop && v.y < 0 && py - point.y < LOB_KNOWN_ABOVE) return new Vec3(bx, by, bz)
+      if (hgt > py - by) return new Vec3(bx, by, bz)
       // A fence/wall reaches half a block into the cell above it.
       if (py - by < 0.5 && blockHeight(bot, bx, by - 1, bz) > 1) return new Vec3(bx, by - 1, bz)
     }
@@ -238,9 +247,9 @@ function arcsTo(bot, point, skip, phys) {
   const d = point.minus(from)
   const h = Math.sqrt(d.x * d.x + d.z * d.z)
   const yaw = Math.atan2(-d.x, -d.z)
-  return solvePitches(h, d.y, phys).map(s => ({
+  return solvePitches(h, d.y, phys).map((s, i) => ({
     yaw, pitch: s.pitch, ticks: s.ticks, point,
-    blocked: arcObstruction(bot, from, yaw, s.pitch, h, skip, phys)
+    blocked: arcObstruction(bot, from, yaw, s.pitch, h, skip, phys, point, i === 1)
   }))
 }
 
@@ -298,7 +307,7 @@ function planShot(bot, target, vel, phys) {
       }
       if (!a) continue
       anyArc = true
-      if (!a.blocked) { a.arc = arc ? 'lob' : 'flat'; a.part = part; return a }
+      if (!a.blocked) { a.arc = arc ? 'lob' : 'flat'; a.part = part; a.flatBlocked = arc ? firstBlock.blocked : null; return a }
       if (!firstBlock.blocked) firstBlock.blocked = a.blocked
     }
   }
@@ -387,7 +396,12 @@ async function shootCrossbow(bot, target) {
     } catch (e) { cancelDraw(bot); throw e }
     bot.deactivateItem()
     for (let i = 0; i < 10 && !isLoaded(bot.heldItem); i++) await raceAbort(bot.waitForTicks(1), 2000)
-    if (!isLoaded(bot.heldItem)) throw new Error('crossbow did not load')
+    if (!isLoaded(bot.heldItem)) {
+      // Not reproduced yet (seen once after a failed walk): record the circumstances.
+      const ammo = bot.inventory.items().filter(i => ARROWS.includes(i.name)).map(i => `${i.name}x${i.count}`).join(',') || 'none'
+      console.log(`  [CROSSBOW] load failed: held=${bot.heldItem?.name} slot=${bot.quickBarSlot} using=${bot.usingHeldItem} ammo=${ammo} components=${JSON.stringify(bot.heldItem?.components)}`)
+      throw new Error('crossbow did not load')
+    }
   }
   const shot = await aim(bot, target, WEAPONS.crossbow, 2)
   bot.activateItem()     // a loaded crossbow fires on use
@@ -595,7 +609,8 @@ async function doShoot(arg) {
       if (r.hit) hits++
       const dist = r.aim.point.distanceTo(launchPoint(bot))
       if (r.lost) stop = r.lost
-      console.log(`  [${weaponName.toUpperCase()}] shot ${shots} at ${label} ${dist.toFixed(1)}m ${r.aim.arc}${r.aim.part ? ` at ${r.aim.part}` : ''} pitch=${(r.aim.pitch * 180 / Math.PI).toFixed(1)}° → ${r.hit ? 'HIT' : r.miss === null ? 'miss (out of sight)' : `landed ${r.miss.toFixed(2)}m from aim`}`)
+      const why = r.aim.flatBlocked ? ` (flat blocked by ${dbBlock(r.aim.flatBlocked.x, r.aim.flatBlocked.y, r.aim.flatBlocked.z)} at ${r.aim.flatBlocked})` : ''
+      console.log(`  [${weaponName.toUpperCase()}] shot ${shots} at ${label} ${dist.toFixed(1)}m ${r.aim.arc}${why}${r.aim.part ? ` at ${r.aim.part}` : ''} pitch=${(r.aim.pitch * 180 / Math.PI).toFixed(1)}° → ${r.hit ? 'HIT' : r.miss === null ? 'miss (out of sight)' : `landed ${r.miss.toFixed(2)}m from aim`}`)
       if (r.lost) break
     }
   } catch (err) {
