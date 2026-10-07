@@ -1,4 +1,4 @@
-// Ranged actions — shoot a bow or crossbow at a mob or a block.
+// Ranged actions — shoot a bow or crossbow, or throw a trident, at a mob or a block.
 //
 // Aim is solved, not guessed: the arrow is simulated tick by tick with the server's
 // own physics (move by velocity, then drag ×0.99, then gravity −0.05 on y), and the
@@ -18,10 +18,17 @@ const { blockVisible } = require('../perception/visibility')
 const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
 const DRAG = 0.99
 const GRAVITY = 0.05
-// Arrow speed in blocks/tick: a fully drawn bow, and a crossbow (always full power).
-const WEAPONS = { bow: { speed: 3.0 }, crossbow: { speed: 3.15 } }
+// Launch speed in blocks/tick (a fully drawn bow; a crossbow is always full power)
+// and what flies. A trident is its own projectile, with the same drag and gravity.
+const WEAPONS = {
+  bow: { speed: 3.0, projectiles: ARROWS },
+  crossbow: { speed: 3.15, projectiles: ARROWS },
+  trident: { speed: 2.5, projectiles: ['trident'] }
+}
 const FULL_DRAW_TICKS = 20   // bow power reaches 1.0 after 20 ticks of drawing
 const CHARGE_TICKS = 27      // crossbow loads after 25 ticks held (less with Quick Charge)
+const TRIDENT_WINDUP_TICKS = 11  // a trident throws if released after 10+ ticks
+const TRIDENT_RETURN_TICKS = 200 // how long to wait for a loyal trident to come back
 const MAX_FLIGHT_TICKS = 200
 const MAX_SHOTS = 10
 
@@ -240,6 +247,12 @@ async function aim(bot, target, speed, minTicks) {
   return shot
 }
 
+function enchantLevel(bot, item, name) {
+  const id = bot.registry.enchantmentsByName[name]?.id
+  const list = item?.components?.find(c => c.type === 'enchantments')?.data?.enchantments || []
+  return list.find(e => e.id === id)?.level || 0
+}
+
 const isLoaded = (item) => !!item?.components?.some(c => c.type === 'charged_projectiles' && c.data?.projectiles?.length)
 
 // Draw the bow fully while aiming, release. Resolves with the shot's outcome.
@@ -269,15 +282,40 @@ async function shootCrossbow(bot, target) {
   return watchArrow(bot, target, shot)
 }
 
+// Wind up, aim, release. A Loyalty trident flies back after it lands or hits and is
+// picked up on contact: wait for it and take it in hand again. Without Loyalty it
+// stays where it fell, and the caller stops.
+async function throwTrident(bot, target) {
+  const loyal = enchantLevel(bot, bot.heldItem, 'loyalty') > 0
+  bot.activateItem()
+  let shot
+  try { shot = await aim(bot, target, WEAPONS.trident.speed, TRIDENT_WINDUP_TICKS) } catch (e) { cancelDraw(bot); throw e }
+  bot.deactivateItem()
+  const r = await watchArrow(bot, target, shot, WEAPONS.trident.projectiles)
+  if (!loyal) {
+    const at = r.projectile?.isValid ? r.projectile.position.floored() : null
+    return { ...r, lost: at ? `the trident has no Loyalty and lies at ${at}` : 'the trident has no Loyalty and is out of sight' }
+  }
+  for (let t = 0; t < TRIDENT_RETURN_TICKS; t++) {
+    const back = bot.inventory.items().find(i => i.name === 'trident')
+    if (back) {
+      if (bot.heldItem?.name !== 'trident') await raceAbort(bot.equip(back, 'hand'), 5000)
+      return r
+    }
+    await raceAbort(bot.waitForTicks(1), 2000)
+  }
+  return { ...r, lost: 'the trident did not come back' }
+}
+
 // Where our arrow ended up, and whether the target took damage meanwhile. The server
 // sends an arrow's position only about once a second, so it can't be tracked in
 // flight: wait past its flight time and read where it came to rest.
-function watchArrow(bot, target, aim) {
+function watchArrow(bot, target, aim, projectiles = ARROWS) {
   return new Promise((resolve) => {
     let arrow = null, ticks = 0, hit = false, goneAt = null
     const settle = Math.ceil(aim.ticks) + 25
     const onSpawn = (e) => {
-      if (!arrow && ARROWS.includes(e.name) && e.position.distanceTo(launchPoint(bot)) < 3) arrow = e
+      if (!arrow && projectiles.includes(e.name) && e.position.distanceTo(launchPoint(bot)) < 3) arrow = e
     }
     const onHurt = (e) => { if (target.entity && e === target.entity) hit = true }
     const onTick = () => {
@@ -288,7 +326,7 @@ function watchArrow(bot, target, aim) {
       bot.removeListener('entitySpawn', onSpawn)
       bot.removeListener('entityHurt', onHurt)
       bot.removeListener('physicsTick', onTick)
-      resolve({ hit, miss: arrow?.isValid ? arrow.position.distanceTo(aim.point) : null, aim })
+      resolve({ hit, miss: arrow?.isValid ? arrow.position.distanceTo(aim.point) : null, aim, projectile: arrow })
     }
     bot.on('entitySpawn', onSpawn)
     bot.on('entityHurt', onHurt)
@@ -308,14 +346,18 @@ async function doShoot(arg) {
   const countArg = parts.slice(1).find(p => /^\d+$/.test(p))
   const count = Math.max(1, parseInt(countArg, 10) || (/^-?\d+,/.test(targetName) ? 1 : MAX_SHOTS))
   const items = bot.inventory.items()
-  const weaponName = asked || (WEAPONS[bot.heldItem?.name] ? bot.heldItem.name : ['bow', 'crossbow'].find(n => items.some(i => i.name === n)))
+  const weaponName = asked || (WEAPONS[bot.heldItem?.name] ? bot.heldItem.name : ['bow', 'crossbow', 'trident'].find(n => items.some(i => i.name === n)))
   const weapon = weaponName && items.find(i => i.name === weaponName)
   if (!weapon) {
-    const why = asked ? `no ${asked}` : 'no bow or crossbow'
+    const why = asked ? `no ${asked}` : 'no bow, crossbow or trident'
     sendChat(`I have ${why}.`); logEvent(`shoot: ${why}`); return false
   }
   const creative = bot.game.gameMode === 'creative'
-  if (!creative && ammoCount(bot) === 0) { sendChat('I have no arrows.'); logEvent('shoot: no arrows'); return false }
+  const usesArrows = WEAPONS[weaponName].projectiles === ARROWS
+  if (usesArrows && !creative && ammoCount(bot) === 0) { sendChat('I have no arrows.'); logEvent('shoot: no arrows'); return false }
+  if (weaponName === 'trident' && enchantLevel(bot, weapon, 'riptide') > 0) {
+    sendChat("A Riptide trident can't be thrown."); logEvent("shoot: a Riptide trident can't be thrown"); return false
+  }
   const target = findTarget(bot, targetName)
   if (!target) { sendChat(`No ${targetName} nearby!`); logEvent(`shoot: no ${targetName} nearby`); return false }
   const label = target.entity ? entityTag(target.entity) : targetName
@@ -340,7 +382,7 @@ async function doShoot(arg) {
     if (bot.heldItem?.name !== weaponName) await raceAbort(bot.equip(weapon, 'hand'), 5000)
     bot.deactivateItem()   // drop a raised shield; the draw needs the hands
     while (shots < count) {
-      if (!creative && ammoCount(bot) === 0) { stop = 'out of arrows'; break }
+      if (usesArrows && !creative && ammoCount(bot) === 0) { stop = 'out of arrows'; break }
       if (target.entity && !target.entity.isValid) break
       if (!inSight()) { stop = shots ? `lost sight of ${label}` : `can't see ${label} from here`; break }
       const plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS[weaponName].speed)
@@ -349,11 +391,13 @@ async function doShoot(arg) {
         stop = `no clear shot at ${label}: the arc hits ${dbBlock(plan.blocked.x, plan.blocked.y, plan.blocked.z)} at ${plan.blocked}`
         break
       }
-      const r = await (weaponName === 'crossbow' ? shootCrossbow : shootBow)(bot, target)
+      const r = await ({ bow: shootBow, crossbow: shootCrossbow, trident: throwTrident })[weaponName](bot, target)
       shots++
       if (r.hit) hits++
       const dist = r.aim.point.distanceTo(launchPoint(bot))
+      if (r.lost) stop = r.lost
       console.log(`  [${weaponName.toUpperCase()}] shot ${shots} at ${label} ${dist.toFixed(1)}m ${r.aim.arc}${r.aim.part ? ` at ${r.aim.part}` : ''} pitch=${(r.aim.pitch * 180 / Math.PI).toFixed(1)}° → ${r.hit ? 'HIT' : r.miss === null ? 'miss (arrow out of sight)' : `landed ${r.miss.toFixed(2)}m from aim`}`)
+      if (r.lost) break
     }
   } catch (err) {
     if (err instanceof AbortError) throw err
@@ -370,7 +414,7 @@ async function doShoot(arg) {
     stop = `lost track of ${label}: it is gone but didn't die in view (despawned or out of range)`
   }
   if (stop) console.log(`  [${weaponName.toUpperCase()}] ${stop}`)
-  logEvent(`shoot: ${shots} ${weaponName} arrows at ${label}, ${hits} hit${killed ? ', killed it' : ''}${stop ? ` — stopped: ${stop}` : ''}`)
+  logEvent(`shoot: ${shots} ${weaponName === 'trident' ? 'trident throws' : `${weaponName} arrows`} at ${label}, ${hits} hit${killed ? ', killed it' : ''}${stop ? ` — stopped: ${stop}` : ''}`)
   if (killed) sendChat('Got it!')
   state.currentTask = null
   return target.entity ? killed : shots > 0
