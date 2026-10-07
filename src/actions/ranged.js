@@ -41,8 +41,10 @@ const WEAPONS = {
   // No gravity, no drag (velocity measured constant), launched from the eye itself.
   // Bursts on whatever it hits and knocks back what's near: `burst` = how far from us
   // it must break so it doesn't fling us too.
-  wind_charge: { speed: 1.5, gravity: 0, drag: 1, updateFirst: true, fromEye: true, projectiles: ['wind_charge'], items: ['wind_charge'], harmless: true, burst: 2.5 }
+  wind_charge: { speed: 1.5, gravity: 0, drag: 1, updateFirst: true, fromEye: true, projectiles: ['wind_charge'], items: ['wind_charge'], harmless: true, burst: 2.5 },
+  ender_pearl: { ...THROWN, projectiles: ['ender_pearl'], items: ['ender_pearl'] }
 }
+const PEARL_DAMAGE = 5
 
 // The potion registry by id (static in vanilla; checked on 26.1 at healing=24,
 // harming=26, poison=28).
@@ -115,7 +117,7 @@ function heightAt(h, pitch, phys) {
     const nx = x + v.x, ny = y + v.y
     if (nx >= h) {
       const f = v.x > 0 ? (h - x) / v.x : 0
-      return { y: y + v.y * f, ticks: t - 1 + f }
+      return { y: y + v.y * f, ticks: t - 1 + f, slope: v.y / v.x }
     }
     x = nx; y = ny
     if (!phys.updateFirst) decay(v, phys)
@@ -145,7 +147,8 @@ function solvePitches(h, dy, phys) {
         if ((err(m) < 0) === rising) a = m; else b = m
       }
       const pitch = (a + b) / 2
-      out.push({ pitch, ticks: heightAt(h, pitch, phys).ticks })
+      const end = heightAt(h, pitch, phys)
+      out.push({ pitch, ticks: end.ticks, slope: end.slope })
     }
     lo = p; elo = e
   }
@@ -256,7 +259,7 @@ function arcsTo(bot, point, skip, phys) {
   const h = Math.sqrt(d.x * d.x + d.z * d.z)
   const yaw = Math.atan2(-d.x, -d.z)
   return solvePitches(h, d.y, phys).map((s, i) => ({
-    yaw, pitch: s.pitch, ticks: s.ticks, point,
+    yaw, pitch: s.pitch, ticks: s.ticks, slope: s.slope, point,
     blocked: arcObstruction(bot, from, yaw, s.pitch, h, skip, phys, point, i === 1)
   }))
 }
@@ -299,7 +302,11 @@ function planShot(bot, target, vel, phys) {
     const arcs = arcsTo(bot, target.block, target.cell, phys)
     arcs.forEach((a, i) => { a.arc = i ? 'lob' : 'flat' })
     if (!arcs.length) return null
-    return arcs.find(a => !a.blocked) || { blocked: arcs[0].blocked }
+    // Landing on a top face (a pearl) needs the arc coming down onto it, not
+    // rising into its side: at least ~1 in 4 at the end.
+    const ok = arcs.filter(a => !target.landOn || a.slope < -0.25)
+    if (!ok.length) return { blocked: target.cell, rising: true }
+    return ok.find(a => !a.blocked) || { blocked: ok[0].blocked }
   }
   const e = target.entity
   let anyArc = false
@@ -644,4 +651,66 @@ async function doShoot(arg) {
   return target.entity && !harmless && !WEAPONS[weaponName].potion ? killed : shots > 0
 }
 
-module.exports = { doShoot, solvePitches, heightAt }
+// pearl:X,Y,Z — throw an ender pearl onto the top of block X,Y,Z and be teleported
+// there (5 damage). The block must be known solid with room above, and the arc must
+// come down onto its top: one that hits the side drops us beside it.
+async function doPearl(arg) {
+  stopAll()
+  const bot = state.bot
+  const m = arg.match(/^(-?\d+),(-?\d+),(-?\d+)$/)
+  if (!m) { logEvent(`pearl: expected X,Y,Z, got "${arg}"`); return false }
+  const cell = new Vec3(+m[1], +m[2], +m[3])
+  const where = `${cell.x},${cell.y},${cell.z}`
+  const fail = (why) => { console.log(`  [PEARL] ${why}`); logEvent(`pearl: ${why}`); return false }
+  if (!bot.inventory.items().some(i => i.name === 'ender_pearl')) return fail('no ender pearl')
+  if (bot.health <= PEARL_DAMAGE + 1) return fail(`HP ${Math.round(bot.health)} is too low for the ${PEARL_DAMAGE} damage a pearl costs`)
+  const solid = (x, y, z) => blockHeight(bot, x, y, z) >= 1
+  const seen = blockVisible(bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0), cell.x, cell.y, cell.z)
+  if (blockHeight(bot, cell.x, cell.y, cell.z) === UNKNOWN) return fail(`I don't know what is at ${where}`)
+  if (!solid(cell.x, cell.y, cell.z)) return fail(`${where} is ${seen ? '' : 'out of sight and I remember it as '}${dbBlock(cell.x, cell.y, cell.z) || 'air'}, nothing to land on`)
+  if (solid(cell.x, cell.y + 1, cell.z) || solid(cell.x, cell.y + 2, cell.z)) return fail(`no room to stand on ${where}`)
+  // Aim just above the top face. We land where the pearl was at the start of the
+  // tick it hits (measured: 0.3m short on a lob, 0.7m on a flat throw, toward us),
+  // so move the aim point until that spot is over the block's centre.
+  const centre = cell.offset(0.5, 1.05, 0.5)
+  const target = { block: centre, cell, landOn: true }
+  let plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS.ender_pearl)
+  for (let i = 0; i < 4 && plan && !plan.blocked; i++) {
+    const land = breakPoint(bot, plan, WEAPONS.ender_pearl, null)
+    target.block = target.block.plus(new Vec3(centre.x - land.x, 0, centre.z - land.z))
+    plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS.ender_pearl)
+  }
+  if (!plan) return fail(`${where} is out of pearl range`)
+  if (plan.rising) return fail(`can't come down onto ${where} from here (the arc would hit its side)`)
+  if (plan.blocked) return fail(`no clear throw to ${where}: the arc hits ${dbBlock(plan.blocked.x, plan.blocked.y, plan.blocked.z)} at ${plan.blocked}`)
+
+  state.currentTask = `pearling to ${where}`
+  const from = bot.entity.position.clone(), hp0 = bot.health
+  try {
+    const pearl = bot.inventory.items().find(i => i.name === 'ender_pearl')
+    if (bot.heldItem !== pearl) await raceAbort(bot.equip(pearl, 'hand'), 5000)
+    const shot = await aim(bot, target, WEAPONS.ender_pearl, 2)
+    // The teleport arrives as a forced move once the pearl lands.
+    const landed = new Promise((resolve) => {
+      const onMove = () => { bot.removeListener('forcedMove', onMove); resolve(true) }
+      bot.on('forcedMove', onMove)
+      setTimeout(() => { bot.removeListener('forcedMove', onMove); resolve(false) }, (shot.ticks + 40) * 50)
+    })
+    bot.activateItem()
+    bot.deactivateItem()
+    const moved = await raceAbort(landed, (shot.ticks + 60) * 50)
+    const at = bot.entity.position
+    const off = Math.hypot(at.x - centre.x, at.z - centre.z)
+    console.log(`  [PEARL] ${shot.arc} pitch=${(shot.pitch * 180 / Math.PI).toFixed(1)}° from ${from.floored()} → ${moved ? `landed at ${at.floored()} (${off.toFixed(2)}m from the centre)` : 'no teleport'}`)
+    if (!moved) return fail(`the pearl to ${where} didn't teleport me (missed, or hit something on the way)`)
+    logEvent(`pearl: to ${where}, landed at ${at.floored()} (${off.toFixed(1)}m from its centre), HP ${Math.round(hp0)}→${Math.round(bot.health)}`)
+    return off < 2
+  } catch (err) {
+    if (err instanceof AbortError) throw err
+    return fail(err.message)
+  } finally {
+    state.currentTask = null
+  }
+}
+
+module.exports = { doShoot, doPearl, solvePitches, heightAt }
