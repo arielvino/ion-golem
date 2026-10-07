@@ -53,6 +53,7 @@
     },
     "mineflayer-tool": {
       "mineflayer": "$mineflayer"
-    }
+    },
+    "prismarine-chunk": "github:arielvino/prismarine-chunk#c9500be43e922b74c06852d76bfb7e3d2e89f071"
   }
 }
