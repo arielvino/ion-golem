@@ -1,4 +1,4 @@
-// Ranged actions — shoot a bow at a mob or a block.
+// Ranged actions — shoot a bow or crossbow at a mob or a block.
 //
 // Aim is solved, not guessed: the arrow is simulated tick by tick with the server's
 // own physics (move by velocity, then drag ×0.99, then gravity −0.05 on y), and the
@@ -18,8 +18,10 @@ const { blockVisible } = require('../perception/visibility')
 const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
 const DRAG = 0.99
 const GRAVITY = 0.05
-const BOW_SPEED = 3.0        // blocks/tick at full draw
-const FULL_DRAW_TICKS = 20   // power reaches 1.0 after 20 ticks of drawing
+// Arrow speed in blocks/tick: a fully drawn bow, and a crossbow (always full power).
+const WEAPONS = { bow: { speed: 3.0 }, crossbow: { speed: 3.15 } }
+const FULL_DRAW_TICKS = 20   // bow power reaches 1.0 after 20 ticks of drawing
+const CHARGE_TICKS = 27      // crossbow loads after 25 ticks held (less with Quick Charge)
 const MAX_FLIGHT_TICKS = 200
 const MAX_SHOTS = 10
 
@@ -45,7 +47,7 @@ function heightAt(h, pitch, speed) {
 // flat shot first, then the lob, if they exist. Height at distance h rises with
 // pitch up to the max-range angle and falls after it, so there are at most two
 // crossings; scan for the brackets and bisect each.
-function solvePitches(h, dy, speed = BOW_SPEED) {
+function solvePitches(h, dy, speed) {
   const err = (p) => { const r = heightAt(h, p, speed); return r ? r.y - dy : -Infinity }
   const STEP = Math.PI / 360
   const out = []
@@ -104,10 +106,10 @@ function blockHeight(bot, x, y, z) {
 // Walk the arc in ≤0.25-block steps from the launch point until it has covered the
 // horizontal distance to the aim point; the first sample inside a block's collision
 // box is the obstruction. `skip` is the target block itself.
-function arcObstruction(bot, from, yaw, pitch, h, skip) {
+function arcObstruction(bot, from, yaw, pitch, h, skip, speed) {
   const dirX = -Math.sin(yaw), dirZ = -Math.cos(yaw)
   let x = 0, y = 0
-  let vx = BOW_SPEED * Math.cos(pitch), vy = BOW_SPEED * Math.sin(pitch)
+  let vx = speed * Math.cos(pitch), vy = speed * Math.sin(pitch)
   for (let t = 0; t < MAX_FLIGHT_TICKS && x < h - 0.3; t++) {
     const n = Math.max(1, Math.ceil(Math.hypot(vx, vy) / 0.25))
     for (let i = 1; i <= n; i++) {
@@ -128,14 +130,14 @@ function arcObstruction(bot, from, yaw, pitch, h, skip) {
 
 // Every way to put an arrow through `point`, flat shot first:
 // [{ yaw, pitch, ticks, blocked }] in mineflayer's yaw/pitch convention.
-function arcsTo(bot, point, skip) {
+function arcsTo(bot, point, skip, speed) {
   const from = launchPoint(bot)
   const d = point.minus(from)
   const h = Math.sqrt(d.x * d.x + d.z * d.z)
   const yaw = Math.atan2(-d.x, -d.z)
-  return solvePitches(h, d.y).map(s => ({
+  return solvePitches(h, d.y, speed).map(s => ({
     yaw, pitch: s.pitch, ticks: s.ticks, point,
-    blocked: arcObstruction(bot, from, yaw, s.pitch, h, skip)
+    blocked: arcObstruction(bot, from, yaw, s.pitch, h, skip, speed)
   }))
 }
 
@@ -167,10 +169,10 @@ const BODY_AIMS = [['chest', 0.7], ['head', 0.9], ['legs', 0.35]]
 // A mob is led by its velocity over that arc's flight time. Returns
 // { yaw, pitch, ticks, point, arc } or { blocked } (the first obstruction) or null
 // (out of range).
-function planShot(bot, target, vel) {
+function planShot(bot, target, vel, speed) {
   const firstBlock = { blocked: null }
   if (target.block) {
-    const arcs = arcsTo(bot, target.block, target.cell)
+    const arcs = arcsTo(bot, target.block, target.cell, speed)
     arcs.forEach((a, i) => { a.arc = i ? 'lob' : 'flat' })
     if (!arcs.length) return null
     return arcs.find(a => !a.blocked) || { blocked: arcs[0].blocked }
@@ -183,7 +185,7 @@ function planShot(bot, target, vel) {
       const base = e.position.offset(0, (e.height || 1.8) * frac, 0)
       let point = base, a = null
       for (let i = 0; i < 3; i++) {   // flight time depends on the led point: iterate
-        a = arcsTo(bot, point)[arc]
+        a = arcsTo(bot, point, null, speed)[arc]
         if (!a) break
         point = base.plus(new Vec3(vel.x, 0, vel.z).scaled(a.ticks))
       }
@@ -198,9 +200,6 @@ function planShot(bot, target, vel) {
 
 const ammoCount = (bot) => bot.inventory.items().filter(i => ARROWS.includes(i.name)).reduce((n, i) => n + i.count, 0)
 
-// Fire one fully drawn arrow at the target. Resolves with the shot's outcome once
-// the arrow has stopped or hit: { hit, miss } where miss is the arrow's closest
-// approach to the aim point in blocks.
 // Put the bow down without firing: switching hotbar slots cancels a draw.
 function cancelDraw(bot) {
   const slot = bot.quickBarSlot
@@ -208,12 +207,15 @@ function cancelDraw(bot) {
   bot.setQuickBarSlot(slot)
 }
 
-async function shootOnce(bot, target) {
+// Track the target and keep looking down the current clear arc every tick. Resolves
+// with the shot once at least `minTicks` have passed, the arc is clear and the target
+// isn't falling or jumping (the lead only covers horizontal movement); throws why
+// not if that doesn't happen within 40 ticks more. The caller fires one tick after
+// the last look, so the server has our rotation.
+async function aim(bot, target, speed, minTicks) {
   const vel = new Vec3(0, 0, 0)
   let lastPos = target.entity?.position.clone()
   let shot = null, ticks = 0, onTick = null
-  bot.activateItem()
-  // Resolves with null when drawn and aimed down a clear arc, or with why it can't shoot.
   const why = await raceAbort(new Promise((resolve) => {
     onTick = () => {
       if (target.entity) {
@@ -223,22 +225,46 @@ async function shootOnce(bot, target) {
         vel.scale(0.6).add(p.minus(lastPos).scaled(0.4))
         lastPos = p.clone()
       }
-      const plan = planShot(bot, target, vel)
+      const plan = planShot(bot, target, vel, speed)
       shot = plan && !plan.blocked ? plan : null
       if (shot) bot.look(shot.yaw, shot.pitch, true)
-      // Release one tick after the final look so the server has our rotation; past
-      // full draw, hold until the arc is clear and the target isn't falling or
-      // jumping (the lead only covers horizontal movement).
       const steady = !target.entity || Math.abs(vel.y) < 0.2
-      if (++ticks > FULL_DRAW_TICKS + 1 && shot && steady) resolve(null)
-      else if (ticks > FULL_DRAW_TICKS + 40) {
+      if (++ticks > minTicks && shot && steady) resolve(null)
+      else if (ticks > minTicks + 40) {
         resolve(plan ? `no clear shot (blocked at ${plan.blocked})` : 'out of range')
       }
     }
     bot.on('physicsTick', onTick)
-  }), 10000).catch(e => { cancelDraw(bot); throw e })
-    .finally(() => bot.removeListener('physicsTick', onTick))
-  if (why) { cancelDraw(bot); throw new Error(why) }
+  }), 10000).finally(() => bot.removeListener('physicsTick', onTick))
+  if (why) throw new Error(why)
+  return shot
+}
+
+const isLoaded = (item) => !!item?.components?.some(c => c.type === 'charged_projectiles' && c.data?.projectiles?.length)
+
+// Draw the bow fully while aiming, release. Resolves with the shot's outcome.
+async function shootBow(bot, target) {
+  bot.activateItem()
+  let shot
+  try { shot = await aim(bot, target, WEAPONS.bow.speed, FULL_DRAW_TICKS + 1) } catch (e) { cancelDraw(bot); throw e }
+  bot.deactivateItem()
+  return watchArrow(bot, target, shot)
+}
+
+// Load the crossbow if it isn't (hold use until charged, release), aim, fire. A
+// loaded crossbow stays loaded, so an abort mid-aim loses nothing.
+async function shootCrossbow(bot, target) {
+  if (!isLoaded(bot.heldItem)) {
+    bot.activateItem()
+    try {
+      await raceAbort(bot.waitForTicks(CHARGE_TICKS), 5000)
+    } catch (e) { cancelDraw(bot); throw e }
+    bot.deactivateItem()
+    for (let i = 0; i < 10 && !isLoaded(bot.heldItem); i++) await raceAbort(bot.waitForTicks(1), 2000)
+    if (!isLoaded(bot.heldItem)) throw new Error('crossbow did not load')
+  }
+  const shot = await aim(bot, target, WEAPONS.crossbow.speed, 2)
+  bot.activateItem()     // a loaded crossbow fires on use
   bot.deactivateItem()
   return watchArrow(bot, target, shot)
 }
@@ -270,16 +296,24 @@ function watchArrow(bot, target, aim) {
   })
 }
 
-// shoot:TARGET[:COUNT] — TARGET is a mob name, a nearby= tag, or X,Y,Z of a block.
-// A mob is shot until it dies (at most COUNT arrows); a block gets COUNT arrows.
+// shoot:TARGET[:COUNT][:bow|crossbow] — TARGET is a mob name, a nearby= tag, or X,Y,Z
+// of a block. A mob is shot until it dies (at most COUNT arrows); a block gets COUNT
+// arrows. Without a weapon named: the one in hand, else a bow, else a crossbow.
 async function doShoot(arg) {
   stopAll()
   const bot = state.bot
   const parts = arg.split(':')
   const targetName = parts[0]
-  const count = Math.max(1, parseInt(parts[1], 10) || (/^-?\d+,/.test(targetName) ? 1 : MAX_SHOTS))
-  const bow = bot.inventory.items().find(i => i.name === 'bow')
-  if (!bow) { sendChat('I have no bow.'); logEvent('shoot: no bow'); return false }
+  const asked = parts.slice(1).find(p => WEAPONS[p])
+  const countArg = parts.slice(1).find(p => /^\d+$/.test(p))
+  const count = Math.max(1, parseInt(countArg, 10) || (/^-?\d+,/.test(targetName) ? 1 : MAX_SHOTS))
+  const items = bot.inventory.items()
+  const weaponName = asked || (WEAPONS[bot.heldItem?.name] ? bot.heldItem.name : ['bow', 'crossbow'].find(n => items.some(i => i.name === n)))
+  const weapon = weaponName && items.find(i => i.name === weaponName)
+  if (!weapon) {
+    const why = asked ? `no ${asked}` : 'no bow or crossbow'
+    sendChat(`I have ${why}.`); logEvent(`shoot: ${why}`); return false
+  }
   const creative = bot.game.gameMode === 'creative'
   if (!creative && ammoCount(bot) === 0) { sendChat('I have no arrows.'); logEvent('shoot: no arrows'); return false }
   const target = findTarget(bot, targetName)
@@ -300,43 +334,43 @@ async function doShoot(arg) {
       : blockVisible(eye, target.cell.x, target.cell.y, target.cell.z)
   }
 
-  state.shootingBow = true
+  state.shooting = true
   let hits = 0, shots = 0, stop = null
   try {
-    if (bot.heldItem?.name !== 'bow') await raceAbort(bot.equip(bow, 'hand'), 5000)
+    if (bot.heldItem?.name !== weaponName) await raceAbort(bot.equip(weapon, 'hand'), 5000)
     bot.deactivateItem()   // drop a raised shield; the draw needs the hands
     while (shots < count) {
       if (!creative && ammoCount(bot) === 0) { stop = 'out of arrows'; break }
       if (target.entity && !target.entity.isValid) break
       if (!inSight()) { stop = shots ? `lost sight of ${label}` : `can't see ${label} from here`; break }
-      const plan = planShot(bot, target, new Vec3(0, 0, 0))
-      if (!plan) { stop = `${label} is out of bow range`; break }
+      const plan = planShot(bot, target, new Vec3(0, 0, 0), WEAPONS[weaponName].speed)
+      if (!plan) { stop = `${label} is out of ${weaponName} range`; break }
       if (plan.blocked) {
         stop = `no clear shot at ${label}: the arc hits ${dbBlock(plan.blocked.x, plan.blocked.y, plan.blocked.z)} at ${plan.blocked}`
         break
       }
-      const r = await shootOnce(bot, target)
+      const r = await (weaponName === 'crossbow' ? shootCrossbow : shootBow)(bot, target)
       shots++
       if (r.hit) hits++
       const dist = r.aim.point.distanceTo(launchPoint(bot))
-      console.log(`  [BOW] shot ${shots} at ${label} ${dist.toFixed(1)}m ${r.aim.arc}${r.aim.part ? ` at ${r.aim.part}` : ''} pitch=${(r.aim.pitch * 180 / Math.PI).toFixed(1)}° → ${r.hit ? 'HIT' : r.miss === null ? 'miss (arrow out of sight)' : `landed ${r.miss.toFixed(2)}m from aim`}`)
+      console.log(`  [${weaponName.toUpperCase()}] shot ${shots} at ${label} ${dist.toFixed(1)}m ${r.aim.arc}${r.aim.part ? ` at ${r.aim.part}` : ''} pitch=${(r.aim.pitch * 180 / Math.PI).toFixed(1)}° → ${r.hit ? 'HIT' : r.miss === null ? 'miss (arrow out of sight)' : `landed ${r.miss.toFixed(2)}m from aim`}`)
     }
   } catch (err) {
     if (err instanceof AbortError) throw err
     if (err.message !== 'target gone') stop = err.message
   } finally {
-    state.shootingBow = false
+    state.shooting = false
     bot.removeListener('entityDead', onDead)
   }
   const killed = died
   if (killed) {
     const pos = target.entity.position
-    logGameEvent('kill', target.entity.name || target.entity.username, 1, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), { weapon: 'bow', tag: label, uuid: target.entity.uuid })
+    logGameEvent('kill', target.entity.name || target.entity.username, 1, Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z), { weapon: weaponName, tag: label, uuid: target.entity.uuid })
   } else if (target.entity && !target.entity.isValid) {
     stop = `lost track of ${label}: it is gone but didn't die in view (despawned or out of range)`
   }
-  if (stop) console.log(`  [BOW] ${stop}`)
-  logEvent(`shoot: ${shots} arrows at ${label}, ${hits} hit${killed ? ', killed it' : ''}${stop ? ` — stopped: ${stop}` : ''}`)
+  if (stop) console.log(`  [${weaponName.toUpperCase()}] ${stop}`)
+  logEvent(`shoot: ${shots} ${weaponName} arrows at ${label}, ${hits} hit${killed ? ', killed it' : ''}${stop ? ` — stopped: ${stop}` : ''}`)
   if (killed) sendChat('Got it!')
   state.currentTask = null
   return target.entity ? killed : shots > 0
