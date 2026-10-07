@@ -366,6 +366,7 @@ function createBot() {
     bot.once('end', () => { clearInterval(visionInterval) })
 
     setupAutonomous(interrupt)
+    require('./src/perception/effects').bind(bot)
 
     // --- Accessibility subtitles from sound events ---
     const langData = (() => {
