@@ -33,8 +33,8 @@ const WEAPONS = {
   snowball: { ...THROWN, projectiles: ['snowball'], items: ['snowball'], harmless: true },
   egg: { ...THROWN, projectiles: ['egg'], items: ['egg', 'blue_egg', 'brown_egg'], harmless: true },
   // Thrown 20° above the look direction (vertical component only) at 0.5 b/t: ~5m
-  // reach on level ground. `splash` = how far away the impact must be to spare us
-  // (a splash reaches 4 blocks; a lingering cloud starts at radius 3).
+  // reach on level ground. `splash` = how far from us the potion must break to spare
+  // us (a splash reaches 4 blocks; a lingering cloud starts at radius 3).
   splash_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['splash_potion'], items: ['splash_potion'], potion: true, splash: 4 },
   lingering_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['lingering_potion'], items: ['lingering_potion'], potion: true, splash: 3.5, effectDelay: 30 }
 }
@@ -70,15 +70,16 @@ function potionUse(potion, entity) {
   if (HARMFUL.has(b)) return 'harm'
   return 'help'
 }
-// The potion to throw at a target: one matching `filter` if given, else the most
-// damaging one for it (strong first).
-function choosePotion(bot, kind, entity, filter) {
+// The potion to throw at a target: one matching `filter` if given, else the best
+// one for the purpose (strong first) — the most damaging, or with `help` the most
+// healing (harming heals the undead).
+function choosePotion(bot, kind, entity, filter, help) {
   const pots = bot.inventory.items().filter(i => i.name === kind)
   if (filter) return pots.find(i => potionOf(i).includes(filter))
   const rank = (i) => {
     const p = potionOf(i), use = potionUse(p, entity)
-    if (use !== 'harm') return -1
-    const order = ['healing', 'harming', 'poison', 'weakness', 'slowness']
+    if (use !== (help ? 'help' : 'harm')) return -1
+    const order = help ? ['harming', 'healing', 'regeneration'] : ['healing', 'harming', 'poison', 'weakness', 'slowness']
     const r = order.indexOf(base(p))
     return (r < 0 ? 0 : 10 - r) + (p.startsWith('strong_') ? 0.5 : 0)
   }
@@ -202,6 +203,33 @@ function arcObstruction(bot, from, yaw, pitch, h, skip, phys) {
     if (!phys.updateFirst) decay(v, phys)
   }
   return null
+}
+
+// Where a thrown potion will break: the start of the tick whose move reaches the
+// target. A projectile hits a mob within 0.3 of its hitbox (plus its own 0.125
+// half-size) and breaks where that tick began, so the burst sits ~1 block short of
+// the mob, toward the thrower — measured: a harming potion at a zombie 4.7m away
+// splashed the thrower.
+function breakPoint(bot, shot, phys, entity) {
+  const from = launchPoint(bot)
+  const dirX = -Math.sin(shot.yaw), dirZ = -Math.cos(shot.yaw)
+  const pad = 0.3 + 0.125
+  const hw = entity ? (entity.width || 0.6) / 2 + pad : 0
+  const inside = (x, y, z) => entity && Math.abs(x - entity.position.x) <= hw && Math.abs(z - entity.position.z) <= hw &&
+    y >= entity.position.y - pad && y <= entity.position.y + (entity.height || 1.8) + pad
+  let h = 0, y = 0
+  const v = { x: phys.speed * Math.cos(shot.pitch), y: phys.speed * Math.sin(shot.pitch) }
+  for (let t = 0; t < MAX_FLIGHT_TICKS; t++) {
+    if (phys.updateFirst) decay(v, phys)
+    const start = new Vec3(from.x + dirX * h, from.y + y, from.z + dirZ * h)
+    for (let i = 1; i <= 8; i++) {
+      const sh = h + v.x * i / 8, sy = y + v.y * i / 8
+      if (inside(from.x + dirX * sh, from.y + sy, from.z + dirZ * sh) || t + i / 8 >= shot.ticks) return start
+    }
+    h += v.x; y += v.y
+    if (!phys.updateFirst) decay(v, phys)
+  }
+  return shot.point
 }
 
 // Every way to put an arrow through `point`, flat shot first:
@@ -434,8 +462,18 @@ function watchArrow(bot, target, aim, projectiles = ARROWS, grace = 6) {
       const idx = bot.registry.entitiesByName[e.name]?.metadataKeys?.indexOf('effect_particles')
       return idx >= 0 ? JSON.stringify(e.metadata?.[idx] || []) : '[]'
     }
+    // An instant heal shows neither: only the mob's synced health going up does.
+    const health = (e) => {
+      const idx = bot.registry.entitiesByName[e.name]?.metadataKeys?.indexOf('health')
+      return idx >= 0 ? e.metadata?.[idx] : undefined
+    }
     const particles0 = victim && !target.self ? particles(victim) : null
-    const onUpdate = (e) => { if (e === victim && particles0 !== null && particles(e) !== particles0 && particles(e) !== '[]') hit = true }
+    const health0 = victim && !target.self ? health(victim) : undefined
+    const onUpdate = (e) => {
+      if (e !== victim || particles0 === null) return
+      if (particles(e) !== particles0 && particles(e) !== '[]') hit = true
+      if (health0 !== undefined && health(e) > health0) hit = true
+    }
     const onTick = () => {
       // An arrow that hits a mob is removed, and the hurt can arrive a tick or two
       // later: give it a few ticks before calling the arrow lost (a lingering
@@ -468,8 +506,10 @@ async function doShoot(arg) {
   const parts = arg.split(':')
   const targetName = parts[0]
   const asked = parts.slice(1).find(p => WEAPONS[p])
-  // Any other word picks a potion by name: shoot:zombie:splash_potion:strong_healing.
-  const potionFilter = parts.slice(1).find(p => !WEAPONS[p] && !/^\d+$/.test(p))
+  // :help = meant to help the target (heal a pet, a villager, a zombie); any other word
+  // picks a potion by name: shoot:zombie:splash_potion:strong_healing.
+  const help = parts.slice(1).includes('help')
+  const potionFilter = parts.slice(1).find(p => !WEAPONS[p] && !/^\d+$/.test(p) && p !== 'help')
   const countArg = parts.slice(1).find(p => /^\d+$/.test(p))
   const items = bot.inventory.items()
   const itemsOf = (n) => WEAPONS[n].items || [n]
@@ -499,9 +539,9 @@ async function doShoot(arg) {
   let potion = null
   if (WEAPONS[weaponName].potion) {
     const victim = target.self ? bot.entity : target.entity
-    const first = choosePotion(bot, weaponName, target.self ? null : victim, potionFilter)
+    const first = choosePotion(bot, weaponName, target.self ? null : victim, potionFilter, help || target.self)
     if (!first) {
-      const why = potionFilter ? `no ${weaponName} of ${potionFilter}` : `no ${weaponName} that hurts ${label}`
+      const why = potionFilter ? `no ${weaponName} of ${potionFilter}` : `no ${weaponName} that ${help || target.self ? 'helps' : 'hurts'} ${label}`
       sendChat(`I have ${why}.`); logEvent(`shoot: ${why}`); return false
     }
     potion = potionOf(first)
@@ -509,7 +549,8 @@ async function doShoot(arg) {
     const isPlayer = victim?.type === 'player'
     const bad = use === 'useless' ? `${potion} does nothing to ${label}`
       : target.self && use === 'harm' ? `${potion} would hurt me`
-      : !target.self && !isPlayer && use === 'help' ? `${potion} would help ${label}` : null
+      : help && use === 'harm' ? `${potion} would hurt ${label}`
+      : !help && !target.self && !isPlayer && use === 'help' ? `${potion} would help ${label} (add :help if you mean to)` : null
     if (bad) { sendChat(`Not throwing that: ${bad}.`); logEvent(`shoot: refused, ${bad}`); return false }
     pick = () => bot.inventory.items().find(i => i.name === weaponName && potionOf(i) === potion)
   }
@@ -552,8 +593,9 @@ async function doShoot(arg) {
         break
       }
       const splash = WEAPONS[weaponName].splash
-      if (splash && potionUse(potion, bot.entity) === 'harm' && plan.point.distanceTo(bot.entity.position) < splash) {
-        stop = `${label} is too close: the ${potion} would splash me too (step back to ${splash}+ blocks)`
+      if (splash && potionUse(potion, bot.entity) === 'harm' &&
+          breakPoint(bot, plan, WEAPONS[weaponName], target.entity).distanceTo(bot.entity.position) < splash) {
+        stop = `${label} is too close: the ${potion} would splash me too (it bursts ~1 block in front of the target; step back)`
         break
       }
       const fire = { bow: shootBow, crossbow: shootCrossbow, trident: throwTrident }[weaponName]
