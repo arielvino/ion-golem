@@ -1,10 +1,11 @@
-// Ranged actions — shoot a bow or crossbow, or throw a trident, snowball, egg or
-// potion, at a mob or a block.
+// Ranged actions — shoot a bow or crossbow, or throw a trident, snowball, egg,
+// potion or wind charge, at a mob or a block.
 //
 // Aim is solved, not guessed: the projectile is simulated tick by tick with the
 // server's own physics (measured on 26.1 from server-side Pos/Motion samples: an
 // arrow or trident moves, then drag ×0.99, then gravity −0.05; a snowball or egg
-// first takes gravity −0.03, then drag, then moves), and the
+// first takes gravity −0.03, then drag, then moves; a wind charge flies straight
+// at constant speed), and the
 // pitch is bisected until the arc passes through the aim point. Moving targets are
 // led by their observed velocity times the flight time. The arc, not the sightline,
 // must be clear of blocks: a flat shot that clips cover tries the head, the legs,
@@ -36,7 +37,11 @@ const WEAPONS = {
   // reach on level ground. `splash` = how far from us the potion must break to spare
   // us (a splash reaches 4 blocks; a lingering cloud starts at radius 3).
   splash_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['splash_potion'], items: ['splash_potion'], potion: true, splash: 4 },
-  lingering_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['lingering_potion'], items: ['lingering_potion'], potion: true, splash: 3.5, effectDelay: 30 }
+  lingering_potion: { ...THROWN, speed: 0.5, gravity: 0.05, pitchOffset: 20 * Math.PI / 180, projectiles: ['lingering_potion'], items: ['lingering_potion'], potion: true, splash: 3.5, effectDelay: 30 },
+  // No gravity, no drag (velocity measured constant), launched from the eye itself.
+  // Bursts on whatever it hits and knocks back what's near: `burst` = how far from us
+  // it must break so it doesn't fling us too.
+  wind_charge: { speed: 1.5, gravity: 0, drag: 1, updateFirst: true, fromEye: true, projectiles: ['wind_charge'], items: ['wind_charge'], harmless: true, burst: 2.5 }
 }
 
 // The potion registry by id (static in vanilla; checked on 26.1 at healing=24,
@@ -94,8 +99,9 @@ const MAX_SHOTS = 10
 
 // One tick of velocity change: gravity and drag, in the projectile's order.
 function decay(v, phys) {
-  if (phys.updateFirst) { v.y = (v.y - phys.gravity) * DRAG; v.x *= DRAG }
-  else { v.x *= DRAG; v.y = v.y * DRAG - phys.gravity }
+  const drag = phys.drag ?? DRAG
+  if (phys.updateFirst) { v.y = (v.y - phys.gravity) * drag; v.x *= drag }
+  else { v.x *= drag; v.y = v.y * drag - phys.gravity }
 }
 
 // Height of the projectile when it has flown `h` blocks horizontally, launched at
@@ -129,7 +135,9 @@ function solvePitches(h, dy, phys) {
   let lo = -Math.PI / 2 + 0.01, elo = err(lo)
   for (let p = lo + STEP; p < Math.PI / 2 - 0.01 && out.length < 2; p += STEP) {
     const e = err(p)
-    if ((elo < 0) !== (e < 0)) {
+    // Only a real crossing: a pitch that never gets that far (-Infinity) next to one
+    // that does isn't one (a steep wind charge never covers the distance).
+    if (Number.isFinite(elo) && Number.isFinite(e) && (elo < 0) !== (e < 0)) {
       let a = lo, b = p
       const rising = elo < 0
       for (let i = 0; i < 30; i++) {
@@ -144,9 +152,9 @@ function solvePitches(h, dy, phys) {
   return out
 }
 
-// Arrows leave from 0.1 below the eye.
-function launchPoint(bot) {
-  return bot.entity.position.offset(0, (bot.entity.eyeHeight ?? 1.62) - 0.1, 0)
+// Projectiles leave from 0.1 below the eye; a wind charge from the eye itself.
+function launchPoint(bot, phys) {
+  return bot.entity.position.offset(0, (bot.entity.eyeHeight ?? 1.62) - (phys?.fromEye ? 0 : 0.1), 0)
 }
 
 // Collision height of a block for an arrow: 0 = it flies through (air, plants,
@@ -219,7 +227,7 @@ function arcObstruction(bot, from, yaw, pitch, h, skip, phys, point, strictTop) 
 // the mob, toward the thrower — measured: a harming potion at a zombie 4.7m away
 // splashed the thrower.
 function breakPoint(bot, shot, phys, entity) {
-  const from = launchPoint(bot)
+  const from = launchPoint(bot, phys)
   const dirX = -Math.sin(shot.yaw), dirZ = -Math.cos(shot.yaw)
   const pad = 0.3 + 0.125
   const hw = entity ? (entity.width || 0.6) / 2 + pad : 0
@@ -243,7 +251,7 @@ function breakPoint(bot, shot, phys, entity) {
 // Every way to put an arrow through `point`, flat shot first:
 // [{ yaw, pitch, ticks, blocked }] in mineflayer's yaw/pitch convention.
 function arcsTo(bot, point, skip, phys) {
-  const from = launchPoint(bot)
+  const from = launchPoint(bot, phys)
   const d = point.minus(from)
   const h = Math.sqrt(d.x * d.x + d.z * d.z)
   const yaw = Math.atan2(-d.x, -d.z)
@@ -597,10 +605,10 @@ async function doShoot(arg) {
         stop = `no clear shot at ${label}: the arc hits ${dbBlock(plan.blocked.x, plan.blocked.y, plan.blocked.z)} at ${plan.blocked}`
         break
       }
-      const splash = WEAPONS[weaponName].splash
-      if (splash && potionUse(potion, bot.entity) === 'harm' &&
-          breakPoint(bot, plan, WEAPONS[weaponName], target.entity).distanceTo(bot.entity.position) < splash) {
-        stop = `${label} is too close: the ${potion} would splash me too (it bursts ~1 block in front of the target; step back)`
+      const w = WEAPONS[weaponName]
+      const reach = w.burst || (w.splash && potionUse(potion, bot.entity) === 'harm' ? w.splash : 0)
+      if (reach && breakPoint(bot, plan, w, target.entity).distanceTo(bot.entity.position) < reach) {
+        stop = `${label} is too close: the ${potion || weaponName} would ${w.burst ? 'blast' : 'splash'} me too (it bursts ~1 block in front of the target; step back)`
         break
       }
       const fire = { bow: shootBow, crossbow: shootCrossbow, trident: throwTrident }[weaponName]
