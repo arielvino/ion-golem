@@ -268,7 +268,7 @@ function createBot() {
     mv.maxDropDown = 4
     mv.scafoldingBlocks = []
     bot.pathfinder.setMovements(mv)
-    if (process.argv.includes('--pathfinder')) console.log(color(c.yellow, '[NAV] walk/pathfind use mineflayer-pathfinder (experiment)'))
+    if (process.argv.includes('--cardinal')) console.log(color(c.yellow, '[NAV] walk/pathfind use cardinalWalk (--cardinal)'))
 
     loadAgenda()
     require('./src/world/journalStore').loadJournal()

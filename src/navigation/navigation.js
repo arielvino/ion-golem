@@ -1105,12 +1105,12 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
   return res.ok
 }
 
-// ── Experiment: mineflayer-pathfinder as the walker (--pathfinder) ──
+// ── mineflayer-pathfinder as the walker (default; --cardinal opts out) ──
 // Replaces the 'walk' and 'pathfind' strategies with one bot.pathfinder.goto, using
 // the Movements configured in bot.js. Explicit tunnel/staircase/pillar stay ours.
 // The pathfinder plans from chunk data (bot.blockAt), not the vision-fed DB, so
-// this mode knowingly breaks the no-x-ray rule — it's a comparison baseline.
-const PATHFINDER_NAV = process.argv.includes('--pathfinder')
+// this mode knowingly breaks the no-x-ray rule.
+const PATHFINDER_NAV = !process.argv.includes('--cardinal')
 const NO_MOVE_MS = 2000      // pathfinder walk with no movement this long → cardinalWalk instead
 const NO_MOVE_DIST = 0.3
 
