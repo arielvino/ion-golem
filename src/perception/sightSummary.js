@@ -12,11 +12,17 @@
 //   unexplained  not natural here and not part of a recognized place: a player, or a
 //                structure no fingerprint knows. count + nearest
 const { roleOf, RESOURCE } = require('../config/natural-blocks')
+const { NEAR } = require('./sight')
 
 const TERRAIN_TOP = 5
 const BIOME_MIN = 0.01    // biomes under this share of the view are left out
 const TERRAIN_MIN = 0.005 // terrain materials under this share of their biome are left out
 const LIST_MAX = 10       // resources / unexplained entries
+const DARK_MIN = 0.02     // less of the near space dark than this: no DARK= line
+const DIR_DARK = 0.6      // a direction this dark (share of its rays) reads "dark"
+const DIR_PART = 0.2      // ... and this, "partly dark"
+const DIR_WORDS = { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S: 'south', SW: 'south-west',
+  W: 'west', NW: 'north-west', up: 'above', down: 'below' }
 
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
@@ -65,7 +71,7 @@ const pct = (x) => `${Math.round(100 * x)}%`
 
 // The context lines — data only; how to read them belongs in the system prompt. An empty
 // layer is left out. Entries: NAMExCOUNT@X,Y,Z (the nearest one) DIST DIR.
-// dark: lookAround's darkSummary (or null): DARK= is left out when nothing reached is dark.
+// dark: lookAround's dark (castRays' near, or null): DARK= is left out when almost nothing near is dark.
 function formatSight(s, dark = null) {
   const item = (e) => `${e.name}x${e.count}@${e.at.x},${e.at.y},${e.at.z} ${e.dist}m ${e.dir}`
   const lines = []
@@ -73,10 +79,14 @@ function formatSight(s, dark = null) {
   if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)}`).join(', ')}`).join(' | ')}]`)
   if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(item).join(', ')}]`)
   if (s.unexplained.length) lines.push(`UNEXPLAINED=[${s.unexplained.map(item).join(', ')}]`)
-  if (dark?.count) {
-    const share = dark.count / (dark.count + (s.seen || 0))
-    const dirs = dark.dirs.filter(([, f]) => f >= 0.15).slice(0, 3).map(([d]) => d)
-    lines.push(`DARK=[light here ${dark.here} | ${dark.count} blocks in reach too dark to see (${pct(share)} of the view)${dirs.length ? `, mostly ${dirs.join(', ')}` : ''}]`)
+  if (dark && dark.share >= DARK_MIN) {
+    const where = (lo, hi) => dark.dirs.filter(([, f]) => f >= lo && f < hi).map(([d]) => DIR_WORDS[d]).join(', ')
+    const full = where(DIR_DARK, 2), part = where(DIR_PART, DIR_DARK)
+    const stand = dark.here < 1 ? 'darkness' : dark.here < 8 ? 'dim light' : 'light'
+    let line = `you stand in ${stand} (${dark.here}/15) | ${pct(dark.share)} of the space within ${NEAR} blocks of you is dark`
+    const sides = [full && `dark: ${full}`, part && `partly dark: ${part}`].filter(Boolean)
+    if (sides.length && dark.share < 0.95) line += ` — ${sides.join('; ')}`
+    lines.push(`DARK=[${line}]`)
   }
   return lines.join('\n')
 }
