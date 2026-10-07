@@ -70,16 +70,15 @@ function potionUse(potion, entity) {
   if (HARMFUL.has(b)) return 'harm'
   return 'help'
 }
-// The potion to throw at a target: one matching `filter` if given, else the best
-// one for the purpose (strong first) — the most damaging, or with `help` the most
-// healing (harming heals the undead).
-function choosePotion(bot, kind, entity, filter, help) {
+// The potion to throw at a target: the one named by `filter` if given (thrown as
+// asked, whatever it does), else the most damaging one for it (strong first).
+function choosePotion(bot, kind, entity, filter) {
   const pots = bot.inventory.items().filter(i => i.name === kind)
   if (filter) return pots.find(i => potionOf(i).includes(filter))
   const rank = (i) => {
-    const p = potionOf(i), use = potionUse(p, entity)
-    if (use !== (help ? 'help' : 'harm')) return -1
-    const order = help ? ['harming', 'healing', 'regeneration'] : ['healing', 'harming', 'poison', 'weakness', 'slowness']
+    const p = potionOf(i)
+    if (potionUse(p, entity) !== 'harm') return -1
+    const order = ['healing', 'harming', 'poison', 'weakness', 'slowness']
     const r = order.indexOf(base(p))
     return (r < 0 ? 0 : 10 - r) + (p.startsWith('strong_') ? 0.5 : 0)
   }
@@ -506,10 +505,8 @@ async function doShoot(arg) {
   const parts = arg.split(':')
   const targetName = parts[0]
   const asked = parts.slice(1).find(p => WEAPONS[p])
-  // :help = meant to help the target (heal a pet, a villager, a zombie); any other word
-  // picks a potion by name: shoot:zombie:splash_potion:strong_healing.
-  const help = parts.slice(1).includes('help')
-  const potionFilter = parts.slice(1).find(p => !WEAPONS[p] && !/^\d+$/.test(p) && p !== 'help')
+  // Any other word names the potion: shoot:zombie:splash_potion:strong_healing.
+  const potionFilter = parts.slice(1).find(p => !WEAPONS[p] && !/^\d+$/.test(p))
   const countArg = parts.slice(1).find(p => /^\d+$/.test(p))
   const items = bot.inventory.items()
   const itemsOf = (n) => WEAPONS[n].items || [n]
@@ -539,19 +536,13 @@ async function doShoot(arg) {
   let potion = null
   if (WEAPONS[weaponName].potion) {
     const victim = target.self ? bot.entity : target.entity
-    const first = choosePotion(bot, weaponName, target.self ? null : victim, potionFilter, help || target.self)
+    if (target.self && !potionFilter) { sendChat('Name the potion to splash on myself.'); return false }
+    const first = choosePotion(bot, weaponName, target.self ? null : victim, potionFilter)
     if (!first) {
-      const why = potionFilter ? `no ${weaponName} of ${potionFilter}` : `no ${weaponName} that ${help || target.self ? 'helps' : 'hurts'} ${label}`
+      const why = potionFilter ? `no ${weaponName} of ${potionFilter}` : `no ${weaponName} that hurts ${label} (name one to throw it anyway)`
       sendChat(`I have ${why}.`); logEvent(`shoot: ${why}`); return false
     }
     potion = potionOf(first)
-    const use = potionUse(potion, victim)
-    const isPlayer = victim?.type === 'player'
-    const bad = use === 'useless' ? `${potion} does nothing to ${label}`
-      : target.self && use === 'harm' ? `${potion} would hurt me`
-      : help && use === 'harm' ? `${potion} would hurt ${label}`
-      : !help && !target.self && !isPlayer && use === 'help' ? `${potion} would help ${label} (add :help if you mean to)` : null
-    if (bad) { sendChat(`Not throwing that: ${bad}.`); logEvent(`shoot: refused, ${bad}`); return false }
     pick = () => bot.inventory.items().find(i => i.name === weaponName && potionOf(i) === potion)
   }
   state.currentTask = `shooting ${label}`
