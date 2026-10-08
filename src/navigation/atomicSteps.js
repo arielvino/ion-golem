@@ -741,4 +741,4 @@ async function followPath(bot, path, opts = {}) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock }
+module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock, glideAxis }
