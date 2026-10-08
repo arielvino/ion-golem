@@ -13,12 +13,13 @@ const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
 const { liveStep, followPath, knownStraightRun, sprintRun, dbBlock, centerInBlock } = require('./atomicSteps')
 const { preCheck } = require('../engine/guard')
+const { HEALTH_CRITICAL } = require('../config/safety')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
 // Extracted planner/query/goal/reachability modules (see REFACTORING.md §1)
 const { _pHazard, _pSurface, _pKnownSolid, _pKnownClear } = require('./blockquery')
 const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
-const { reachGoal, headingGoal, until } = require('./goals')
+const { reachGoal, headingGoal, until, arrived } = require('./goals')
 const { navMode, clearNavState } = require('./navmode')
 const { blockNeedsMissingTool, toolSpeedAdvice, equipForDig } = require('../world/tooling')
 
@@ -879,7 +880,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
     if (state.abortSignal) break
     const pos = bot.entity.position
     const dist = pos.distanceTo(target)
-    if (dist <= range + 0.5) return true
+    if (arrived(pos, tx, ty, tz, range)) return true
 
     const cx = Math.floor(pos.x), cy = Math.round(pos.y), cz = Math.floor(pos.z)
     const vk = `${cx},${cy},${cz}`
@@ -1014,6 +1015,7 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
   const ctx = { goal, advanced: 0 }   // fresh, opaque, per-run — owned by this driver
   let stuck = 0
   let best = goal.progress(ctx)
+  const startedHurt = bot.health <= HEALTH_CRITICAL
   console.log(`\n  runStrategy[${name}]: ${goal.desc} (timeout=${Math.round(timeout / 1000)}s)`)
 
   while (true) {
@@ -1030,7 +1032,7 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
     }
 
     // Hostile / critical-status guard — same policy as the cascade.
-    const check = preCheck({ ignoreMsgs: true })
+    const check = preCheck({ ignoreMsgs: true, startedHurt })
     if (check && (check.interrupt === 'hostile' || check.interrupt === 'low_health' || check.interrupt === 'drowning')) {
       console.log(`  runStrategy[${name}]: ${check.interrupt}, aborting`)
       return { ok: false, reason: check.interrupt }
@@ -1120,6 +1122,10 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   // Same hostile / critical-status guard runStrategy checks between steps, polled
   // here since goto is one long call. Clearing the goal makes goto reject.
   let reason = null
+  // low_health stops a walk the bot gets badly hurt during. A walk begun already at
+  // critical HP is the reaction to it (to shore, away from a mob); stopping it at
+  // step 0 pinned the bot in place — it drowned 3 blocks off a beach at HP 3.
+  const startedHurt = bot.health <= HEALTH_CRITICAL
   // No movement at all for NO_MOVE_MS (pinned at a wall, or thinking without a step):
   // give up so navigateTo can fall back to cardinalWalk.
   let anchor = bot.entity.position.clone(), anchorAt = Date.now()
@@ -1132,7 +1138,7 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
       return
     }
     let check = null
-    try { check = preCheck({ ignoreMsgs: true }) } catch (e) { return }   // abort: raceAbort handles it
+    try { check = preCheck({ ignoreMsgs: true, startedHurt }) } catch (e) { return }   // abort: raceAbort handles it
     if (check && (check.interrupt === 'hostile' || check.interrupt === 'low_health' || check.interrupt === 'drowning')) {
       reason = check.interrupt
       bot.pathfinder.setGoal(null)

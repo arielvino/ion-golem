@@ -32,9 +32,31 @@ function setupAutonomous(interruptFn) {
     }
   })
 
+  // --- FLOAT: never sink ---
+  // Hold jump while the eyes are under water, so the bot rises and bobs at the surface
+  // instead of sinking whenever nothing steers it (idle, after a stop, a dig, a swimup).
+  // The pathfinder steers its own swimming, so it is left alone while it moves.
+  // A player can switch it off (`!float off`, floatMode.js).
+  const float = require('./floatMode')
+  let floating = false
+  bot.on('physicsTick', () => {
+    const e = bot.entity
+    if (!float.isOn()) { if (floating) { bot.setControlState('jump', false); floating = false } return }
+    if (!e || bot.health <= 0 || bot.pathfinder?.isMoving()) { floating = false; return }
+    const eye = bot.blockAt(e.position.offset(0, 1.62, 0))
+    if (e.isInWater && eye && (WATER_BLOCKS.has(eye.name) || eye.name === 'bubble_column')) {
+      if (!bot.controlState.jump) bot.setControlState('jump', true)
+      floating = true
+    } else if (floating) {
+      bot.setControlState('jump', false)
+      floating = false
+    }
+  })
+
   // --- DROWNING PROTECTION ---
-  // No hard interrupt — just queue swimup. Hard interrupt kills API calls and
-  // causes an unresponsive loop where the bot can never complete a response.
+  // Out of air despite the float: something overhead holds the bot under. Preempt
+  // whatever runs and launch swimup now (it digs through) — queued behind a task or
+  // the engine tick it came too late, and the next AI reply wiped it.
   let lastDrowningDispatch = 0
   bot.on('breath', () => {
     if (bot.oxygenLevel <= OXYGEN_DROWNING && Date.now() - lastDrowningDispatch > T.DROWNING_DEBOUNCE) {
@@ -45,8 +67,12 @@ function setupAutonomous(interruptFn) {
       } catch (e) { return }
       lastDrowningDispatch = Date.now()
       console.log(`  [AUTO] DROWNING! oxygen=${bot.oxygenLevel}, dispatching swimup`)
-      // Queue swimup without interrupting — engine will process it
-      state.actionQueue.unshift({ actionStr: 'swimup', username: 'auto' })
+      // keepResponse: an AI turn in flight finishes; only the running task dies.
+      interruptFn({ keepResponse: true })
+      setTimeout(() => {
+        state.actionQueue.unshift({ actionStr: 'swimup', username: 'auto' })
+        require('./engine').processActionQueue()
+      }, T.QUEUE_PREPEND_DELAY)
     }
   })
 

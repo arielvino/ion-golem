@@ -284,8 +284,8 @@ function _pNeighbors(x, y, z, mode, avoid) {
 }
 
 // A* with optimistic neighbours. Arrives on the target XZ column, or — with `range` —
-// anywhere the walk would call arrived (feet within range+0.5 of the target, the same
-// test as cardinalWalk/reachGoal). The range matters when the target is a solid block
+// anywhere the walk would call arrived (nearBlock, the same test as
+// cardinalWalk/reachGoal). The range matters when the target is a solid block
 // (a log to chop): its own column can only be "stood on" from the top of the tree, so
 // without it the planner hunts for high ground instead of walking up to the trunk.
 // Returns [{x,y,z}] or null.
@@ -304,7 +304,7 @@ function optimisticAstar(sx, sy, sz, tx, ty, tz, mode, avoid, maxNodes = 6000, r
     const ck = key(cur.x, cur.y, cur.z)
     expanded++
     const arrived = (cur.x === tx && cur.z === tz) ||
-      (range > 0 && Math.hypot(cur.x + 0.5 - tx, cur.y - ty, cur.z + 0.5 - tz) <= range + 0.5)
+      (range > 0 && require('./goals').nearBlock(cur.x, cur.y, cur.z, tx, ty, tz, range))
     if (arrived) {
       const path = [{ x: cur.x, y: cur.y, z: cur.z }]
       let pk = ck
