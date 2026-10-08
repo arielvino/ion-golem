@@ -17,7 +17,7 @@ const { logEvent } = require('../core/utils')
 const { currentDim } = require('../world/memory')
 const finder = require('../world/strongholdFinder')
 
-const REACH = 12          // the eye's flight when the stronghold is further than this
+const REACH = 12          // the eye's flight when the stronghold is further than this (measured 12.00 every time)
 const SPAWN_MS = 2000     // no eye entity by then: it didn't fly
 const FLIGHT_MS = 6000    // spawn to gone is ~80 ticks
 const DROP_MS = 1500      // after it's gone, an item this soon where it hovered = it dropped
@@ -80,7 +80,7 @@ async function doEye(arg) {
     const dx = last.x - o.x, dz = last.z - o.z, flown = Math.hypot(dx, dz)
     if (flown < 0.5) return fail(`the eye rose but didn't move sideways (from ${o.floored()})`)
     const ux = dx / flown, uz = dz / flown
-    const close = flown < REACH - 0.5
+    const close = flown < REACH - 0.05   // a dive from 11.77 blocks out was seen: anything short of 12 is one
     finder.addThrow(o.x, o.z, ux, uz)
     if (close) finder.setFound(last.x, last.z)
 
@@ -94,7 +94,7 @@ async function doEye(arg) {
       // It can still roll, or merge into another stack nearby: chase where it is now.
       for (let i = 0; i < 3 && bot.entities[drop.id] && eyeCount(bot) < before && !isAborted(); i++) {
         const p = drop.position
-        try { await navigateTo(p.x, p.y, p.z, 1, 15000, { noReachCheck: true }) } catch (e) { if (e instanceof AbortError) throw e }
+        try { await navigateTo(p.x, p.y, p.z, 1, 8000, { noReachCheck: true }) } catch (e) { if (e instanceof AbortError) throw e }
         // "Within 1 block" can leave the item ~1.4m off, just outside pickup reach:
         // the last bit is a glide onto it (at most a block, so the walk got us here).
         if (bot.entities[drop.id] && Math.hypot(drop.position.x - bot.entity.position.x, drop.position.z - bot.entity.position.z) < 2) {

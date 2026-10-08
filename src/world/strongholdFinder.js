@@ -84,7 +84,7 @@ function ringStretch(t) {
   const b = t.x * t.dx + t.z * t.dz, c0 = t.x * t.x + t.z * t.z
   // |o + s·u|² = r²  →  s² + 2bs + c0 − r² = 0
   const at = (r) => { const d = b * b - c0 + r * r; return d < 0 ? null : [-b - Math.sqrt(d), -b + Math.sqrt(d)] }
-  for (const [rin, rout] of RINGS) {
+  for (const [n, [rin, rout]] of RINGS.entries()) {
     const out = at(rout)
     if (!out || out[1] <= 0) continue
     const inn = at(rin)
@@ -93,7 +93,7 @@ function ringStretch(t) {
     for (const [s0, s1] of spans) {
       if (s1 <= 0) continue
       const a = Math.max(s0, 0)
-      return { ring: [rin, rout], from: { x: t.x + a * t.dx, z: t.z + a * t.dz }, to: { x: t.x + s1 * t.dx, z: t.z + s1 * t.dz } }
+      return { ring: n + 1, inner: rin, outer: rout, from: { x: t.x + a * t.dx, z: t.z + a * t.dz }, to: { x: t.x + s1 * t.dx, z: t.z + s1 * t.dz } }
     }
   }
   return null
@@ -125,7 +125,7 @@ function contextLine() {
       const last = s.throws[s.throws.length - 1]
       const st = last && ringStretch(last)
       parts.push(s.throws.length > 1 ? 'crossing=none(rays near parallel)' : 'crossing=none(one ray)')
-      if (st) parts.push(`ring${RINGS.findIndex(g => g === st.ring) + 1}(${st.ring[0]}-${st.ring[1]})_on_ray=${r(st.from.x)},${r(st.from.z)}..${r(st.to.x)},${r(st.to.z)}`)
+      if (st) parts.push(`ring${st.ring}(${st.inner}-${st.outer})_on_ray=${r(st.from.x)},${r(st.from.z)}..${r(st.to.x)},${r(st.to.z)}`)
     }
   }
   return ` EYES=[${parts.join(' ')}]`
