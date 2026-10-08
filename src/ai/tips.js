@@ -1,57 +1,50 @@
-// tips.js — game knowledge shown to the model once, the turn its situation first arises.
+// tips.js — game knowledge shown to the model while the situation it is about lasts.
 //
 // The system prompt is sent every turn, so knowledge that only matters in a rare
 // situation (a spawner in a stronghold) is either missing from it or paid for on
-// every turn. A tip pairs a detector with a text in tips/<id>.txt: the detector reads
-// what the bot perceives right now (the LOS survey, never bot.blockAt), and the text
-// rides along in that turn's input only. Each subject (one spawner) is tipped once
-// per process, so a fight next to it doesn't repeat the same paragraph every turn.
+// every turn. A tip pairs a detector with a text in tips/<id>.txt, and rides along in
+// the turn's input on every turn its detector holds. Every turn is a fresh session, so a
+// tip shown once is forgotten by the next turn. Detectors read only what the bot knows:
+// the block memory and the LOS survey, never bot.blockAt.
 const fs = require('fs')
 const path = require('path')
-const { getLastSurvey } = require('../perception/visibility')
+const state = require('../core/state')
+const { queryBlockMemory } = require('../world/memory')
 
 const TIP_DIR = path.join(__dirname, 'tips')
 
-// Every subject of a tip in sight now, as { key, vars }. key identifies the subject
-// across turns; vars fill the {NAME} slots of the text.
+// A spawner runs while a player is within this many blocks of it.
+const SPAWNER_RANGE = 16
+
+// Every subject of a tip that applies now, as { key, vars }. key names the subject;
+// vars fill the {NAME} slots of the text.
 const TIPS = [
   {
     id: 'spawner',
+    // Spawners the bot has seen, within their activation range. Remembered rather than
+    // in sight, because one keeps spawning while hidden behind the portal frames.
     detect() {
-      const rec = getLastSurvey()?.blocks?.spawner
-      if (!rec?.nearest) return []
-      const { x, y, z } = rec.nearest
-      return [{ key: `${x},${y},${z}`, vars: { AT: `${x},${y},${z}` } }]
+      return queryBlockMemory(['spawner'], state.bot.entity.position)
+        .filter(s => s.dist <= SPAWNER_RANGE)
+        .map(({ x, y, z }) => ({ key: `${x},${y},${z}`, vars: { AT: `${x},${y},${z}` } }))
     },
   },
 ]
 
 const texts = Object.fromEntries(TIPS.map(t => [t.id, fs.readFileSync(path.join(TIP_DIR, `${t.id}.txt`), 'utf8').trim()]))
-const shown = new Set()
 
-// This turn's TIP lines ('' when nothing new is in sight) and their ids. A tip only
-// counts as shown once markTipsShown(ids) confirms the model answered that turn: an
-// interrupted turn's input is thrown away, and with it a tip marked too early.
+// This turn's TIP lines, '' when none applies.
 function renderTips() {
-  const lines = [], ids = []
+  const lines = []
   for (const tip of TIPS) {
     let subjects = []
     try { subjects = tip.detect() } catch (e) { console.warn(`  [TIP] ${tip.id} detect err:`, e.message) }
     for (const { key, vars } of subjects) {
-      const id = `${tip.id}@${key}`
-      if (shown.has(id)) continue
-      ids.push(id)
-      lines.push(`TIP(${id}): ${texts[tip.id].replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m)}`)
+      console.log(`  [TIP] ${tip.id}@${key}`)
+      lines.push(`TIP(${tip.id}@${key}): ${texts[tip.id].replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m)}`)
     }
   }
-  return { text: lines.join('\n'), ids }
+  return lines.join('\n')
 }
 
-function markTipsShown(ids) {
-  for (const id of ids) {
-    shown.add(id)
-    console.log(`  [TIP] shown ${id}`)
-  }
-}
-
-module.exports = { renderTips, markTipsShown }
+module.exports = { renderTips }
