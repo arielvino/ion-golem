@@ -10,6 +10,7 @@ const { offsets } = require('../config/constants')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions, logEvent } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
+const { entityTag } = require('../perception/entityTag')
 
 async function doPlace(target, opts = {}) {
   const bot = state.bot
@@ -161,6 +162,8 @@ async function doPlace(target, opts = {}) {
       return true
     }
 
+    if (item.name === 'end_crystal') return await placeEndCrystal(item, targetName, at)
+
     await bot.equip(item, 'hand')
     const botPos = bot.entity.position.floored()
 
@@ -294,6 +297,93 @@ async function doPlace(target, opts = {}) {
   // Reaching here means no success path returned true → the placement failed.
   state.currentTask = null
   return false
+}
+
+// An end crystal is an entity, not a block: it goes on top of obsidian or bedrock,
+// and only if the two cells above that base are air. Clicking any face of the base
+// spawns it on top, so the generic block placer (which tries every neighbour face
+// and verifies a BLOCK landed) placed crystals while reporting failure, and in bare
+// mode kept going and placed several. Here: click the base's top face once, and
+// verify by the crystal entity appearing.
+const CRYSTAL_BASES = new Set(['obsidian', 'bedrock'])
+const CRYSTAL_REACH = 4.5
+
+async function placeEndCrystal(item, targetName, at) {
+  const bot = state.bot
+  const eye = () => bot.entity.position.offset(0, 1.62, 0)
+  const fail = (why) => {
+    const spot = at ? `:${at[1]},${at[2]},${at[3]}` : ''
+    sendChat(`Can't place ${item.name}: ${why}`)
+    console.log(`  place ${item.name}${spot} FAILED — ${why}`)
+    recordFailure(`place:${item.name}${spot} - ${why}`)
+    state.currentTask = null
+    return false
+  }
+  const crystalAt = (cell) => Object.values(bot.entities).find(e =>
+    e.name === 'end_crystal' && e.position &&
+    Math.floor(e.position.x) === cell.x && Math.floor(e.position.y) === cell.y && Math.floor(e.position.z) === cell.z)
+  const isAir = (b) => b && (b.name === 'air' || b.name === 'cave_air')
+  // Why `base` can't hold a crystal right now, or null if it can.
+  const blocker = (base) => {
+    const b = bot.blockAt(base)
+    if (!b || !CRYSTAL_BASES.has(b.name)) return `${base} is ${b?.name || 'unloaded'}, crystals only go on obsidian or bedrock`
+    const cell = base.offset(0, 1, 0)
+    if (crystalAt(cell)) return `there is already an end_crystal at ${cell}`
+    if (!isAir(bot.blockAt(cell)) || !isAir(bot.blockAt(cell.offset(0, 1, 0)))) {
+      return `the two blocks above ${base} must be air (${bot.blockAt(cell)?.name} / ${bot.blockAt(cell.offset(0, 1, 0))?.name})`
+    }
+    // The server refuses if any entity overlaps the 1x2x1 space above the base.
+    const inTheWay = Object.values(bot.entities).find(e => e.position && e.name !== 'end_crystal' &&
+      Math.abs(e.position.x - (cell.x + 0.5)) < 0.5 + (e.width || 0.6) / 2 &&
+      Math.abs(e.position.z - (cell.z + 0.5)) < 0.5 + (e.width || 0.6) / 2 &&
+      e.position.y < cell.y + 2 && e.position.y + (e.height || 1.8) > cell.y)
+    if (inTheWay) return `${inTheWay === bot.entity ? 'I am' : entityTag(inTheWay) + ' is'} standing in the spot above ${base}`
+    if (eye().distanceTo(base.offset(0.5, 1, 0.5)) > CRYSTAL_REACH) return `${base} is out of reach (more than ${CRYSTAL_REACH} blocks) — goto closer first`
+    return null
+  }
+
+  let base
+  if (at) {
+    // Accept either the crystal's own cell or the obsidian/bedrock under it.
+    const pos = new Vec3(+at[1], +at[2], +at[3])
+    base = CRYSTAL_BASES.has(bot.blockAt(pos)?.name) ? pos : pos.offset(0, -1, 0)
+    const why = blocker(base)
+    if (why) return fail(why)
+  } else {
+    const feet = bot.entity.position.floored()
+    const candidates = []
+    for (let dx = -4; dx <= 4; dx++) for (let dy = -3; dy <= 2; dy++) for (let dz = -4; dz <= 4; dz++) {
+      const p = feet.offset(dx, dy, dz)
+      if (!blocker(p)) candidates.push(p)
+    }
+    if (candidates.length === 0) return fail('no obsidian or bedrock within reach with two air blocks above it')
+    candidates.sort((a, b) => eye().distanceTo(a) - eye().distanceTo(b))
+    base = candidates[0]
+  }
+
+  state.currentTask = `placing ${item.name}`
+  await bot.equip(item, 'hand')
+  const cell = base.offset(0, 1, 0)
+  const countBefore = getInvMap()[item.name] || 0
+  await bot.activateBlock(bot.blockAt(base), new Vec3(0, 1, 0))
+  let crystal = null
+  for (let i = 0; i < 20 && !crystal; i++) {
+    if (isAborted()) return false
+    await sleep(50)
+    crystal = crystalAt(cell)
+  }
+  if (!crystal) {
+    const consumed = (getInvMap()[item.name] || 0) < countBefore
+    return fail(consumed
+      ? `crystal left my inventory but I don't see it at ${cell}`
+      : `server didn't accept a crystal on ${base}`)
+  }
+  console.log(`  placed end_crystal at ${cell} on ${bot.blockAt(base).name} (verified: ${entityTag(crystal)})`)
+  logGameEvent('place', 'end_crystal', 1, cell.x, cell.y, cell.z, { reason: 'place_action' })
+  sendChat('Placed!')
+  state.consecutivePlaceFails = 0
+  state.currentTask = null
+  return true
 }
 
 async function doBuild(opts = {}) {
