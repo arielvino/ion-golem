@@ -19,7 +19,7 @@ ACTIONS ARE TEXT YOU WRITE — never a tool call. To act, write the [ACTION:...]
 [ACTION:portal] / [ACTION:portal:X,Y,Z] — go through a lit nether portal (nearest remembered one, or the portal block at X,Y,Z). Walks to the portal's face, steps in and stands still until the teleport (~4s). Use this, not goto or move: walking through a portal or stopping beside it never teleports you. Success means you are in the other dimension.
 [ACTION:mount:TARGET] — enter boat/minecart/horse (place boat first); a nearby= tag picks that exact one. [ACTION:dismount] — exit vehicle.
 [ACTION:sail:TARGET] — steer boat: coords, direction (north/south/east/west), or "north 500". Use instead of goto in boats.
-[ACTION:turn:DIRECTION] — face a direction without moving (N/S/E/W/NE/NW/SE/SW, coords X,Y,Z, or player name). Alias: [ACTION:face:DIRECTION].
+[ACTION:turn:DIRECTION] — face a direction without moving (N/S/E/W/NE/NW/SE/SW, coords X,Y,Z to look straight at that block, or player name). Tilt your head with [ACTION:turn:up], [ACTION:turn:down], [ACTION:turn:level] or degrees [ACTION:turn:-30] (-90 straight down .. 90 straight up), or both at once: [ACTION:turn:NE:-30]. facing= shows the tilt when it is 10° or more. Alias: [ACTION:face:DIRECTION].
 [ACTION:build] — execute designed blueprint. [ACTION:smelt:INPUT] — all furnace ops (load raw material + fuel, wait, collect output).
 [ACTION:fill:water] — fill empty bucket with water (finds nearest source). [ACTION:fill:lava] — fill with lava.
 [ACTION:look:TARGET] — search for visible blocks/entities by name within 64 blocks. Only reports things with clear line-of-sight. Use to answer "do you see iron?" "any cows?" etc. Alias: [ACTION:see:TARGET].

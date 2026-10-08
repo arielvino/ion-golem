@@ -94,9 +94,10 @@ function getBotContext() {
     .join(', ') || 'none'
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
-  const facingDirs = ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE']
+  const facingDirs = ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW']  // mineflayer yaw: atan2(-dx, -dz), east = -90°
   const yawToDir = (y) => facingDirs[Math.round(((((y + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) / (Math.PI / 4)) % 8]
-  const facing = yawToDir(bot.entity.yaw)
+  const pitchDeg = Math.round(bot.entity.pitch * 180 / Math.PI)
+  const facing = yawToDir(bot.entity.yaw) + (Math.abs(pitchDeg) >= 10 ? `,${pitchDeg > 0 ? 'up' : 'down'} ${Math.abs(pitchDeg)}°` : '')
   const t = bot.time.timeOfDay
   // MC ticks: 0=6:00, 6000=12:00, 12000=18:00, 18000=0:00
   const hours = Math.floor(((t + 6000) % 24000) / 1000)
