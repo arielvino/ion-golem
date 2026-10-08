@@ -3,6 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
 const { getBotContext } = require('./context')
+const { renderTips } = require('./tips')
 const { applyPlanTags, agendaTitles } = require('../engine/tasks')
 const { applyNoteTags, markShown, recordTurn, logWhy, currentNode } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
@@ -117,7 +118,8 @@ async function handleMessages(batch) {
     const said = isPlayer(m.username) ? state.journal?.record(`${m.username}: "${m.message}"`) : null
     return `${said ? `${m.username} just said (${said.id})` : m.username}: ${m.message}`
   })
-  const context = getBotContext()
+  // Tips are advice, not state, so they join the input here rather than inside getBotContext.
+  const context = [getBotContext(), renderTips()].filter(Boolean).join('\n')
   const input = `${context}\n${lines.join('\n')}`
   for (const m of batch) logChat({ type: 'user', username: m.username, message: m.message, context })
 
