@@ -39,7 +39,9 @@ function scanHostiles(range = 12) {
 }
 
 // Run pre-checks before an atomic step
-// opts: { ignoreHostiles, ignoreMsgs, hostileRange, allowLowHealth }
+// opts: { ignoreHostiles, ignoreMsgs, hostileRange, allowLowHealth, startedHurt }
+// startedHurt: the caller began at critical HP, so low_health is not news to it —
+// skip only that check (drowning and hostiles still apply).
 function preCheck(opts = {}) {
   if (state.abortSignal) throw new AbortError()
 
@@ -50,7 +52,7 @@ function preCheck(opts = {}) {
 
   if (!opts.allowLowHealth) {
     const bot = state.bot
-    if (bot && bot.health <= HEALTH_CRITICAL) return { interrupt: 'low_health' }
+    if (bot && bot.health <= HEALTH_CRITICAL && !opts.startedHurt) return { interrupt: 'low_health' }
     // Only flag drowning if head is actually in water — oxygenLevel can be stale
     if (bot && bot.oxygenLevel <= OXYGEN_LOW && bot.entity?.isInWater) {
       try {
