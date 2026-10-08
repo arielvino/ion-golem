@@ -115,7 +115,7 @@ function setupRetreat(interruptFn) {
       if (hs.length < need) return
       const dir = escapeDir(bot, hs)
       if (!dir) { corneredUntil = now + CORNERED_PAUSE_MS; return }
-      interruptFn()                // drops a running attack; clears controls
+      interruptFn({ keepResponse: true })  // drops a running attack, keeps the model's turn
       try { bot.pvp.stop() } catch (e) {}
       state.retreating = true
       run = { at: now, from: bot.entity.position.clone(), dir, swings: 0, lastSwing: 0 }

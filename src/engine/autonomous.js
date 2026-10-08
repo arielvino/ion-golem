@@ -23,7 +23,7 @@ function setupAutonomous(interruptFn) {
       const eating = state.backgroundTask?.action === 'eat' || state.actionQueue.some(a => a.actionStr === 'eat')
       if (edibleFoods(bot).length > 0 && !eating) {
         console.log(`  [AUTO] HP=${Math.round(bot.health)}, eating`)
-        interruptFn()
+        interruptFn({ keepResponse: true })
         // Prepend eat to front of queue instead of replacing
         setTimeout(() => {
           state.actionQueue.unshift({ actionStr: 'eat', username: 'auto' })
@@ -90,7 +90,9 @@ function setupAutonomous(interruptFn) {
     console.log(`  [AUTO] ${logLine}`)
     require('../core/utils').logEvent(`reflex: ${logLine} → attack:${entityTag(attacker)}`)
     sendChat(chatLine)
-    interruptFn()
+    // keepResponse: a reflex kills the running task, never the model's turn. A stream of
+    // mobs (a spawner) used to abort every turn, so the model never got to answer it.
+    interruptFn({ keepResponse: true })
     // Prepend attack to front of queue instead of replacing, and launch it now — left
     // to the engine it would wait for the next tick, up to 5s of free hits.
     setTimeout(() => {
@@ -161,7 +163,7 @@ function setupAutonomous(interruptFn) {
 
     if (inLava) {
       console.log(`  [AUTO] LAVA DAMAGE! HP=${Math.round(bot.health)}, fleeing`)
-      interruptFn()
+      interruptFn({ keepResponse: true })
       const escapeLava = async () => {
         bot.setControlState('jump', true)
         bot.setControlState('forward', true)
