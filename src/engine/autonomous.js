@@ -36,9 +36,12 @@ function setupAutonomous(interruptFn) {
   // Hold jump while the eyes are under water, so the bot rises and bobs at the surface
   // instead of sinking whenever nothing steers it (idle, after a stop, a dig, a swimup).
   // The pathfinder steers its own swimming, so it is left alone while it moves.
+  // A player can switch it off (`!float off`, floatMode.js).
+  const float = require('./floatMode')
   let floating = false
   bot.on('physicsTick', () => {
     const e = bot.entity
+    if (!float.isOn()) { if (floating) { bot.setControlState('jump', false); floating = false } return }
     if (!e || bot.health <= 0 || bot.pathfinder?.isMoving()) { floating = false; return }
     const eye = bot.blockAt(e.position.offset(0, 1.62, 0))
     if (e.isInWater && eye && (WATER_BLOCKS.has(eye.name) || eye.name === 'bubble_column')) {
