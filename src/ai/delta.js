@@ -4,19 +4,21 @@
 // is simply stated. Pure: snapshot in, one line out.
 
 // The fields worth diffing, from values context.js already computes.
-function snapshot({ pos, hp, food, held, offhand, inv, armor, vehicle, task, seen, drops = {}, players = {}, now = Date.now() }) {
+function snapshot({ pos, hp, food, held, offhand, inv, armor, vehicle, task, seen, drops = {}, far = {}, players = {}, now = Date.now() }) {
   return {
     t: now,
     pos: { x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z) },
     // A running task shows its elapsed time ('bg:goto:… (13s, walking)'); drop it,
     // or the same task reads as changed every turn.
     hp: Math.round(hp), food: Math.round(food), held, offhand, task: String(task).replace(/\(\d+s,\s*/, '('), vehicle,
-    inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(), drops: { ...drops }, players: { ...players },
+    inv: { ...inv }, armor: [...armor].sort(), seen: [...new Set(seen)].sort(), drops: { ...drops }, far: { ...far }, players: { ...players },
   }
 }
 
 // Smaller distance changes are walking noise and rounding.
 const PLAYER_MOVE = 3
+// Far threats come and go one by one all night; only a crowd gathering is news.
+const FAR_GROWTH = 3
 
 function renderDelta(prev, cur) {
   if (!prev) return ''
@@ -55,6 +57,10 @@ function renderDelta(prev, cur) {
   // Sargon went from 2m to 17m once made the bot think it was still beside him.
   const walked = Object.keys(cur.players).filter(n => n in prev.players && Math.abs(cur.players[n] - prev.players[n]) >= PLAYER_MOVE)
   if (walked.length) parts.push(walked.map(n => `${n} ${prev.players[n]}m→${cur.players[n]}m away`).join(', '))
+  // Mobs past the nearby= tag range aren't in seen, so one wandering in and out
+  // at 90m is no longer "new nearby".
+  const gathered = Object.keys(cur.far).filter(n => cur.far[n] - (prev.far[n] || 0) >= FAR_GROWTH)
+  if (gathered.length) parts.push(`far ${gathered.map(n => `${n}×${prev.far[n] || 0}→${cur.far[n]}`).join(', ')}`)
   const grew = Object.keys(cur.drops).filter(t => t in prev.drops && prev.drops[t] !== cur.drops[t])
   if (grew.length) parts.push(grew.map(t => `${t} x${prev.drops[t]}→x${cur.drops[t]}`).join(', '))
 
