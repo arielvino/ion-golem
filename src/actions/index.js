@@ -221,7 +221,10 @@ async function executeAction(actionStr, username, opts = {}) {
         sendChat(`Personality switched! ${p.slice(0, 60)}...`)
         break
       }
-      default: console.log(`  unknown: ${action}`)
+      default:
+        console.log(`  unknown: ${action}`)
+        recordFailure(`${action}: no such action`)
+        result = false
     }
     // Only an explicit `false` return means the action failed; undefined = success.
     succeeded = (result !== false)

@@ -21,6 +21,7 @@ async function doPlace(target, opts = {}) {
   if (!item) {
     sendChat(`Don't have ${targetName}!`)
     console.log(`  no ${targetName} in inventory, skipping place`)
+    recordFailure(`place:${targetName} - not in inventory`)
     const before = state.actionQueue.length
     clearQueuedActions('place:' + normalized)
     if (state.actionQueue.length < before) console.log(`  cleared ${before - state.actionQueue.length} place(s)`)
@@ -142,7 +143,7 @@ async function doPlace(target, opts = {}) {
           if (b && !STRUCTURAL_AIR.has(b.name) && !WATER_BLOCKS.has(b.name)) { target = b; break }
         }
       }
-      if (!target) { sendChat("No surface to place on!"); return false }
+      if (!target) { sendChat("No surface to place on!"); recordFailure(`place:${item.name} - no solid surface around me to put it on`); return false }
       await bot.lookAt(target.position.offset(0.5, 1, 0.5))
       await bot.activateItem()
       await sleep(500)
@@ -263,6 +264,7 @@ async function doPlace(target, opts = {}) {
     recordFailure(`place:${item.name} - no valid spot`)
   } catch (err) {
     console.error('  place err:', err.message)
+    recordFailure(`place:${item.name} - ${err.message}`)
   }
   // Reaching here means no success path returned true → the placement failed.
   state.currentTask = null

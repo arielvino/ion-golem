@@ -46,7 +46,7 @@ async function doMine(targetName, opts = {}) {
     if (matches.length === 0) {
       matches = Object.keys(mcData.blocksByName).filter(n => fuzzyMatch(n, normalized))
     }
-    if (matches.length === 0) { sendChat(`Don't know what ${targetName} is!`); state.currentTask = null; return false }
+    if (matches.length === 0) { sendChat(`Don't know what ${targetName} is!`); recordFailure(`mine:${targetName} - no such block`); state.currentTask = null; return false }
     blockType = mcData.blocksByName[matches[0]]
     matchingIds = matches.map(n => mcData.blocksByName[n].id)
   }
@@ -205,10 +205,12 @@ async function doMine(targetName, opts = {}) {
     if (err instanceof AbortError) throw err
     if (err.message === 'timeout') {
       console.log(`  dig timed out on block at ${bPos}`)
+      recordFailure(`mine:${targetName} - digging the block at ${bPos.x},${bPos.y},${bPos.z} timed out`)
       state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
       try { bot.stopDigging() } catch(e) {}
     } else {
       console.error('  dig err:', err.message)
+      recordFailure(`mine:${targetName} - ${err.message}`)
     }
   }
   } // end batch loop

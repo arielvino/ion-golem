@@ -131,7 +131,7 @@ async function doCraft(targetName, count = 1) {
   let item = mcData.itemsByName[normalized]
   if (!item) {
     const match = Object.keys(mcData.itemsByName).find(n => fuzzyMatch(n, normalized))
-    if (!match) { sendChat(`Don't know ${targetName}!`); state.currentTask = null; return false }
+    if (!match) { sendChat(`Don't know ${targetName}!`); recordFailure(`craft:${targetName} - no such item`); state.currentTask = null; return false }
     item = mcData.itemsByName[match]
   }
 
@@ -343,9 +343,11 @@ async function doCraft(targetName, count = 1) {
           if (top.length > 0) sourceParts.push(`${generalize(mat)}: ${top.join(', ')}`)
         }
 
-        let failMsg = `craft:${targetName} - missing: ${missingStr}.`
+        let failMsg = missingStr
+          ? `craft:${targetName} - missing: ${missingStr}.`
+          : `craft:${targetName} - no recipe matched the inventory, though it now holds enough for one (it may have changed mid-craft); retry.`
         if (sourceParts.length > 0) failMsg += ` FIND: ${sourceParts.join(' | ')}`
-        else failMsg += ' Get the missing materials then try again!'
+        else if (missingStr) failMsg += ' Get the missing materials then try again!'
         recordFailure(failMsg)
       } else {
         sendChat(`Can't craft ${targetName} — missing materials!`)
@@ -419,6 +421,8 @@ async function doCraft(targetName, count = 1) {
   } catch (err) {
     console.error(`  craft err: ${err.message}`)
     sendChat(`Craft failed!`)
+    const gained = countInInventory(bot, item.name) - craftedBefore
+    recordFailure(`craft:${targetName} - ${err.message}${gained > 0 ? ` (stopped after ${gained}x ${item.name})` : ''}`)
     clearQueuedActions('craft:')
   }
   state.currentTask = null

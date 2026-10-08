@@ -99,6 +99,7 @@ async function doSmelt(targetName) {
 
     if (totalToSmelt === 0) {
       sendChat(`Don't have ${targetName} to smelt and furnace is empty!`)
+      recordFailure(`smelt:${targetName} - none in inventory, and the furnace input is empty`)
       furnace.close()
       state.currentTask = null
       return false
@@ -121,6 +122,7 @@ async function doSmelt(targetName) {
 
     if (!fuel && !existingFuel) {
       sendChat(`Furnace loaded but no fuel! Need coal or wood.`)
+      recordFailure(`smelt:${targetName} - no fuel in inventory or furnace (coal, charcoal, planks or logs); the input is loaded`)
       furnace.close()
       state.currentTask = null
       return false
@@ -222,6 +224,7 @@ async function doSmelt(targetName) {
   } catch (err) {
     if (err instanceof AbortError) throw err
     console.error('  smelt err:', err.message)
+    recordFailure(`smelt:${targetName} - ${err.message}`)
     try { if (state.bot.currentWindow) state.bot.closeWindow(state.bot.currentWindow) } catch(e) {}
     // (furnace state tracked in containers DB)
   }

@@ -26,7 +26,7 @@ async function doEquip(targetName) {
   const bot = state.bot
   const normalized = normalizeItemName(targetName)
   const item = bot.inventory.items().find(i => fuzzyMatch(i.name, normalized))
-  if (!item) { sendChat(`Don't have ${targetName}!`); return false }
+  if (!item) { sendChat(`Don't have ${targetName}!`); recordFailure(`equip:${targetName} - not in inventory`); return false }
   const name = item.name
   let dest = 'hand'
   if (name.includes('helmet') || name.includes('cap')) dest = 'head'
@@ -42,6 +42,7 @@ async function doEquip(targetName) {
   } catch (e) {
     console.log(`  equip ${item.name} to ${dest} failed: ${e.message}`)
     sendChat(`Can't equip ${item.name}: ${e.message}`)
+    recordFailure(`equip:${targetName} - ${e.message}`)
     return false
   }
 }
