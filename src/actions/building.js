@@ -8,7 +8,7 @@ const { removeBlock, trackPlacedBlock, createStructure, getStructures,
 const { getInvMap, countMat } = require('../world/recipes')
 const { offsets } = require('../config/constants')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
-const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
+const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions, logEvent } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
 
 async function doPlace(target, opts = {}) {
@@ -175,8 +175,32 @@ async function doPlace(target, opts = {}) {
       if (!at) return fail('coordinates must be X,Y,Z')
       const pos = new Vec3(+at[1], +at[2], +at[3])
       const cur = bot.blockAt(pos)
+      const inReach = bot.entity.position.offset(0, 1.62, 0).distanceTo(pos.offset(0.5, 0.5, 0.5)) <= 4.5
+      // An eye goes into a portal frame the way a player does it: using the frame with
+      // the eye in hand. Not a placement, so no air needed.
+      if (item.name === 'ender_eye' && cur?.name === 'end_portal_frame') {
+        if (cur.getProperties().eye) return fail('that frame already has an eye')
+        if (!inReach) return fail('out of reach (more than 4.5 blocks) — goto closer first')
+        const dim = bot.game.dimension
+        await bot.activateBlock(cur)
+        await sleep(300)
+        // The last eye lights the portal; standing inside the ring, that's a trip to the End.
+        if (bot.game.dimension !== dim) {
+          logGameEvent('place', 'ender_eye', 1, pos.x, pos.y, pos.z, { reason: 'portal_frame' })
+          logEvent(`place:ender_eye:${coords}: the eye went in, the portal lit and took me to ${bot.game.dimension.replace(/^minecraft:/, '')}: I was standing inside the frame ring`)
+          state.consecutivePlaceFails = 0
+          return true
+        }
+        const now = bot.blockAt(pos)
+        if (!now?.getProperties().eye) return fail('the eye did not go in')
+        try { state.stmts.upsertBlock.run(pos.x, pos.y, pos.z, now.name, bot.time?.age || 0, now.stateId) } catch (e) {}
+        logGameEvent('place', 'ender_eye', 1, pos.x, pos.y, pos.z, { reason: 'portal_frame' })
+        console.log(`  eye into end_portal_frame at ${pos}`)
+        state.consecutivePlaceFails = 0
+        return true
+      }
       if (!cur || !(cur.name === 'air' || STRUCTURAL_AIR.has(cur.name) || WATER_BLOCKS.has(cur.name))) return fail(`spot is ${cur?.name || 'unloaded'}, not air`)
-      if (bot.entity.position.offset(0, 1.62, 0).distanceTo(pos.offset(0.5, 0.5, 0.5)) > 4.5) return fail('out of reach (more than 4.5 blocks) — goto closer first')
+      if (!inReach) return fail('out of reach (more than 4.5 blocks) — goto closer first')
       const placedName = await placeBlockAt(item, pos)
       if (!placedName) return fail('no solid block next to it to place against, or something is in the way')
       console.log(`  placed ${item.name} at ${pos} (verified: ${placedName})`)
