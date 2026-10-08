@@ -8,6 +8,7 @@ const { castVisionRays, hasLineOfSight } = require('../perception/vision')
 const { approachToTouch, touchFailText } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
+const { labelOf } = require('../world/blockLabel')
 
 async function doMine(targetName, opts = {}) {
   stopAll()
@@ -82,7 +83,7 @@ async function doMine(targetName, opts = {}) {
     const eb = bot.blockAt(explicitPos)
     if (!eb || !matchingIds.includes(eb.type) || state.skipBlocks.has(at)) {
       console.log(`  explicit coords (${at}) — block not found, wrong type or skipped`)
-      recordFailure(`mine:${targetName} - no ${rawName} at ${at} (${eb ? eb.name : 'unloaded'}). Mine by name without coords, or pick coords from VISION.`)
+      recordFailure(`mine:${targetName} - no ${rawName} at ${at} (${eb ? labelOf(eb) : 'unloaded'}). Mine by name without coords, or pick coords from VISION.`)
       break
     }
     console.log(`  using explicit coords (${at})`)
@@ -187,7 +188,7 @@ async function doMine(targetName, opts = {}) {
         }
       } else if (res.reason === 'need_tool') {
         console.log(color(c.yellow, `  refusing to hand-mine ${target.name} — no ${res.need} (would drop nothing)`))
-        recordFailure(`mine:${targetName} - ${target.name} needs a ${res.need} to drop anything (mining by hand yields nothing). Craft/equip a ${res.need}, or re-issue [ACTION:mine:${rawName}:skiptool] to break it for no drop.`)
+        recordFailure(`mine:${targetName} - ${labelOf(target)} needs a ${res.need} to drop anything (mining by hand yields nothing). Craft/equip a ${res.need}, or re-issue [ACTION:mine:${rawName}:skiptool] to break it for no drop.`)
         break
       } else {
         console.log(`  dig failed on ${target.name} (${res.reason})`)
@@ -199,7 +200,7 @@ async function doMine(targetName, opts = {}) {
     } else {
       console.log(`  can't dig ${target?.name || 'null'}`)
       state.skipBlocks.add(`${bPos.x},${bPos.y},${bPos.z}`)
-      recordFailure(`mine:${targetName} - ${target ? `${target.name} at ${bPos.x},${bPos.y},${bPos.z} can't be dug` : `block at ${bPos.x},${bPos.y},${bPos.z} is unloaded`}`)
+      recordFailure(`mine:${targetName} - ${target ? `${labelOf(target)} at ${bPos.x},${bPos.y},${bPos.z} can't be dug` : `block at ${bPos.x},${bPos.y},${bPos.z} is unloaded`}`)
     }
   } catch (err) {
     if (err instanceof AbortError) throw err

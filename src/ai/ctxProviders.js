@@ -21,6 +21,7 @@
 const state = require('../core/state')
 const { Vec3 } = require('vec3')
 const { queryRegion, queryBlockMemoryFuzzy, searchContainersFor } = require('../world/memory')
+const { blockLabel, addByState } = require('../world/blockLabel')
 const { getLastSurvey } = require('../perception/visibility')
 const { HAZARDS, RESOURCES, WATER_BLOCKS } = require('../config/blocks')
 const { PAST_PROVIDERS } = require('./ctxPast')
@@ -150,12 +151,11 @@ function slice(args) {
     if (off === 0) cell.set(`${axis === 'ew' ? b.x : b.z},${b.y}`, g)
     if (g === '$' || g === '!') {
       const d = new Vec3(b.x, b.y, b.z).distanceTo(p)
-      const rec = notable.get(b.name)
-      if (!rec) notable.set(b.name, { count: 1, best: b, dist: d, offPlane: off !== 0 })
-      else {
-        rec.count++
-        if (d < rec.dist) { rec.best = b; rec.dist = d; rec.offPlane = off !== 0 }
-      }
+      let rec = notable.get(b.name)
+      if (!rec) notable.set(b.name, rec = { count: 0, best: b, dist: d })
+      rec.count++
+      if (d < rec.dist) { rec.best = b; rec.dist = d }
+      addByState(rec, b.state, b, d)
     }
   }
 
@@ -207,13 +207,13 @@ function slice(args) {
     const items = [...notable.entries()]
       .sort((a, b) => a[1].dist - b[1].dist)
       .slice(0, 8)
-      .map(([name, v]) => {
-        const off = crossOf(v.best)
+      .flatMap(([name, v]) => [...v.byState.entries()].map(([st, sub]) => {
+        const b = sub.nearest, off = crossOf(b)
         const where = off === 0
           ? 'ON this plane'
           : `${Math.abs(off)} ${axis === 'ew' ? (off > 0 ? 'south' : 'north') : (off > 0 ? 'east' : 'west')} of it`
-        return `${name} x${v.count} nearest@${v.best.x},${v.best.y},${v.best.z} (${Math.round(v.dist)}m, ${where})`
-      })
+        return `${blockLabel(name, st)} x${sub.count} nearest@${b.x},${b.y},${b.z} (${Math.round(sub.nearestDist)}m, ${where})`
+      }))
     out.push(
       half === 0
         ? `notable on this plane:`
@@ -251,9 +251,11 @@ function find(args) {
   if (survey?.blocks) {
     for (const [name, rec] of Object.entries(survey.blocks)) {
       if (!name.includes(needle)) continue
-      const a = rec.nearest
-      const d = Math.round(new Vec3(a.x, a.y, a.z).distanceTo(p))
-      lines.push(`  visible    ${name} x${rec.count} nearest@${a.x},${a.y},${a.z} (${d}m)`)
+      for (const [st, sub] of rec.byState || [[rec.nearest?.state, rec]]) {
+        const a = sub.nearest
+        const d = Math.round(new Vec3(a.x, a.y, a.z).distanceTo(p))
+        lines.push(`  visible    ${blockLabel(name, st)} x${sub.count}${rec.many ? '+' : ''} nearest@${a.x},${a.y},${a.z} (${d}m)`)
+      }
     }
   }
 
@@ -266,7 +268,7 @@ function find(args) {
   for (const b of queryBlockMemoryFuzzy(needle, p, limit)) {
     const dy = b.y - p.y
     const depth = dy === 0 ? 'level' : (dy < 0 ? `${-dy} BELOW you` : `${dy} above you`)
-    lines.push(`  db         ${b.name}@${b.x},${b.y},${b.z} (${Math.round(b.dist)}m, ${depth}) [memory, may be gone]`)
+    lines.push(`  db         ${blockLabel(b.name, b.state)}@${b.x},${b.y},${b.z} (${Math.round(b.dist)}m, ${depth}) [memory, may be gone]`)
   }
 
   if (lines.length === 0) return `find "${needle}": nothing in inventory, view, containers or memory`
@@ -283,9 +285,10 @@ function around() {
   const bot = state.bot
   const p = bot.entity.position.floored()
   const R = 2, UP = 2, DOWN = 3
-  const cells = new Map()
-  for (const b of queryRegion(p.x - R, p.y - DOWN, p.z - R, p.x + R, p.y + UP, p.z + R)) cells.set(`${b.x},${b.y},${b.z}`, b.name)
-  const at = (x, y, z) => cells.get(`${x},${y},${z}`) ?? null
+  const cells = new Map()    // "x,y,z" -> row ({ name, state })
+  for (const b of queryRegion(p.x - R, p.y - DOWN, p.z - R, p.x + R, p.y + UP, p.z + R)) cells.set(`${b.x},${b.y},${b.z}`, b)
+  const at = (x, y, z) => cells.get(`${x},${y},${z}`)?.name ?? null
+  const label = (x, y, z) => { const b = cells.get(`${x},${y},${z}`); return b ? blockLabel(b.name, b.state) : null }
   const glyph = (n) => {
     if (!n) return '?'
     if (AIR.has(n)) return '.'
@@ -321,8 +324,8 @@ function around() {
     const foot = at(x, p.y, z), head = at(x, p.y + 1, z)
     let s
     if (foot === null || head === null) s = 'unseen'
-    else if (!pass(foot)) s = pass(head) && pass(at(x, p.y + 2, z)) ? `step up onto ${foot}` : `wall (${foot})`
-    else if (!pass(head)) s = `blocked at head height (${head})`
+    else if (!pass(foot)) s = pass(head) && pass(at(x, p.y + 2, z)) ? `step up onto ${label(x, p.y, z)}` : `wall (${label(x, p.y, z)})`
+    else if (!pass(head)) s = `blocked at head height (${label(x, p.y + 1, z)})`
     else {
       const f = measureFall(x, p.y, z)
       if (f.hazard) s = `drop ${f.blocks} into ${f.hazard}`
@@ -338,7 +341,7 @@ function around() {
   const floor = at(p.x, p.y - 1, p.z)
   const under = measureFall(p.x, p.y, p.z, 1)
   const below = floor === null ? 'floor unseen'
-    : `floor ${floor}; breaking it: ${under.unknown ? `drop ≥${under.blocks}, then unseen` : `drop ${under.blocks} → onto ${under.landing ?? '?'}, stand at y${under.stand}`}`
+    : `floor ${label(p.x, p.y - 1, p.z)}; breaking it: ${under.unknown ? `drop ≥${under.blocks}, then unseen` : `drop ${under.blocks} → onto ${under.landing ?? '?'}, stand at y${under.stand}`}`
 
   const out = [`around ${p.x},${p.y},${p.z} — layers top→bottom, each 5x5: rows north→south, columns west→east, @ = you`, ...grid]
   out.push(sides.join(' | '))

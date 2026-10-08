@@ -15,6 +15,7 @@ const { rayClear, hasLineOfSight } = require('./vision')
 const { scanCandidates } = require('./chunkScan')
 const fw = require('./fastworld')
 const { HAZARDS, RESOURCES } = require('../config/blocks')
+const { addByState, formatByState } = require('../world/blockLabel')
 
 const DEG = Math.PI / 180
 const _slow = process.env.PERCEPTION_SLOW === '1'   // see vision.js — differential-test escape hatch
@@ -107,7 +108,9 @@ function surveyVisible(opts = {}) {
     visibleCount++
     const rec = existing || (blocks[cnd.name] = { count: 0, many: false, nearest: null, nearestDist: Infinity })
     rec.count++
-    if (cnd.dist < rec.nearestDist) { rec.nearestDist = cnd.dist; rec.nearest = { x: cnd.x, y: cnd.y, z: cnd.z, dist: Math.round(cnd.dist) } }
+    const at = { x: cnd.x, y: cnd.y, z: cnd.z, dist: Math.round(cnd.dist), state: cnd.state ?? null }
+    if (cnd.dist < rec.nearestDist) { rec.nearestDist = cnd.dist; rec.nearest = at }
+    addByState(rec, cnd.state, at, cnd.dist)
     if (rec.count > K) rec.many = true // >K verified-visible → report "many", stop testing
   }
 
@@ -170,14 +173,15 @@ function _markSightline(eye, cnd, seen, writes, names) {
     // Was bot.blockAt per cell purely to read `.name`. fastworld returns null for an
     // unloaded column, which the old code also recorded as 'air' (blockAt → null left
     // the initialiser untouched), so the fallback preserves that.
-    let name
+    let name, st = null
     if (_slow) {
       name = 'air'
-      try { const b = bot.blockAt(new Vec3(bx, by, bz)); if (b) name = b.name } catch (e) { continue }
+      try { const b = bot.blockAt(new Vec3(bx, by, bz)); if (b) { name = b.name; st = b.stateId } } catch (e) { continue }
     } else {
-      name = fw.nameAt(names, bx, by, bz) || 'air'
+      st = fw.stateAt(bx, by, bz)
+      name = (st !== null && names[st]) || 'air'
     }
-    writes.push({ x: bx, y: by, z: bz, name })
+    writes.push({ x: bx, y: by, z: bz, name, state: st })
     n++
   }
   return n
@@ -208,21 +212,21 @@ function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = NA
   const t1 = performance.now()
   const tick = bot.time?.age || 0
   const names = fw.stateNames(require('minecraft-data')(bot.version))
-  const writes = []         // {x,y,z,name}
+  const writes = []         // {x,y,z,name,state}
   const seen = new Set()    // "x,y,z" dedup across solids + sightline cells
   let solids = 0, passables = 0, losTests = 0
   for (const cnd of candidates) {
     losTests++
     if (!blockVisible(eye, cnd.x, cnd.y, cnd.z)) continue
     const sk = cnd.x + ',' + cnd.y + ',' + cnd.z
-    if (!seen.has(sk)) { seen.add(sk); writes.push({ x: cnd.x, y: cnd.y, z: cnd.z, name: cnd.name }); solids++ }
+    if (!seen.has(sk)) { seen.add(sk); writes.push({ x: cnd.x, y: cnd.y, z: cnd.z, name: cnd.name, state: cnd.state ?? null }); solids++ }
     if (cnd.dist <= passableRange) passables += _markSightline(eye, cnd, seen, writes, names)
   }
 
   const t2 = performance.now()
   try {
     state.db.transaction(() => {
-      for (const w of writes) state.stmts.upsertBlock.run(w.x, w.y, w.z, w.name, tick)
+      for (const w of writes) state.stmts.upsertBlock.run(w.x, w.y, w.z, w.name, tick, w.state)
     })()
   } catch (e) { console.warn('  [navSurvey] upsert err:', e.message); return null }
   const t3 = performance.now()
@@ -248,11 +252,7 @@ function formatSurvey(s) {
     if (ar !== br) return ar - br
     return b[1].count - a[1].count
   })
-  const strs = entries.slice(0, 16).map(([name, r]) => {
-    const n = SHORTEN(name), at = r.nearest
-    const c = r.many ? 'many' : r.count
-    return r.count > 1 ? `${n}x${c}@${at.x},${at.y},${at.z}` : `${n}@${at.x},${at.y},${at.z}`
-  })
+  const strs = entries.slice(0, 16).flatMap(([name, r]) => formatByState(name, r, SHORTEN))
   if (strs.length) parts.push(`see=[${strs.join(',')}]`)
   if (s.entities.length) {
     parts.push(`mobs=[${s.entities.slice(0, 8).map(e => `${e.name}@${e.x},${e.y},${e.z}`).join(',')}]`)

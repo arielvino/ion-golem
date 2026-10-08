@@ -8,6 +8,7 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { isOpenable } = require('../config/blocks')
+const { labelOf } = require('../world/blockLabel')
 
 const isOpen = (b) => { const o = b.getProperties().open; return o === true || o === 'true' }
 
@@ -56,7 +57,7 @@ async function toggle(bot, door) {
   return false
 }
 
-const where = (b) => `${b.name} at ${b.position.x},${b.position.y},${b.position.z}`
+const where = (b) => `${labelOf(b)} at ${b.position.x},${b.position.y},${b.position.z}`
 
 // Before a flat step from (cx,cy,cz) along (dx,dz): open any door or gate in this cell or
 // the next that blocks the move. Returns { ok } or { ok:false, why }.

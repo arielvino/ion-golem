@@ -13,6 +13,7 @@
 //                structure no fingerprint knows. count + nearest
 const { roleOf, RESOURCE } = require('../config/natural-blocks')
 const { NEAR } = require('./sight')
+const { blockLabel } = require('../world/blockLabel')
 
 const TERRAIN_TOP = 5
 const BIOME_MIN = 0.01    // biomes under this share of the view are left out
@@ -27,7 +28,8 @@ const DIR_WORDS = { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
-// blocks: [{ name, x, y, z, biome }] (no air). places: recognizeCues(...).places or [].
+// blocks: [{ id, name, x, y, z, biome }] (no air; id = state id).
+// Terrain and unexplained blocks are grouped by label (name plus state). places: recognizeCues(...).places or [].
 function summarizeSight({ dimension, eye, blocks, places = [] }) {
   const explained = new Set(places.flatMap(p => [...p.counts.keys()]))
   const biomes = new Map()     // biome -> { n, terrain: Map(name -> n) }
@@ -43,9 +45,9 @@ function summarizeSight({ dimension, eye, blocks, places = [] }) {
     if (!bm) biomes.set(b.biome, bm = { n: 0, terrain: new Map() })
     bm.n++
     const role = roleOf(b.name, dimension, b.biome)
-    if (role === 'terrain') bm.terrain.set(b.name, (bm.terrain.get(b.name) || 0) + 1)
+    if (role === 'terrain') { const l = blockLabel(b.name, b.id); bm.terrain.set(l, (bm.terrain.get(l) || 0) + 1) }
     else if (role === 'resource') note(found.resource, RESOURCE.get(b.name), b)
-    else if (!explained.has(b.name)) note(found.unexplained, b.name, b)
+    else if (!explained.has(b.name)) note(found.unexplained, blockLabel(b.name, b.id), b)
   }
 
   const total = blocks.length || 1

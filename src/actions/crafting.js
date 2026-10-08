@@ -9,6 +9,7 @@ const { getInvMap, countMat, generalize, getBestRecipe } = require('../world/rec
 const { c, color } = require('../lib/colors')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
 const { isSmeltable } = require('./smelting')
+const { labelOf } = require('../world/blockLabel')
 
 // --- Crafting helpers ---
 
@@ -330,7 +331,7 @@ async function doCraft(targetName, count = 1) {
             const blocks = queryBlockMemoryFuzzy(term, botPos, 3)
             for (const b of blocks) {
               if (!hits.some(h => h.x === b.x && h.y === b.y && h.z === b.z)) {
-                hits.push({ label: `${b.name}@${b.x},${b.y},${b.z}(${Math.round(b.dist)}m)`, dist: b.dist })
+                hits.push({ label: `${labelOf(b)}@${b.x},${b.y},${b.z}(${Math.round(b.dist)}m)`, dist: b.dist })
               }
             }
             const cHits = searchContainersFor(term, botPos, 128)

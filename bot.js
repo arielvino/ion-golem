@@ -256,6 +256,8 @@ function createBot() {
       console.log(`  [SOUND] corrected off-by-one sound registry (${Object.keys(fixed).length} ids, now 0-indexed)`)
     }
 
+    require('./src/world/memory').checkStateVersion(bot.version)
+
     const mcData = require('minecraft-data')(bot.version)
     const mv = new Movements(bot, mcData)
     mv.allowSprinting = true

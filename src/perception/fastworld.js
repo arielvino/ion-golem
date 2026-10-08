@@ -131,6 +131,13 @@ function inLUT(lut, x, y, z) {
   return id < lut.length && lut[id] === 1
 }
 
+// The state id as block memory stores it: an absent section is air (0), unloaded is null.
+function stateAt(x, y, z) {
+  const id = getState(x, y, z)
+  if (id === EMPTY_SECTION) return 0
+  return id < 0 ? null : id
+}
+
 function nameAt(names, x, y, z) {
   const id = getState(x, y, z)
   if (id === EMPTY_SECTION) return 'air'
@@ -138,4 +145,4 @@ function nameAt(names, x, y, z) {
   return names[id]
 }
 
-module.exports = { stateLUT, stateNames, maxStateId, getState, inLUT, nameAt, UNLOADED, EMPTY_SECTION }
+module.exports = { stateLUT, stateNames, maxStateId, getState, stateAt, inLUT, nameAt, UNLOADED, EMPTY_SECTION }

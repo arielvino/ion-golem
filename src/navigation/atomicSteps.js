@@ -9,6 +9,7 @@
 const { Vec3 } = require('vec3')
 const { BlockMap } = require('../world/blockmap')  // still used by dbAstar via getNeighbors
 const state = require('../core/state')
+const { stateProps } = require('../world/memory')
 
 // Returns 'yes', 'no', or 'unknown'
 // 'unknown' = some required block has no data (conservative: treat as blocked)
@@ -163,6 +164,23 @@ function dbBlock(x, y, z) {
   try {
     const row = state.stmts.getBlockAt.get(x, y, z)
     return row ? row.name : null
+  } catch (e) { return null }
+}
+
+// The block's properties as last seen ({ eye: true }, { open: false, half: 'lower' }),
+// or null when the cell or its state isn't known. DB only, like dbBlock.
+function dbProps(x, y, z) {
+  try {
+    const row = state.stmts.getBlockAt.get(x, y, z)
+    return row ? stateProps(row.state) : null
+  } catch (e) { return null }
+}
+
+// The block as the model is shown it: name plus state (blockLabel), or null if unseen.
+function dbLabel(x, y, z) {
+  try {
+    const row = state.stmts.getBlockAt.get(x, y, z)
+    return row ? require('../world/blockLabel').blockLabel(row.name, row.state) : null
   } catch (e) { return null }
 }
 
@@ -741,4 +759,4 @@ async function followPath(bot, path, opts = {}) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, centerInBlock, glideAxis }
+module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, dbProps, dbLabel, centerInBlock, glideAxis }

@@ -175,9 +175,10 @@ function blockHeight(bot, x, y, z) {
   const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0)
   let name = dbBlock(x, y, z)
   if (blockVisible(eye, x, y, z)) {
-    const live = bot.blockAt(new Vec3(x, y, z))?.name
+    const liveBlock = bot.blockAt(new Vec3(x, y, z))
+    const live = liveBlock?.name
     if (live && live !== name) {
-      try { state.stmts.upsertBlock.run(x, y, z, live, now) } catch (e) {}
+      try { state.stmts.upsertBlock.run(x, y, z, live, now, liveBlock.stateId) } catch (e) {}
       name = live
     }
   }

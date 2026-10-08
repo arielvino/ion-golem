@@ -154,7 +154,7 @@ async function digBlock(pos, opts = {}) {
     // looking at it, so this write is LOS-honest.
     try {
       const bx = Math.floor(pos.x), by = Math.floor(pos.y), bz = Math.floor(pos.z)
-      state.stmts.upsertBlock.run(bx, by, bz, after ? after.name : 'cave_air', state.bot.time?.age || 0)
+      state.stmts.upsertBlock.run(bx, by, bz, after ? after.name : 'cave_air', state.bot.time?.age || 0, after ? after.stateId : null)
     } catch (e) { /* DB write is best-effort; next survey will correct it */ }
     logGameEvent('mine', b.name, 1, pos.x, pos.y, pos.z, { tool: bot.heldItem?.name || 'hand', reason: opts.reason || 'navigation' })
     return { ok: true, block: b.name, warn }
@@ -225,7 +225,7 @@ async function placeBlockAt(item, placePos) {
     try { after = bot.blockAt(placePos) } catch (e) {}
     if (after && accept.includes(after.name)) {
       try {
-        state.stmts.upsertBlock.run(Math.floor(placePos.x), Math.floor(placePos.y), Math.floor(placePos.z), after.name, state.bot.time?.age || 0)
+        state.stmts.upsertBlock.run(Math.floor(placePos.x), Math.floor(placePos.y), Math.floor(placePos.z), after.name, state.bot.time?.age || 0, after.stateId)
       } catch (e) { /* best-effort DB write; next survey corrects it */ }
       return after.name
     }

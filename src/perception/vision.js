@@ -3,6 +3,7 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { TRANSPARENT, NOTABLE_TRANSPARENT, PASSABLE, HAZARDS, RESOURCES } = require('../config/blocks')
 const fw = require('./fastworld')
+const { blockLabel, addByState, formatByState } = require('../world/blockLabel')
 
 // Resolve a name Set to its state-id lookup table (see fastworld.js). Returns null for
 // an unrecognised set so callers can fall back to the original blockAt path.
@@ -272,18 +273,21 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         continue
       }
 
-      // Only `.name` is ever read from the block here, so this goes through fastworld
-      // rather than building a full prismarine Block per ray step. Both return
+      // Only the name and state id are read from the block here, so this goes through
+      // fastworld rather than building a full prismarine Block per ray step. Both return
       // null/undefined for an unloaded column, which ends the ray exactly as before.
-      let name
+      let name, st
       if (rayNames) {
-        name = fw.nameAt(rayNames, bx, by, bz)
+        st = fw.stateAt(bx, by, bz)
+        if (st === null) break
+        name = rayNames[st]
         if (!name) break
       } else {
         let block
         try { block = bot.blockAt(new Vec3(bx, by, bz)) } catch(e) { break }
         if (!block) break
         name = block.name
+        st = block.stateId
       }
       seen.add(key)
       if (passThrough.has(name)) {
@@ -291,17 +295,17 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         airCount++
         // Record passable blocks near bot for DB pathfinding corridor data
         if (step <= 5) {
-          results.allBlocks.push({ x: bx, y: by, z: bz, name })
+          results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
         }
         if (NOTABLE_TRANSPARENT.has(name)) {
           if (!results.seenBlocks[name]) results.seenBlocks[name] = []
           if (results.seenBlocks[name].length < 10) {
-            results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step })
+            results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step, state: st })
           }
           const reach = hadBarrier ? null : 'yes'
           const prev = reachMap.get(key)
           if (prev !== 'yes') reachMap.set(key, reach)
-          if (step > 5) results.allBlocks.push({ x: bx, y: by, z: bz, name })
+          if (step > 5) results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
         }
         continue
       }
@@ -313,12 +317,12 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         if (NOTABLE_TRANSPARENT.has(name)) {
           if (!results.seenBlocks[name]) results.seenBlocks[name] = []
           if (results.seenBlocks[name].length < 10) {
-            results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step })
+            results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step, state: st })
           }
           const reach = hadBarrier ? null : 'yes'
           const prev = reachMap.get(key)
           if (prev !== 'yes') reachMap.set(key, reach)
-          results.allBlocks.push({ x: bx, y: by, z: bz, name })
+          results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
         }
         continue
       }
@@ -327,7 +331,8 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
 
       solid.add(key)
       if (step <= 2) {
-        results.nearBlocks[name] = (results.nearBlocks[name] || 0) + 1
+        const label = blockLabel(name, st)
+        results.nearBlocks[label] = (results.nearBlocks[label] || 0) + 1
       }
 
       // Track reachability for solid blocks at ray terminus
@@ -341,10 +346,10 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
           if (structRow) results.visibleStructures.add(structRow.name)
         } catch(e) { console.warn('  [VISION] structure lookup err:', e.message) }
       }
-      results.allBlocks.push({ x: bx, y: by, z: bz, name })
+      results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
       if (!results.seenBlocks[name]) results.seenBlocks[name] = []
       if (results.seenBlocks[name].length < 10) {
-        results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step })
+        results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step, state: st })
       }
       if (RESOURCES.has(name)) {
         if (!results.resources[name]) results.resources[name] = []
@@ -452,12 +457,7 @@ function formatVision(v, opts = {}) {
       if (aOre !== bOre) return aOre - bOre
       return b[1].count - a[1].count
     })
-    const blockStrs = entries.slice(0, 20).map(([name, r]) => {
-      const at = r.nearest
-      return r.count > 1
-        ? `${_shorten(name)}x${r.many ? 'many' : r.count}@${at.x},${at.y},${at.z}`
-        : `${_shorten(name)}@${at.x},${at.y},${at.z}`
-    })
+    const blockStrs = entries.slice(0, 20).flatMap(([name, r]) => formatByState(name, r, _shorten))
     if (blockStrs.length) parts.push(`see=[${blockStrs.join(',')}]`)
   } else if (v && v.seenBlocks && Object.keys(v.seenBlocks).length > 0) {
     const entries = Object.entries(v.seenBlocks)
@@ -472,13 +472,9 @@ function formatVision(v, opts = {}) {
     })
     const blockStrs = []
     for (const [name, positions] of entries.slice(0, 20)) {
-      const closest = positions[0]
-      const shortName = _shorten(name)
-      if (positions.length === 1) {
-        blockStrs.push(`${shortName}@${closest.x},${closest.y},${closest.z}`)
-      } else {
-        blockStrs.push(`${shortName}x${positions.length}@${closest.x},${closest.y},${closest.z}`)
-      }
+      const rec = {}
+      for (const p of positions) addByState(rec, p.state, p, p.dist)
+      blockStrs.push(...formatByState(name, rec, _shorten))
     }
     parts.push(`see=[${blockStrs.join(',')}]`)
   }

@@ -12,7 +12,7 @@ const { around } = require('../src/ai/ctxProviders')
 
 state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'around-'))
 memory.initDB()
-const put = (x, y, z, name) => state.stmts.upsertBlock.run(x, y, z, name, 0)
+const put = (x, y, z, name) => state.stmts.upsertBlock.run(x, y, z, name, 0, null)
 for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) {
   put(x, 100, z, 'stone')
   for (let y = 101; y <= 121; y++) put(x, y, z, x === 0 && z === 0 && y >= 110 && y <= 117 ? 'dirt' : 'air')
