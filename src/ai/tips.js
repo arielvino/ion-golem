@@ -29,21 +29,29 @@ const TIPS = [
 const texts = Object.fromEntries(TIPS.map(t => [t.id, fs.readFileSync(path.join(TIP_DIR, `${t.id}.txt`), 'utf8').trim()]))
 const shown = new Set()
 
-// The TIP lines for this turn, '' when nothing new is in sight. Marks them shown.
+// This turn's TIP lines ('' when nothing new is in sight) and their ids. A tip only
+// counts as shown once markTipsShown(ids) confirms the model answered that turn: an
+// interrupted turn's input is thrown away, and with it a tip marked too early.
 function renderTips() {
-  const lines = []
+  const lines = [], ids = []
   for (const tip of TIPS) {
     let subjects = []
     try { subjects = tip.detect() } catch (e) { console.warn(`  [TIP] ${tip.id} detect err:`, e.message) }
     for (const { key, vars } of subjects) {
       const id = `${tip.id}@${key}`
       if (shown.has(id)) continue
-      shown.add(id)
-      console.log(`  [TIP] ${id}`)
+      ids.push(id)
       lines.push(`TIP(${id}): ${texts[tip.id].replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m)}`)
     }
   }
-  return lines.join('\n')
+  return { text: lines.join('\n'), ids }
 }
 
-module.exports = { renderTips }
+function markTipsShown(ids) {
+  for (const id of ids) {
+    shown.add(id)
+    console.log(`  [TIP] shown ${id}`)
+  }
+}
+
+module.exports = { renderTips, markTipsShown }
