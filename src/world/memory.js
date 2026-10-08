@@ -127,6 +127,7 @@ function initDB() {
     CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
     CREATE INDEX IF NOT EXISTS idx_events_target ON events(target);
     CREATE INDEX IF NOT EXISTS idx_events_type_target ON events(type, target);
+    CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
   `)
 
   // Migrations
@@ -145,6 +146,9 @@ function initDB() {
   if (addColIfMissing('structures', 'origin_y', 'INTEGER')) migrated = true
   if (addColIfMissing('structures', 'origin_z', 'INTEGER')) migrated = true
   if (addColIfMissing('blocks', 'reachable', "TEXT DEFAULT 'unknown'")) migrated = true
+  // The block's protocol state id: its properties (a frame's eye, a door's open/half,
+  // a slab's type). NULL = not known, e.g. rows written before this column existed.
+  if (addColIfMissing('blocks', 'state', 'INTEGER')) migrated = true
   if (addColIfMissing('structures', 'dim', "TEXT NOT NULL DEFAULT 'overworld'")) migrated = true
   if (addColIfMissing('events', 'dim', 'TEXT')) {
     db.exec(`UPDATE events SET dim = 'overworld' WHERE x IS NOT NULL`)
@@ -161,8 +165,8 @@ function initDB() {
 
   // Prepared statements
   const stmts = {
-    upsertBlock: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at) VALUES (cur_dim(),?,?,?,?,?)
-      ON CONFLICT(dim,x,y,z) DO UPDATE SET name=excluded.name, seen_at=excluded.seen_at`),
+    upsertBlock: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at,state) VALUES (cur_dim(),?,?,?,?,?,?)
+      ON CONFLICT(dim,x,y,z) DO UPDATE SET name=excluded.name, seen_at=excluded.seen_at, state=excluded.state`),
     removeBlock: db.prepare(`DELETE FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     queryByName: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE dim=cur_dim() AND name=?
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
@@ -187,17 +191,17 @@ function initDB() {
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
     queryUtilBlocks: db.prepare(`SELECT x,y,z,name FROM blocks WHERE dim=cur_dim() AND name IN ('furnace','crafting_table','chest','trapped_chest','barrel','anvil','smoker','blast_furnace','enchanting_table','brewing_stand')
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
-    getBlockAt: db.prepare(`SELECT name, reachable FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
-    upsertBlockReach: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at,reachable) VALUES (cur_dim(),?,?,?,?,?,?)
+    getBlockAt: db.prepare(`SELECT name, reachable, state FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    upsertBlockReach: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at,reachable,state) VALUES (cur_dim(),?,?,?,?,?,?,?)
       ON CONFLICT(dim,x,y,z) DO UPDATE SET
-        name=excluded.name, seen_at=excluded.seen_at,
+        name=excluded.name, seen_at=excluded.seen_at, state=excluded.state,
         reachable = CASE
           WHEN blocks.name != excluded.name THEN excluded.reachable
           WHEN blocks.reachable = 'yes' THEN 'yes'
           ELSE excluded.reachable
         END`),
     // Region query (bounding box)
-    queryRegion: db.prepare(`SELECT x, y, z, name FROM blocks
+    queryRegion: db.prepare(`SELECT x, y, z, name, state FROM blocks
       WHERE dim=cur_dim() AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? AND z BETWEEN ? AND ?`),
     // Path blocks
     addPathBlock: db.prepare(`INSERT OR REPLACE INTO path_blocks (dim,x,y,z,path_type,created_at) VALUES (cur_dim(),?,?,?,?,?)`),
@@ -219,12 +223,12 @@ function initDB() {
 
   const upsertBatch = db.transaction((blocks) => {
     const now = gameTick()
-    for (const b of blocks) stmts.upsertBlock.run(b.x, b.y, b.z, b.name, now)
+    for (const b of blocks) stmts.upsertBlock.run(b.x, b.y, b.z, b.name, now, b.state ?? null)
   })
 
   const upsertBatchReach = db.transaction((blocks) => {
     const now = gameTick()
-    for (const b of blocks) stmts.upsertBlockReach.run(b.x, b.y, b.z, b.name, now, b.reachable || 'unknown')
+    for (const b of blocks) stmts.upsertBlockReach.run(b.x, b.y, b.z, b.name, now, b.reachable || 'unknown', b.state ?? null)
   })
 
   state.db = db
@@ -311,7 +315,7 @@ async function upsertVisionChunked(visionResult, chunkSize = 200) {
     try {
       state.db.transaction(() => {
         for (const b of chunk) {
-          state.stmts.upsertBlockReach.run(b.x, b.y, b.z, b.name, now, b.reachable || 'unknown')
+          state.stmts.upsertBlockReach.run(b.x, b.y, b.z, b.name, now, b.reachable || 'unknown', b.state ?? null)
         }
       })()
     } catch (e) { console.warn('  [MEMORY] block upsert chunk err:', e.message) }
@@ -444,6 +448,38 @@ function getNearbyContainers(botPos, radius) {
   } catch (e) { return [] }
 }
 
+// --- Block state ---
+// State ids are numbered per game version (26.1 and 26.3 differ), so a stored one
+// only means something under the version that wrote it. Called on spawn, once the
+// version is known: joining under another version forgets every stored state.
+function checkStateVersion(version) {
+  try {
+    const row = state.db.prepare(`SELECT value FROM meta WHERE key='state_version'`).get()
+    if (row?.value === version) return
+    if (row) {
+      const n = state.db.prepare('UPDATE blocks SET state=NULL WHERE state IS NOT NULL').run().changes
+      console.log(`  [MEMORY] game version ${row.value} → ${version}: forgot ${n} block states`)
+    }
+    state.db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('state_version', ?)`).run(version)
+  } catch (e) { console.warn('  [MEMORY] state version check err:', e.message) }
+}
+
+// A stored state id → the block's properties ({ eye: true, facing: 'north' }), or
+// null when it isn't known. One decode per id per registry.
+let _propsReg = null
+const _propsCache = new Map()
+function stateProps(id) {
+  const reg = state.bot?.registry
+  if (id === null || id === undefined || !reg) return null
+  if (reg !== _propsReg) { _propsReg = reg; _propsCache.clear() }
+  let p = _propsCache.get(id)
+  if (!p) {
+    try { p = require('prismarine-block')(reg).fromStateId(id, 0).getProperties() } catch (e) { return null }
+    _propsCache.set(id, p)
+  }
+  return p
+}
+
 // --- Region query ---
 function queryRegion(x1, y1, z1, x2, y2, z2) {
   try {
@@ -567,7 +603,7 @@ module.exports = {
   initDB, currentDim, updateBlockMemoryReach, queryBlockMemory, queryBlockMemoryFuzzy,
   trackPlacedBlock, createStructure, getStructures, removeBlock, queryUtilityBlocks,
   saveContainerState, getContainerState, removeContainerState, getNearbyContainers, searchContainersFor,
-  queryRegion,
+  queryRegion, checkStateVersion, stateProps,
   trackPathBlock, isPathBlock, clearOldPathBlocks, countNearbyPathBlocks,
   updateChunkBiomes, logChatDB, logGameEvent, logTaskAction, upsertVisionChunked,
 }

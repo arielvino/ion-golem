@@ -272,18 +272,21 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         continue
       }
 
-      // Only `.name` is ever read from the block here, so this goes through fastworld
-      // rather than building a full prismarine Block per ray step. Both return
+      // Only the name and state id are read from the block here, so this goes through
+      // fastworld rather than building a full prismarine Block per ray step. Both return
       // null/undefined for an unloaded column, which ends the ray exactly as before.
-      let name
+      let name, st
       if (rayNames) {
-        name = fw.nameAt(rayNames, bx, by, bz)
+        st = fw.stateAt(bx, by, bz)
+        if (st === null) break
+        name = rayNames[st]
         if (!name) break
       } else {
         let block
         try { block = bot.blockAt(new Vec3(bx, by, bz)) } catch(e) { break }
         if (!block) break
         name = block.name
+        st = block.stateId
       }
       seen.add(key)
       if (passThrough.has(name)) {
@@ -291,7 +294,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         airCount++
         // Record passable blocks near bot for DB pathfinding corridor data
         if (step <= 5) {
-          results.allBlocks.push({ x: bx, y: by, z: bz, name })
+          results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
         }
         if (NOTABLE_TRANSPARENT.has(name)) {
           if (!results.seenBlocks[name]) results.seenBlocks[name] = []
@@ -301,7 +304,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
           const reach = hadBarrier ? null : 'yes'
           const prev = reachMap.get(key)
           if (prev !== 'yes') reachMap.set(key, reach)
-          if (step > 5) results.allBlocks.push({ x: bx, y: by, z: bz, name })
+          if (step > 5) results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
         }
         continue
       }
@@ -318,7 +321,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
           const reach = hadBarrier ? null : 'yes'
           const prev = reachMap.get(key)
           if (prev !== 'yes') reachMap.set(key, reach)
-          results.allBlocks.push({ x: bx, y: by, z: bz, name })
+          results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
         }
         continue
       }
@@ -341,7 +344,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
           if (structRow) results.visibleStructures.add(structRow.name)
         } catch(e) { console.warn('  [VISION] structure lookup err:', e.message) }
       }
-      results.allBlocks.push({ x: bx, y: by, z: bz, name })
+      results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
       if (!results.seenBlocks[name]) results.seenBlocks[name] = []
       if (results.seenBlocks[name].length < 10) {
         results.seenBlocks[name].push({ x: bx, y: by, z: bz, dist: step })

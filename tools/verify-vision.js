@@ -173,7 +173,7 @@ async function main() {
   const { surveyForNav } = require('../src/perception/visibility')
   const capture = []
   const origRun = state.stmts.upsertBlock.run.bind(state.stmts.upsertBlock)
-  state.stmts.upsertBlock.run = (x, y, z, n, t) => { capture.push(`${x},${y},${z}=${n}`); return origRun(x, y, z, n, t) }
+  state.stmts.upsertBlock.run = (x, y, z, n, t, s) => { capture.push(`${x},${y},${z}=${n}`); return origRun(x, y, z, n, t, s) }
   surveyForNav({})
   const fastSet = new Set(capture)
   const airWrites = capture.filter(s => s.endsWith('=air')).length

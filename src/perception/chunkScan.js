@@ -284,9 +284,9 @@ function scanCandidates({ origin, look, cosHalf = -1, maxDistance = 64, count = 
           let g = groups.get(name)
           if (!g) groups.set(name, g = { total: 0, nearest: [] })
           g.total++
-          insertNearest(g.nearest, { x: wx, y: wy, z: wz, name, dist }, groupNearest)
+          insertNearest(g.nearest, { x: wx, y: wy, z: wz, name, state: id, dist }, groupNearest)
         } else {
-          out.push({ x: wx, y: wy, z: wz, name, dist })
+          out.push({ x: wx, y: wy, z: wz, name, state: id, dist })
         }
       }
     }
