@@ -220,6 +220,9 @@ async function doMount(targetName) {
   } catch (err) {
     console.log(`  mount failed: ${err.message}`)
     sendChat(`Can't get in: ${err.message}`)
+    recordFailure(`mount:${entity.name} - ${err.message}`)
+    state.currentTask = null
+    return false
   }
   state.currentTask = null
 }
@@ -418,7 +421,7 @@ async function doGoto(target, opts = {}) {
   }
 
   const coords = coordStr.split(',').map(Number)
-  if (coords.length !== 3 || coords.some(isNaN)) { console.log('  bad coords:', target); return false }
+  if (coords.length !== 3 || coords.some(isNaN)) { console.log('  bad coords:', target); recordFailure(`goto:${target} - expected X,Y,Z`); return false }
   const [tx, ty, tz] = coords
 
   if (bot.vehicle) {

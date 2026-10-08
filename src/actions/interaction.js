@@ -61,6 +61,7 @@ async function doUse(target) {
   } catch (err) {
     console.error(`  use err: ${err.message}`)
     sendChat(`Failed to use ${block.name}!`)
+    recordFailure(`use:${target} - ${err.message}`)
     state.currentTask = null
     return false
   }
@@ -78,12 +79,12 @@ async function doFill(targetName) {
 
   // Find empty bucket in inventory
   const bucket = bot.inventory.items().find(i => i.name === 'bucket')
-  if (!bucket) { sendChat("I don't have an empty bucket!"); return false }
+  if (!bucket) { sendChat("I don't have an empty bucket!"); recordFailure(`fill:${targetName} - no empty bucket in inventory`); return false }
 
   // Find nearest liquid source block
   const mcData = require('minecraft-data')(bot.version)
   const liquidBlock = mcData.blocksByName[liquidName]
-  if (!liquidBlock) { sendChat(`Unknown liquid: ${liquidName}`); return false }
+  if (!liquidBlock) { sendChat(`Unknown liquid: ${liquidName}`); recordFailure(`fill:${targetName} - unknown liquid ${liquidName}`); return false }
 
   // Find source blocks (metadata 0 = still/source, not flowing) — only ones in sight
   const allLiquid = findKnownBlocks([liquidName], { maxDistance: 32, count: 100 })
@@ -95,6 +96,7 @@ async function doFill(targetName) {
   const targets = sources.length > 0 ? sources : allLiquid
   if (targets.length === 0) {
     sendChat(`Can't find ${liquidName} nearby!`)
+    recordFailure(`fill:${targetName} - no ${liquidName} seen nearby`)
     return false
   }
 
@@ -142,7 +144,7 @@ async function doFill(targetName) {
   const dist = bot.entity.position.distanceTo(navTarget)
   if (dist > 3) {
     const arrived = await navigateTo(navTarget.x, navTarget.y, navTarget.z, 2, 30000)
-    if (!arrived) { sendChat(`Can't reach the ${liquidName}!`); return false }
+    if (!arrived) { sendChat(`Can't reach the ${liquidName}!`); recordFailure(`fill:${targetName} - couldn't reach the ${liquidName} at ${navTarget.x},${navTarget.y},${navTarget.z}${state.navFailReason ? ` (${state.navFailReason})` : ''}`); return false }
   }
   await sleep(300)
 
@@ -150,6 +152,7 @@ async function doFill(targetName) {
   const block = bot.blockAt(chosenTarget)
   if (!block || block.name !== liquidName) {
     sendChat(`${liquidName} block disappeared!`)
+    recordFailure(`fill:${targetName} - the ${liquidName} at ${chosenTarget.x},${chosenTarget.y},${chosenTarget.z} is gone`)
     return false
   }
 
@@ -195,6 +198,7 @@ async function doFill(targetName) {
 
   console.log(`  fill bucket failed all attempts`)
   sendChat(`Can't fill bucket here`)
+  recordFailure(`fill:${targetName} - 3 tries at ${chosenTarget.x},${chosenTarget.y},${chosenTarget.z} left the bucket empty`)
   return false
 }
 
