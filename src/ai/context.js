@@ -78,7 +78,7 @@ function getBotContext() {
     .map(e => {
       const tag = entityTag(e)
       const ep = e.position
-      const coord = `@${Math.round(ep.x)},${Math.round(ep.y)},${Math.round(ep.z)}`
+      const coord = `@${Math.floor(ep.x)},${Math.floor(ep.y)},${Math.floor(ep.z)}`
       const dist = `${Math.round(ep.distanceTo(pos))}m`
       let count = ''
       if (tag.startsWith('drop:')) {
