@@ -714,7 +714,7 @@ async function pillarUp(targetY, maxBlocks = 5) {
     }
 
     // Look straight down before jumping
-    await bot.look(bot.entity.yaw, Math.PI / 2, true) // pitch=90° = straight down
+    await bot.look(bot.entity.yaw, -Math.PI / 2, true) // mineflayer pitch: -π/2 = straight down
 
     // Jump and wait until we're above our starting Y
     bot.setControlState('jump', true)
