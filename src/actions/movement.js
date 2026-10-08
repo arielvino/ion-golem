@@ -611,49 +611,6 @@ async function doSwimUp() {
   }
   bot.setControlState('jump', false)
 
-  // Try to swim to shore — find nearest solid ground at water surface level
-  if (bot.entity.isInWater) {
-    console.log('  [swimup] still in water, seeking shore...')
-    const pos = bot.entity.position
-    const cy = Math.round(pos.y)
-    let bestShore = null, bestDist = Infinity
-    // Scan in expanding square for a solid non-water block at foot level
-    for (let r = 1; r <= 16; r++) {
-      for (let dx = -r; dx <= r; dx++) {
-        for (let dz = -r; dz <= r; dz++) {
-          if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue // only perimeter
-          const bx = Math.floor(pos.x) + dx, bz = Math.floor(pos.z) + dz
-          // Check a few Y levels around surface
-          for (let dy = -1; dy <= 2; dy++) {
-            const b = bot.blockAt(new Vec3(bx, cy + dy, bz))
-            const above = bot.blockAt(new Vec3(bx, cy + dy + 1, bz))
-            if (b && !WATER_BLOCKS.has(b.name) && !STRUCTURAL_AIR.has(b.name)
-                && above && STRUCTURAL_AIR.has(above.name)) {
-              const d = Math.abs(dx) + Math.abs(dz)
-              if (d < bestDist) { bestDist = d; bestShore = new Vec3(bx, cy + dy + 1, bz) }
-            }
-          }
-        }
-      }
-      if (bestShore) break // found shore at this radius
-    }
-    if (bestShore) {
-      console.log(`  [swimup] shore at ${bestShore.x},${bestShore.y},${bestShore.z} (${bestDist}m)`)
-      // Swim toward shore — jump + look + forward
-      for (let s = 0; s < 30; s++) {
-        if (!bot.entity.isInWater) { console.log('  [swimup] reached land'); break }
-        if (isAborted()) break
-        await bot.lookAt(bestShore.offset(0.5, 0.5, 0.5))
-        bot.setControlState('forward', true)
-        bot.setControlState('jump', true)
-        await sleep(300)
-      }
-      bot.clearControlStates()
-    } else {
-      console.log('  [swimup] no shore found within 16 blocks')
-    }
-  }
-
   console.log('  [swimup] done')
   state.currentTask = null
 }

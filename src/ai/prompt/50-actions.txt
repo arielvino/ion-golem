@@ -14,7 +14,7 @@ ACTIONS ARE TEXT YOU WRITE — never a tool call. To act, write the [ACTION:...]
 [ACTION:goto!:X,Y,Z] — like goto but allows walking through ALL hazards (lava, fire, magma, water). Use only when the player explicitly asks to walk into danger (e.g. "jump in lava"). NOT needed for filling buckets — fill:lava/water handles proximity automatically.
 [ACTION:give:ITEM[:COUNT]:PLAYER] — walk to the player and toss them an item: give:copper_pickaxe:Sargon564, give:bread:3:Sargon564. ITEM comes first; always name the PLAYER.
 [ACTION:flee] — sprint from danger immediately, no preparation.
-[ACTION:swimup] — surface when underwater/drowning (digs straight up or heads to shore). If a background task is running, pair with [ACTION:stop] first.
+[ACTION:swimup] — surface when underwater/drowning (swims straight up, digging through a block overhead). If a background task is running, pair with [ACTION:stop] first.
 [ACTION:portal] / [ACTION:portal:X,Y,Z] — go through a lit nether portal (nearest remembered one, or the portal block at X,Y,Z). Walks to the portal's face, steps in and stands still until the teleport (~4s). Use this, not goto or move: walking through a portal or stopping beside it never teleports you. Success means you are in the other dimension.
 [ACTION:mount:TARGET] — enter boat/minecart/horse (place boat first); a nearby= tag picks that exact one. [ACTION:dismount] — exit vehicle.
 [ACTION:sail:TARGET] — steer boat: coords, direction (north/south/east/west), or "north 500". Use instead of goto in boats.
