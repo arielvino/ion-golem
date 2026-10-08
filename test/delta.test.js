@@ -49,3 +49,10 @@ test('a player walking off while staying in view is a change', () => {
   assert.strictEqual(renderDelta(a, b), 'since last turn (11s): Sargon564 2m→17m away')
   assert.strictEqual(renderDelta(a, snapshot({ ...base, players: { Sargon564: 4 }, now: 12000 })), 'nothing changed in 11s')
 })
+
+test('far threats: one wandering in is quiet, a crowd gathering is reported', () => {
+  const a = snapshot({ ...base, far: { skeleton: 3 } })
+  assert.strictEqual(renderDelta(a, snapshot({ ...base, far: { skeleton: 4, zombie: 2 }, now: 4000 })), 'nothing changed in 3s')
+  assert.strictEqual(renderDelta(a, snapshot({ ...base, far: { skeleton: 7, zombie: 3 }, now: 4000 })),
+    'since last turn (3s): far skeleton×3→7, zombie×0→3')
+})

@@ -16,8 +16,7 @@ const { getBackgroundSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending, around } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
-const { entityTag } = require('../perception/entityTag')
-const { entityClass } = require('../perception/entityClass')
+const { renderNearby, equipOf } = require('./nearby')
 const { blockLabel } = require('../world/blockLabel')
 
 // Item name with remaining durability for damageable items: iron_pickaxe(212/250).
@@ -44,54 +43,13 @@ function getBotContext() {
   const armorSlots = armorItems.map(s => s.name)
   const armorStr = armorItems.length > 0 ? ` armor=[${armorItems.map(s => itemLabel(s)).join(',')}]` : ' armor=none'
   const eyePos = pos.offset(0, 1.62, 0)
-  const nearbyNames = []
-  const drops = {}  // drop tag → stack size, so DELTA can report a pile growing
   const playerDist = {}  // tracked player → distance; staying in view isn't staying put
-  // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
-  const equipOf = (e) => {
-    const parts = []
-    if (e.equipment) {
-      const labels = ['hand', 'off', 'head', 'chest', 'legs', 'feet']
-      for (let i = 0; i < labels.length; i++) {
-        const item = e.equipment[i]
-        if (item && item.name) parts.push(`${labels[i]}:${item.name}`)
-      }
-    }
-    return parts.length > 0 ? `,${parts.join(',')}` : ''
-  }
-  // Every visible non-player entity, nearest first. Players have PLAYERS= below.
-  // Background mobs (fish, squid, bats) are summarized per type after the tagged
-  // list; drops only show within pickup range.
-  const background = {}  // name → { n, near }
-  const nearby = Object.values(bot.entities)
+  const visible = Object.values(bot.entities)
     .filter(e => e !== bot.entity && !e.username && e.position.distanceTo(pos) < ranges.sight.nearbyEntities)
     .filter(e => hasLineOfSight(eyePos, e.position, e.height || 1.8))
-    .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
-    .filter(e => {
-      const kind = entityClass(e)
-      if (kind === 'drop') return e.position.distanceTo(pos) < ranges.sight.nearbyDrops
-      if (kind !== 'background') return true
-      const b = background[e.name] || (background[e.name] = { n: 0, near: Math.round(e.position.distanceTo(pos)) })
-      b.n++
-      return false
-    })
-    .map(e => {
-      const tag = entityTag(e)
-      const ep = e.position
-      const coord = `@${Math.floor(ep.x)},${Math.floor(ep.y)},${Math.floor(ep.z)}`
-      const dist = `${Math.round(ep.distanceTo(pos))}m`
-      let count = ''
-      if (tag.startsWith('drop:')) {
-        try { drops[tag] = e.getDroppedItem().count; count = `,x${drops[tag]}` } catch (_) { /* no drop data */ }
-      }
-      nearbyNames.push(tag)
-      return `${tag}${coord}(${dist}${count}${equipOf(e)})`
-    })
-    .concat(Object.entries(background).map(([name, b]) => {
-      nearbyNames.push(name)
-      return `${name}×${b.n}(${b.near}m+)`
-    }))
-    .join(', ') || 'none'
+  const nearbyView = renderNearby(visible, pos, { threats: ranges.sight.nearbyThreats, mobs: ranges.sight.nearbyMobs, drops: ranges.sight.nearbyDrops })
+  const nearby = nearbyView.text
+  const nearbyNames = nearbyView.seen
   // Facing direction from yaw. yawToDir maps any mineflayer yaw (radians) to a
   // compass label; also reused for locator bearings toward out-of-range players.
   const facingDirs = ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW']  // mineflayer yaw: atan2(-dx, -dz), east = -90°
@@ -313,7 +271,7 @@ function getBotContext() {
   const invCounts = {}
   for (const i of bot.inventory.items()) invCounts[i.name] = (invCounts[i.name] || 0) + i.count
   const snap = snapshot({ pos, hp: bot.health, food: bot.food, held, offhand, inv: invCounts, armor: armorSlots,
-    vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops, players: playerDist })
+    vehicle: vehicleStr.trim(), task, seen: nearbyNames, drops: nearbyView.drops, far: nearbyView.far, players: playerDist })
   const delta = renderDelta(state.prevSnapshot, snap)
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
