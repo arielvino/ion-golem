@@ -29,7 +29,9 @@ const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z sout
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
 // blocks: [{ id, name, x, y, z, biome }] (no air; id = state id).
-// Terrain and unexplained blocks are grouped by label (name plus state). places: recognizeCues(...).places or [].
+// Terrain is grouped by name: it says what the area is made of, and a state split
+// (oak_leaves by distance, vine by side) only crowded real materials out of the top few.
+// Unexplained blocks are grouped by label (name plus state). places: recognizeCues(...).places or [].
 function summarizeSight({ dimension, eye, blocks, places = [] }) {
   const explained = new Set(places.flatMap(p => [...p.counts.keys()]))
   const biomes = new Map()     // biome -> { n, terrain: Map(name -> n) }
@@ -45,7 +47,7 @@ function summarizeSight({ dimension, eye, blocks, places = [] }) {
     if (!bm) biomes.set(b.biome, bm = { n: 0, terrain: new Map() })
     bm.n++
     const role = roleOf(b.name, dimension, b.biome)
-    if (role === 'terrain') { const l = blockLabel(b.name, b.id); bm.terrain.set(l, (bm.terrain.get(l) || 0) + 1) }
+    if (role === 'terrain') bm.terrain.set(b.name, (bm.terrain.get(b.name) || 0) + 1)
     else if (role === 'resource') note(found.resource, RESOURCE.get(b.name), b)
     else if (!explained.has(b.name)) note(found.unexplained, blockLabel(b.name, b.id), b)
   }
