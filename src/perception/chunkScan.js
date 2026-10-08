@@ -62,14 +62,15 @@ function findByTypeMap(idToName, { maxDistance = 64, count = 64, origin } = {}) 
       // --- scan the 4096 blocks of this section ---
       const baseY = minY + s * 16
       for (let i = 0; i < 4096; i++) {
-        const name = idToName.get(container.get(i))
+        const id = container.get(i)
+        const name = idToName.get(id)
         if (!name) continue
         const lx = i & 15, lz = (i >> 4) & 15, ly = (i >> 8) & 15
         const wx = baseX + lx, wy = baseY + ly, wz = baseZ + lz
         const dx = wx + 0.5 - eye.x, dy = wy + 0.5 - eye.y, dz = wz + 0.5 - eye.z
         const d2 = dx * dx + dy * dy + dz * dz
         if (d2 > maxD2) continue
-        out.push({ x: wx, y: wy, z: wz, name, dist: Math.sqrt(d2) })
+        out.push({ x: wx, y: wy, z: wz, name, state: id, dist: Math.sqrt(d2) })
       }
     }
   }

@@ -168,7 +168,7 @@ function initDB() {
     upsertBlock: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at,state) VALUES (cur_dim(),?,?,?,?,?,?)
       ON CONFLICT(dim,x,y,z) DO UPDATE SET name=excluded.name, seen_at=excluded.seen_at, state=excluded.state`),
     removeBlock: db.prepare(`DELETE FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
-    queryByName: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE dim=cur_dim() AND name=?
+    queryByName: db.prepare(`SELECT x,y,z,name,seen_at,state FROM blocks WHERE dim=cur_dim() AND name=?
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
     isPlaced: db.prepare(`SELECT 1 FROM placed_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=? AND structure_id IS NOT NULL`),
     addPlaced: db.prepare(`INSERT OR IGNORE INTO placed_blocks (dim,x,y,z,structure_id,bp_x,bp_y,bp_z) VALUES (cur_dim(),?,?,?,?,?,?,?)`),
@@ -187,9 +187,9 @@ function initDB() {
     removeContainer: db.prepare(`DELETE FROM containers WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     getNearbyContainers: db.prepare(`SELECT x,y,z,type,contents,updated_at FROM containers
       WHERE dim=cur_dim() AND (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ? ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT 20`),
-    queryByNameLike: db.prepare(`SELECT x,y,z,name,seen_at FROM blocks WHERE dim=cur_dim() AND name LIKE ?
+    queryByNameLike: db.prepare(`SELECT x,y,z,name,seen_at,state FROM blocks WHERE dim=cur_dim() AND name LIKE ?
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
-    queryUtilBlocks: db.prepare(`SELECT x,y,z,name FROM blocks WHERE dim=cur_dim() AND name IN ('furnace','crafting_table','chest','trapped_chest','barrel','anvil','smoker','blast_furnace','enchanting_table','brewing_stand')
+    queryUtilBlocks: db.prepare(`SELECT x,y,z,name,state FROM blocks WHERE dim=cur_dim() AND name IN ('furnace','crafting_table','chest','trapped_chest','barrel','anvil','smoker','blast_furnace','enchanting_table','brewing_stand')
       ORDER BY (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) ASC LIMIT ?`),
     getBlockAt: db.prepare(`SELECT name, reachable, state FROM blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     upsertBlockReach: db.prepare(`INSERT INTO blocks (dim,x,y,z,name,seen_at,reachable,state) VALUES (cur_dim(),?,?,?,?,?,?,?)
@@ -335,7 +335,7 @@ function queryBlockMemory(matchingNames, botPos) {
         if (state.stmts.isPlaced.get(r.x, r.y, r.z)) continue
         const dist = botPos.distanceTo(new Vec3(r.x, r.y, r.z))
         const age = Math.round((gameTick() - r.seen_at) / 20) // seconds since last seen
-        results.push({ x: r.x, y: r.y, z: r.z, name: r.name, dist, age })
+        results.push({ x: r.x, y: r.y, z: r.z, name: r.name, state: r.state, dist, age })
       }
     } catch (e) { console.warn('  [MEMORY] queryBlockMemory err:', e.message) }
   }
@@ -352,7 +352,7 @@ function queryBlockMemoryFuzzy(partialName, botPos, limit = 10) {
     for (const r of rows) {
       if (state.stmts.isPlaced.get(r.x, r.y, r.z)) continue
       const dist = botPos.distanceTo(new Vec3(r.x, r.y, r.z))
-      results.push({ x: r.x, y: r.y, z: r.z, name: r.name, dist })
+      results.push({ x: r.x, y: r.y, z: r.z, name: r.name, state: r.state, dist })
     }
   } catch (e) { console.warn('  [MEMORY] queryBlockMemoryFuzzy err:', e.message) }
   results.sort((a, b) => a.dist - b.dist)

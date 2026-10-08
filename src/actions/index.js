@@ -146,12 +146,13 @@ async function executeAction(actionStr, username, opts = {}) {
         const LOOK_RANGE = ranges.sight.lookBlocks
         const { scanCandidates, resolveTargets } = require('../perception/chunkScan')
         const { blockVisible } = require('../perception/visibility')
+        const { blockLabel } = require('../world/blockLabel')
         // omni (cosHalf -1): "do I see any X anywhere", not just ahead. Exposure-culled.
         const hits = scanCandidates({ origin: eyePos, cosHalf: -1, maxDistance: LOOK_RANGE, count: 256, idToName: resolveTargets(normalized) })
         let visibleSoFar = 0
         for (const h of hits) {
           if (blockVisible(eyePos, h.x, h.y, h.z)) {
-            found.push({ name: h.name, type: 'block', x: h.x, y: h.y, z: h.z, dist: Math.round(h.dist), visible: true })
+            found.push({ name: blockLabel(h.name, h.state), type: 'block', x: h.x, y: h.y, z: h.z, dist: Math.round(h.dist), visible: true })
             if (++visibleSoFar >= ranges.sight.lookReportCap) break
           }
         }

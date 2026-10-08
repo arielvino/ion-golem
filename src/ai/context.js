@@ -18,6 +18,7 @@ const { providerNames, renderPending, around } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
 const { entityTag } = require('../perception/entityTag')
 const { entityClass } = require('../perception/entityClass')
+const { blockLabel } = require('../world/blockLabel')
 
 // Item name with remaining durability for damageable items: iron_pickaxe(212/250).
 // Stackables keep the xN count instead (withCount).
@@ -134,7 +135,7 @@ function getBotContext() {
   const foundUtils = queryUtilityBlocks(pos, SEARCH_UTILITY).map(u => {
     const d = Math.round(pos.distanceTo(new Vec3(u.x, u.y, u.z)))
     const unopened = STORAGE.has(u.name) && !opened(u) ? ',unopened' : ''
-    return `${u.name}@${u.x},${u.y},${u.z}(${d}m${unopened})`
+    return `${blockLabel(u.name, u.state)}@${u.x},${u.y},${u.z}(${d}m${unopened})`
   })
 
   // Container locations from DB (contents accessible via take/deposit actions)
@@ -293,7 +294,7 @@ function getBotContext() {
   // adjacent blocks are not otherwise surfaced to the model.
   let bodyStr = ''
   try {
-    const blockName = (b) => b ? b.name : 'unknown'
+    const blockName = (b) => b ? blockLabel(b.name, b.stateId) : 'unknown'
     const headBlock = bot.blockAt(pos.offset(0, 1, 0))
     const feetBlock = bot.blockAt(pos)
     const floorBlock = bot.blockAt(pos.offset(0, -1, 0))

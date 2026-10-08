@@ -15,6 +15,7 @@ const { rayClear, hasLineOfSight } = require('./vision')
 const { scanCandidates } = require('./chunkScan')
 const fw = require('./fastworld')
 const { HAZARDS, RESOURCES } = require('../config/blocks')
+const { addByState, formatByState } = require('../world/blockLabel')
 
 const DEG = Math.PI / 180
 const _slow = process.env.PERCEPTION_SLOW === '1'   // see vision.js — differential-test escape hatch
@@ -107,7 +108,9 @@ function surveyVisible(opts = {}) {
     visibleCount++
     const rec = existing || (blocks[cnd.name] = { count: 0, many: false, nearest: null, nearestDist: Infinity })
     rec.count++
-    if (cnd.dist < rec.nearestDist) { rec.nearestDist = cnd.dist; rec.nearest = { x: cnd.x, y: cnd.y, z: cnd.z, dist: Math.round(cnd.dist) } }
+    const at = { x: cnd.x, y: cnd.y, z: cnd.z, dist: Math.round(cnd.dist), state: cnd.state ?? null }
+    if (cnd.dist < rec.nearestDist) { rec.nearestDist = cnd.dist; rec.nearest = at }
+    addByState(rec, cnd.state, at, cnd.dist)
     if (rec.count > K) rec.many = true // >K verified-visible → report "many", stop testing
   }
 
@@ -249,11 +252,7 @@ function formatSurvey(s) {
     if (ar !== br) return ar - br
     return b[1].count - a[1].count
   })
-  const strs = entries.slice(0, 16).map(([name, r]) => {
-    const n = SHORTEN(name), at = r.nearest
-    const c = r.many ? 'many' : r.count
-    return r.count > 1 ? `${n}x${c}@${at.x},${at.y},${at.z}` : `${n}@${at.x},${at.y},${at.z}`
-  })
+  const strs = entries.slice(0, 16).flatMap(([name, r]) => formatByState(name, r, SHORTEN))
   if (strs.length) parts.push(`see=[${strs.join(',')}]`)
   if (s.entities.length) {
     parts.push(`mobs=[${s.entities.slice(0, 8).map(e => `${e.name}@${e.x},${e.y},${e.z}`).join(',')}]`)

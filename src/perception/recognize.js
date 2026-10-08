@@ -21,6 +21,7 @@ const { FINGERPRINTS } = require('../config/fingerprints')
 const { scanCandidates } = require('./chunkScan')
 const { blockVisible } = require('./visibility')
 const { hasLineOfSight } = require('./vision')
+const { blockLabel } = require('../world/blockLabel')
 
 const LINK = 10          // blocks: two visible cues closer than this belong to one place
 const MERGE = 32         // blocks: same-kind places whose nearest members are this close are one
@@ -92,7 +93,7 @@ function visibleCues(eye, maxDistance, c) {
     losTests++
     if (!blockVisible(eye, cnd.x, cnd.y, cnd.z)) continue
     seenPerName.set(cnd.name, n + 1)
-    out.push({ name: cnd.name, x: cnd.x, y: cnd.y, z: cnd.z, entity: false })
+    out.push({ name: cnd.name, state: cnd.state, x: cnd.x, y: cnd.y, z: cnd.z, entity: false })
   }
   out.push(...visibleEntityCues(eye, maxDistance, c))
   return { cues: out, candidates: candidates.length, losTests }
@@ -131,7 +132,7 @@ function viewCues(view, maxDistance, c) {
     if (n >= VISIBLE_CAP) continue
     if (state.stmts?.isPlaced?.get(b.x, b.y, b.z)) continue // our own builds are not a place
     per.set(b.name, n + 1)
-    out.push({ name: b.name, x: b.x, y: b.y, z: b.z, entity: false })
+    out.push({ name: b.name, state: b.id, x: b.x, y: b.y, z: b.z, entity: false })
   }
   return [...out, ...visibleEntityCues(eye, maxDistance, c)]
 }
@@ -341,7 +342,15 @@ function recognizeCues(bot, mcData, eye, cues) {
   }
 
   places.sort((a, b) => a.dist - b.dist)
-  for (const p of [...places, ...unrecognizedGroups]) delete p.members
+  // counts (by name) is the evidence; labels (name plus state) is what a report shows.
+  for (const p of [...places, ...unrecognizedGroups]) {
+    p.labels = new Map()
+    for (const m of p.members) {
+      const l = m.entity ? m.name : blockLabel(m.name, m.state)
+      p.labels.set(l, (p.labels.get(l) || 0) + 1)
+    }
+    delete p.members
+  }
   return { places, unrecognized: unrecognizedGroups.length, unrecognizedGroups, visible: cues.length }
 }
 
@@ -356,12 +365,12 @@ function formatRecognition(r) {
   const lines = r.places.map(p => {
     const label = (h) => h.variant ? `${h.kind}(${h.variant})` : h.kind
     const guesses = p.hyps.map(h => `${label(h)} ${h.share.toFixed(2)}`).join(' | ')
-    const seen = [...p.counts].sort((a, b) => b[1] - a[1]).map(([n, k]) => `${n}×${k}`).join(' ')
+    const seen = [...p.labels].sort((a, b) => b[1] - a[1]).map(([n, k]) => `${n}×${k}`).join(' ')
     const confirm = p.hyps.slice(0, 2).map(h => `${label(h)}: ${h.missing.join(', ') || '—'}`).join('; ')
     return `  ~${p.dist}m ${p.dir} @${p.at.x},${p.at.y},${p.at.z}${p.biome ? ` (${p.biome})` : ''}: ${guesses}\n    seen: ${seen}\n    would confirm → ${confirm}`
   })
   const odd = r.unrecognizedGroups.slice(0, 3).map(g =>
-    `  unrecognized ~${g.dist}m ${g.dir}: ${[...g.counts].map(([n, k]) => `${n}×${k}`).join(' ')}`)
+    `  unrecognized ~${g.dist}m ${g.dir}: ${[...g.labels].map(([n, k]) => `${n}×${k}`).join(' ')}`)
   return [head, ...lines, ...odd].join('\n')
 }
 

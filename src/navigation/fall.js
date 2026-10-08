@@ -1,7 +1,7 @@
 // Fall measurement from the block DB — how far a step off an edge, or through a
 // floor, would drop the bot, onto what, and for how much damage. Shared by the
 // descend actions (digdown/jumpdown) and the around view in every context.
-const { dbBlock } = require('./atomicSteps')
+const { dbBlock, dbLabel } = require('./atomicSteps')
 const { PASSABLE, HAZARDS, WATER_BLOCKS } = require('../config/blocks')
 
 const SAFE_FALL = 3        // blocks a fall can span without damage
@@ -10,7 +10,8 @@ const DIRS = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] }
 
 // Fall from standing at feet level `fromY` in column (x,z), cells fromY-1 downward.
 // `open` = cells treated as air regardless of the DB (the floor about to be dug).
-// Returns { blocks, landing, at, stand, water, hazard, unknown } — `blocks` is how far the
+// Returns { blocks, landing, at, stand, water, hazard, unknown } — `landing`/`hazard` are the
+// block's label (name plus state, for reports); `blocks` is how far the
 // bot drops; `at` is the landing BLOCK's y, `stand` the feet y after landing (at + 1) —
 // the height pos= and digdown:yN speak in, so reports to the model give `stand`;
 // `unknown` means the scan hit a cell nobody has seen before finding ground.
@@ -20,10 +21,10 @@ function measureFall(x, fromY, z, open = 0) {
     if (fromY - 1 - y < open) { blocks++; continue }
     const name = dbBlock(x, y, z)
     if (name === null) return { blocks, unknown: true, at: y }
-    if (WATER_BLOCKS.has(name)) return { blocks, water: true, landing: name, at: y }
-    if (HAZARDS.has(name)) return { blocks, hazard: name, landing: name, at: y }
+    if (WATER_BLOCKS.has(name)) return { blocks, water: true, landing: dbLabel(x, y, z), at: y }
+    if (HAZARDS.has(name)) { const label = dbLabel(x, y, z); return { blocks, hazard: label, landing: label, at: y } }
     if (PASSABLE.has(name)) { blocks++; continue }
-    return { blocks, landing: name, at: y, stand: y + 1 }
+    return { blocks, landing: dbLabel(x, y, z), at: y, stand: y + 1 }
   }
   return { blocks, unknown: true, at: fromY - MAX_SCAN }
 }

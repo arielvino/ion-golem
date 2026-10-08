@@ -176,6 +176,14 @@ function dbProps(x, y, z) {
   } catch (e) { return null }
 }
 
+// The block as the model is shown it: name plus state (blockLabel), or null if unseen.
+function dbLabel(x, y, z) {
+  try {
+    const row = state.stmts.getBlockAt.get(x, y, z)
+    return row ? require('../world/blockLabel').blockLabel(row.name, row.state) : null
+  } catch (e) { return null }
+}
+
 function dbPassable(x, y, z) { const n = dbBlock(x, y, z); return n !== null && PASSABLE.has(n) }
 function dbSolid(x, y, z)   { const n = dbBlock(x, y, z); return n !== null && !PASSABLE.has(n) }
 function dbUnknown(x, y, z)  { return dbBlock(x, y, z) === null }
@@ -751,4 +759,4 @@ async function followPath(bot, path, opts = {}) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, dbProps, centerInBlock, glideAxis }
+module.exports = { canFlatStep, canStepUp, canStepDown, getNeighbors, hasFloor, isSafe, liveStep, followPath, knownStraightRun, sprintRun, dbPlanPath, dbCanFlat, dbCanUp, dbCanDown, dbBlock, dbProps, dbLabel, centerInBlock, glideAxis }

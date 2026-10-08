@@ -9,6 +9,7 @@ const { getInvMap, countMat } = require('../world/recipes')
 const { offsets } = require('../config/constants')
 const { WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
+const { labelOf } = require('../world/blockLabel')
 
 async function doPlace(target, opts = {}) {
   const bot = state.bot
@@ -335,7 +336,7 @@ async function doBuild(opts = {}) {
   }
 
   if (obstructions.length > 0) {
-    const msg = `Can't build: ${obstructions.length} unbreakable blocks in the way (e.g. ${obstructions[0].name} at ${obstructions[0].pos.x},${obstructions[0].pos.y},${obstructions[0].pos.z})`
+    const msg = `Can't build: ${obstructions.length} unbreakable blocks in the way (e.g. ${labelOf(obstructions[0])} at ${obstructions[0].pos.x},${obstructions[0].pos.y},${obstructions[0].pos.z})`
     sendChat(msg)
     recordFailure(`build - ${msg}`)
     state.pendingBlueprint = bp
@@ -358,7 +359,7 @@ async function doBuild(opts = {}) {
       if (dug.ok) {
         console.log(`    cleared ${c.block.name} at (${c.pos.x},${c.pos.y},${c.pos.z})`)
       } else if (dug.reason === 'need_tool') {
-        recordFailure(`build: ${c.block.name} at ${c.pos.x},${c.pos.y},${c.pos.z} needs a ${dug.need} to clear. Craft/equip one, or re-issue [ACTION:build:skiptool] to hand-clear.`)
+        recordFailure(`build: ${labelOf(c.block)} at ${c.pos.x},${c.pos.y},${c.pos.z} needs a ${dug.need} to clear. Craft/equip one, or re-issue [ACTION:build:skiptool] to hand-clear.`)
         console.log(`    can't clear ${c.block.name} — needs a ${dug.need}`)
       } else {
         console.log(`    failed to clear ${c.block.name} at (${c.pos.x},${c.pos.y},${c.pos.z}): ${dug.reason}`)
