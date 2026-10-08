@@ -19,7 +19,7 @@ const { sendChat, debugChat } = require('../core/utils')
 // Extracted planner/query/goal/reachability modules (see REFACTORING.md §1)
 const { _pHazard, _pSurface, _pKnownSolid, _pKnownClear } = require('./blockquery')
 const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
-const { reachGoal, headingGoal, until } = require('./goals')
+const { reachGoal, headingGoal, until, arrived } = require('./goals')
 const { navMode, clearNavState } = require('./navmode')
 const { blockNeedsMissingTool, toolSpeedAdvice, equipForDig } = require('../world/tooling')
 
@@ -880,7 +880,7 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
     if (state.abortSignal) break
     const pos = bot.entity.position
     const dist = pos.distanceTo(target)
-    if (dist <= range + 0.5) return true
+    if (arrived(pos, tx, ty, tz, range)) return true
 
     const cx = Math.floor(pos.x), cy = Math.round(pos.y), cz = Math.floor(pos.z)
     const vk = `${cx},${cy},${cz}`
