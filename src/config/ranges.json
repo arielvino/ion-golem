@@ -3,6 +3,8 @@
   "sight": {
     "playerVisibility": "chunkLoad",
     "nearbyEntities": "chunkLoad",
+    "nearbyThreats": 40,
+    "nearbyMobs": 24,
     "nearbyDrops": 32,
     "ambientSurveyBlocks": 64,
     "ambientFovDegrees": 120,
@@ -20,7 +22,9 @@
   },
   "_fields": {
     "sight.playerVisibility": "Max range to LOS-test the named chat player for PLAYER=...(visible/NOT_VISIBLE). chunkLoad = see them as far as chunks load.",
-    "sight.nearbyEntities": "Range for the nearby= mob/entity list (LOS-gated). chunkLoad = full loaded range.",
+    "sight.nearbyEntities": "Range for the nearby= mob/entity list (LOS-gated). chunkLoad = full loaded range. Past nearbyThreats/nearbyMobs a mob is only counted per kind (far: skeleton×11(39m+)).",
+    "sight.nearbyThreats": "Hostile mobs closer than this are listed in nearby= one by one, with tag, position and gear. Farther ones are counted per kind.",
+    "sight.nearbyMobs": "Same as nearbyThreats, for every other mob (animals, villagers, golems, boats...). Shorter: a far sheep is rarely worth a tag.",
     "sight.nearbyDrops": "Range for dropped items in nearby= (LOS-gated). Drops farther than this are omitted — they matter only for pickup.",
     "sight.ambientSurveyBlocks": "Range of the standing-context survey (exposure-culled chunk scan + LOS) that feeds VISION= see=. Per-tick cost; exposure cull keeps candidate count low so range can be larger. Profile before pushing past ~64.",
     "sight.ambientFovDegrees": "Field-of-view cone (full angle) for the standing survey. (FOV-vs-omni still under discussion.)",
