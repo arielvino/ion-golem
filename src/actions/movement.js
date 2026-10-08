@@ -553,25 +553,44 @@ const COMPASS_OFFSETS = {
   sw: [-1, 1], southwest: [-1, 1],
 }
 
+// Pitch words for turn, in degrees (mineflayer: positive pitch looks up).
+const PITCH_WORDS = { up: 90, down: -90, level: 0, ahead: 0 }
+
+// A pitch argument: up/down/level or degrees -90..90. Returns radians, or null.
+function parsePitch(s) {
+  if (s in PITCH_WORDS) return PITCH_WORDS[s] * Math.PI / 180
+  if (!/^[-+]?\d+(\.\d+)?$/.test(s)) return null
+  return Math.max(-90, Math.min(90, parseFloat(s))) * Math.PI / 180
+}
+
 async function doTurn(target) {
   const bot = state.bot
   const pos = bot.entity.position
-  const dir = target.toLowerCase().trim()
+  const [dir, pitchArg] = target.toLowerCase().trim().split(':').map(s => s.trim())
 
-  // Compass direction
-  const offset = COMPASS_OFFSETS[dir]
-  if (offset) {
-    const lookPos = pos.offset(offset[0] * 10, 0, offset[1] * 10)
-    await bot.lookAt(lookPos.offset(0, bot.entity.height, 0))
-    console.log(`  turned to face ${dir.toUpperCase()}`)
+  // Pitch only, yaw unchanged: up / down / level / degrees
+  const pitchOnly = pitchArg === undefined ? parsePitch(dir) : null
+  if (pitchOnly !== null) {
+    await bot.look(bot.entity.yaw, pitchOnly, true)
+    console.log(`  turned head to pitch ${Math.round(pitchOnly * 180 / Math.PI)}°`)
     return
   }
 
-  // Coordinates: x,y,z
+  // Compass direction, optionally with a pitch: N, NE:-30, S:down
+  const offset = COMPASS_OFFSETS[dir]
+  if (offset) {
+    const pitch = pitchArg === undefined ? 0 : parsePitch(pitchArg)
+    if (pitch === null) return turnFail(target, `bad pitch "${pitchArg}" (use up/down/level or degrees -90..90)`)
+    await bot.look(Math.atan2(-offset[0], -offset[1]), pitch, true)
+    console.log(`  turned to face ${dir.toUpperCase()}${pitchArg !== undefined ? ` at pitch ${Math.round(pitch * 180 / Math.PI)}°` : ''}`)
+    return
+  }
+
+  // Coordinates: x,y,z — look at the centre of that block
   const coordMatch = dir.match(/(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)/)
   if (coordMatch) {
     const tx = parseInt(coordMatch[1]), ty = parseInt(coordMatch[2]), tz = parseInt(coordMatch[3])
-    await bot.lookAt(new Vec3(tx + 0.5, ty + bot.entity.height, tz + 0.5))
+    await bot.lookAt(new Vec3(tx + 0.5, ty + 0.5, tz + 0.5), true)
     console.log(`  turned to face ${tx},${ty},${tz}`)
     return
   }
@@ -584,7 +603,13 @@ async function doTurn(target) {
     return
   }
 
-  console.log(`  turn: unknown direction "${target}" (use N/S/E/W/NE/NW/SE/SW, coords, or player name)`)
+  return turnFail(target, 'unknown direction (use N/S/E/W/NE/NW/SE/SW with optional :PITCH, up/down/level, degrees, coords X,Y,Z, or a player name)')
+}
+
+function turnFail(target, why) {
+  console.log(`  turn:${target} FAILED — ${why}`)
+  recordFailure(`turn:${target} - ${why}`)
+  return false
 }
 
 async function doSwimUp() {
