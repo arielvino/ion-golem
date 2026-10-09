@@ -37,6 +37,7 @@ function enqueueChat(text, debug) {
 
 function sendChat(text, debug = false) {
   if (!text) return
+  if (state.chatMuted) { console.log(`  [MUTED] ${text}`); return }
   const MAX = 230
   if (text.length <= MAX) { enqueueChat(text, debug); drainChatQueue(); return }
   const sentences = text.match(/[^.!?]+[.!?]+\s*/g) || [text]
