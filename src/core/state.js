@@ -20,6 +20,7 @@ module.exports = {
   msgPending: false,
   noActionRounds: 0,
   aiPaused: false,       // debug `!ai off`: engine makes no model calls
+  chatMuted: false,      // --no-chat: lines the bot would say go to the console only
 
   messageQueue: [],
   // Tasks — agenda is the source of truth; taskStack is its derived view (engine/tasks.js)

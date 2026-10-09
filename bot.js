@@ -26,6 +26,8 @@ const { stopAll } = require('./src/core/tick')
 const DEBUG_MODE = process.argv.includes('--debug')
 // --no-ai: start with model calls paused (a debugging bot driven by !act); `!ai on` resumes.
 if (process.argv.includes('--no-ai')) state.aiPaused = true
+// --no-chat: never speak in game (a quiet test bot); what it would say is printed instead.
+if (process.argv.includes('--no-chat')) state.chatMuted = true
 const nameArg = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null
 const BOT_NAME = nameArg || process.env.MC_USERNAME || (DEBUG_MODE ? 'BroDev' : 'Bro')
 state.debugMode = DEBUG_MODE
