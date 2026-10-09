@@ -47,7 +47,7 @@ npm install
 cp .env.example .env            # tweak if you like; defaults target a local server
 
 # Option A — spin up a local offline server (downloads a Mojang-licensed jar):
-scripts/setup-server.sh 26.1.2
+scripts/setup-server.sh 26.3
 cd server && java -Xms1G -Xmx2G -jar server.jar nogui   # leave running in another shell
 cd ..
 
@@ -69,7 +69,7 @@ offline server with the CLI AI backend, so a fresh clone runs with zero edits.
 | `AI_MODEL`    | `sonnet`            | Model id (or alias) passed to the `claude` CLI; `sonnet` tracks the latest Sonnet. |
 | `MC_HOST`     | `localhost`         | Server host to join.                                          |
 | `MC_PORT`     | `25565`             | Server port.                                                  |
-| `MC_VERSION`  | `26.1`              | Protocol version.                                             |
+| `MC_VERSION`  | `26.3`              | Protocol version.                                             |
 | `MC_USERNAME` | `Bro` / `BroDev`    | In-game username (`--debug` defaults to `BroDev`).           |
 | `MC_AUTH`     | *(offline)*         | `offline` for cracked/LAN servers, `microsoft` for online-mode. |
 | `IONGOLEM_DATA_DIR` | *(OS data dir)* | Base dir for per-bot state. Defaults to your OS user-data dir (see below). |
