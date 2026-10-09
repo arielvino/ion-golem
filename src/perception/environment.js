@@ -43,7 +43,7 @@ function bind(bot) {
     const t = bot.time
     const cur = { time: t.time, timeOfDay: t.timeOfDay, age: t.age, cycle: t.doDaylightCycle }
     const ch = timeChange(prev, cur)
-    if (ch?.jump) record(`time: set ${hhmm(prev.timeOfDay)} → ${hhmm(cur.timeOfDay)} (${ch.jump > 0 ? '+' : ''}${ch.jump}t), now ${phase(cur.timeOfDay)}`)
+    if (ch?.jump) record(`time: set ${hhmm(prev.timeOfDay)} → ${hhmm(cur.timeOfDay)}, now ${phase(cur.timeOfDay)}`)
     else if (ch?.phase === 'night') record(`time: night fell (${hhmm(cur.timeOfDay)})`)
     else if (ch?.phase === 'day') record(`time: day broke (${hhmm(cur.timeOfDay)})`)
     if (cycle !== null && cycle !== cur.cycle) record(`time: the daylight cycle ${cur.cycle ? 'runs again' : 'stopped'} at ${hhmm(cur.timeOfDay)}`)
