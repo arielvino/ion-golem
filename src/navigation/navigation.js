@@ -579,6 +579,10 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
         ctx.why = 'no placeable blocks to build a step up'
         return false
       }
+      // The server refuses a block where the bot's hitbox is. Standing off-center
+      // toward the step (e.g. after a short climb) pokes the hitbox into the step
+      // cell, so center on the step axis first.
+      await centerInBlock(bot, { axis: stepX !== 0 ? 'x' : 'z' })
       const placedName = await placeBlockAt(placeableSlot, stepPos)
       if (!placedName) {
         console.log(`  stairUp: couldn't place step (no valid placement)`)
