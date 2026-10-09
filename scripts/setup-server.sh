@@ -8,10 +8,10 @@
 # Running it writes eula.txt with eula=true — i.e. you accept Mojang's EULA
 # (https://www.minecraft.net/en-us/eula). Don't run it if you don't.
 #
-# Usage: scripts/setup-server.sh [version]   (default: 26.1.2)
+# Usage: scripts/setup-server.sh [version]   (default: 26.3)
 set -euo pipefail
 
-VERSION="${1:-26.1.2}"
+VERSION="${1:-26.3}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_DIR="$ROOT/server"
 MANIFEST="https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
