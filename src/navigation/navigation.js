@@ -64,6 +64,19 @@ function getToolSummary(bot) {
 // the nav driver bails to the AI (craft the tool, or re-issue with :skiptool).
 // Intent comes from opts.intent, else state.navIntent (set by the running nav
 // op), else 'clear'. Returns { ok, reason?, need?, block? }.
+// A digBlock refusal in words, for ctx.why.
+function refusalText(r) {
+  switch (r.reason) {
+    case 'hazard': return `${r.hazard} next to it at ${r.at.x},${r.at.y},${r.at.z}, would flow in; safe mode won't open it`
+    case 'path': return 'part of a staircase or tunnel I made'
+    case 'placed': return 'a block I built'
+    case 'need_tool': return `needs ${r.need}`
+    case 'not_permitted': return 'breaking not permitted'
+    case 'unbreakable': return `${r.block} is unbreakable`
+    default: return r.reason + (r.error ? `: ${r.error}` : '')
+  }
+}
+
 async function digBlock(pos, opts = {}) {
   const bot = state.bot
   const b = bot.blockAt(pos)
@@ -103,11 +116,11 @@ async function digBlock(pos, opts = {}) {
       if (!nb) continue
       if (nb.name === 'lava') {
         console.log(`  digBlock: lava adjacent at ${np}, skipping`)
-        return { ok: false, reason: 'hazard' }
+        return { ok: false, reason: 'hazard', hazard: 'lava', at: np }
       }
       if (mode === 'safe' && WATER_BLOCKS.has(nb.name)) {
         console.log(`  digBlock: water adjacent at ${np}, skipping`)
-        return { ok: false, reason: 'hazard' }
+        return { ok: false, reason: 'hazard', hazard: 'water', at: np }
       }
     }
   }
@@ -544,10 +557,16 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     // Dig above head for jump room, dig ahead at +1 and +2 for body space,
     // keep ahead at +0 solid as the step, then jump-walk onto it.
     const beforeY = bot.entity.position.y
+    // Digs the climb needed but digBlock refused, so a failed step can say why.
+    const refused = []
+    const dig = async (p) => {
+      const r = await digBlock(p)
+      if (r && !r.ok && r.reason !== 'not_diggable') refused.push({ p, r })
+    }
 
     // Ensure current body space is clear (might be stuck in stone)
-    await digBlock(new Vec3(cx, curY, cz))
-    await digBlock(new Vec3(cx, curY + 1, cz))
+    await dig(new Vec3(cx, curY, cz))
+    await dig(new Vec3(cx, curY + 1, cz))
     if (state.abortSignal) return false
 
     // Check if step block ahead is solid; if not, place one
@@ -570,11 +589,11 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     }
 
     // Dig space for body at +1 level ahead (feet after stepping up)
-    await digBlock(new Vec3(cx + stepX, curY + 1, cz + stepZ))
+    await dig(new Vec3(cx + stepX, curY + 1, cz + stepZ))
     // Dig space for head at +2 level ahead
-    await digBlock(new Vec3(cx + stepX, curY + 2, cz + stepZ))
+    await dig(new Vec3(cx + stepX, curY + 2, cz + stepZ))
     // Dig above head at current pos for jump clearance
-    await digBlock(new Vec3(cx, curY + 2, cz))
+    await dig(new Vec3(cx, curY + 2, cz))
     if (state.abortSignal) return false
 
     // Reveal the step cells before the STRICT liveStep — an unsurveyed (unknown)
@@ -589,7 +608,9 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     const upResult = await liveStep(bot, stepX, stepZ, { mode: upMode })
     if (!upResult.ok) {
       console.log(`  stairUp: liveStep failed (${upResult.type})`)
-      ctx.why = `step up blocked (${upResult.type})`
+      ctx.why = refused.length
+        ? `step up blocked: ${refused.map(({ p, r }) => `won't dig ${p.x},${p.y},${p.z} (${refusalText(r)})`).join('; ')}`
+        : `step up blocked (${upResult.type})`
       return false
     }
     bot.clearControlStates()
