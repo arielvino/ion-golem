@@ -370,6 +370,7 @@ function createBot() {
     bot.once('end', () => { clearInterval(visionInterval) })
 
     setupAutonomous(interrupt)
+    require('./src/perception/playerSignals').bind(bot)
     require('./src/perception/effects').bind(bot)
     require('./src/perception/environment').bind(bot)
     require('./src/perception/selfStatus').bind(bot)
@@ -437,7 +438,9 @@ function createBot() {
     } else { noPathCount = 0 }
   })
 
-  bot.on('chat', (username, message) => {
+  // A whisper (/msg) is a player talking to the bot like chat; mineflayer emits it as
+  // 'whisper' ("X whispers to you: …" isn't chat's <X> form), so it takes the same path.
+  const onChat = (username, message) => {
     if (username === bot.username) return
     if (username.startsWith('Bot') && username !== bot.username) {
       console.log(`<${username}> ${message}  [ignored: other bot]`)
@@ -469,7 +472,9 @@ function createBot() {
     // Don't abort if already handling a player message (msgPending).
     if (!state.msgPending) softInterrupt()
     state.messageQueue.push({ username, message })
-  })
+  }
+  bot.on('chat', onChat)
+  bot.on('whisper', onChat)
 
   // System/game events
   bot.on('messagestr', (message, messagePosition) => {
