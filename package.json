@@ -31,29 +31,23 @@
   "homepage": "https://github.com/arielvino/ion-golem#readme",
   "dependencies": {
     "better-sqlite3": "^13.0.3",
-    "mineflayer": "github:arielvino/mineflayer#fix/set-passengers-events",
+    "minecraft-data": "github:arielvino/node-minecraft-data#iongolem",
+    "minecraft-protocol": "github:arielvino/node-minecraft-protocol#iongolem",
+    "mineflayer": "github:arielvino/mineflayer#iongolem",
     "mineflayer-auto-eat": "^5.0.3",
     "mineflayer-collectblock": "^1.6.0",
-    "mineflayer-pathfinder": "^2.4.5",
+    "mineflayer-pathfinder": "github:arielvino/mineflayer-pathfinder#iongolem",
     "mineflayer-pvp": "^1.3.2",
-    "mineflayer-tool": "^1.2.0"
+    "mineflayer-tool": "^1.2.0",
+    "prismarine-chunk": "github:arielvino/prismarine-chunk#iongolem",
+    "prismarine-physics": "github:arielvino/prismarine-physics#iongolem"
   },
   "overrides": {
-    "mineflayer-auto-eat": {
-      "mineflayer": "$mineflayer"
-    },
-    "mineflayer-collectblock": {
-      "mineflayer": "$mineflayer"
-    },
-    "mineflayer-pathfinder": {
-      "mineflayer": "$mineflayer"
-    },
-    "mineflayer-pvp": {
-      "mineflayer": "$mineflayer"
-    },
-    "mineflayer-tool": {
-      "mineflayer": "$mineflayer"
-    },
-    "prismarine-chunk": "github:arielvino/prismarine-chunk#c9500be43e922b74c06852d76bfb7e3d2e89f071"
+    "minecraft-data": "$minecraft-data",
+    "minecraft-protocol": "$minecraft-protocol",
+    "mineflayer": "$mineflayer",
+    "mineflayer-pathfinder": "$mineflayer-pathfinder",
+    "prismarine-chunk": "$prismarine-chunk",
+    "prismarine-physics": "$prismarine-physics"
   }
 }
