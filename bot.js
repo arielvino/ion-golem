@@ -373,6 +373,7 @@ function createBot() {
     require('./src/perception/playerSignals').bind(bot)
     require('./src/perception/effects').bind(bot)
     require('./src/perception/environment').bind(bot)
+    require('./src/perception/selfStatus').bind(bot)
 
     // --- Accessibility subtitles from sound events ---
     const langData = (() => {
