@@ -370,6 +370,7 @@ function createBot() {
     bot.once('end', () => { clearInterval(visionInterval) })
 
     setupAutonomous(interrupt)
+    require('./src/perception/playerSignals').bind(bot)
     require('./src/perception/effects').bind(bot)
     require('./src/perception/environment').bind(bot)
 
