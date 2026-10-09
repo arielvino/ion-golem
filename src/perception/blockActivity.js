@@ -76,12 +76,15 @@ function bind(bot) {
   // mineflayer forgets a closed chest's count, so the server repeating "0 viewers"
   // reads as another close: keep the last count per chest here.
   const lids = new Map()   // "x,y,z" → viewers
+  const own = new Set()    // chests the bot opened itself; their close is its own too
   bot.on('chestLidMove', (block, viewers) => {
     if (!block) return
     const pos = block.position
-    if ((lids.get(at(pos)) || 0) === viewers) return
-    if (viewers > 0) lids.set(at(pos), viewers); else lids.delete(at(pos))
-    if (bot.currentWindow && bot.entity && bot.entity.position.distanceTo(pos) <= OWN_CONTAINER_BLOCKS) return
+    const key = at(pos)
+    if ((lids.get(key) || 0) === viewers) return
+    if (viewers > 0) lids.set(key, viewers); else lids.delete(key)
+    if (viewers === 0 && own.delete(key)) return
+    if (bot.currentWindow && bot.entity && bot.entity.position.distanceTo(pos) <= OWN_CONTAINER_BLOCKS) { own.add(key); return }
     if (!seenBlock(bot, pos)) return
     record(viewers > 0
       ? `container: ${block.name} at ${at(pos)} opened${viewers > 1 ? ` (${viewers} looking in)` : ''}`
