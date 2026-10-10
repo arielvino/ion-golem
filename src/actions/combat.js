@@ -60,11 +60,6 @@ async function doAttack(targetName) {
   let killed = false
   let timedOut = false
   let waiter = null
-  // When the target goes, pvp.stop() waits up to 5s for a path_stop that the pathfinder
-  // only sends once its goal is reset, so a bot standing at the corpse lingers 5s
-  // before stoppedAttacking. Reset the goal ourselves: path_stop fires now.
-  const onGone = (e) => { if (e === entity) bot.pathfinder.setGoal(null) }
-  bot.on('entityGone', onGone)
   try {
     await equipBestWeapon(bot)
     await equipShield(bot)
@@ -94,7 +89,6 @@ async function doAttack(targetName) {
     else { console.error('  pvp err:', err.message); recordFailure(`attack:${targetName} - ${err.message}`) }
   } finally {
     if (waiter) waiter.cancel()
-    bot.removeListener('entityGone', onGone)
     // pvp raises the shield after every swing and never lowers it when the fight
     // ends: left up, it slows every step and the bot walks around blocking.
     // (bot.usingHeldItem can't tell: mineflayer clears it on any entity_status.)
