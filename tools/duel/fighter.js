@@ -35,6 +35,9 @@ bot.once('spawn', () => {
   // The arena's cover is part of the fight: don't let the pathfinder dig through it.
   bot.pvp.movements.canDig = false
   bot.pvp.movements.allow1by1towers = false
+  // The bot's physicsTick reflexes against archers and incoming projectiles.
+  require('../../src/engine/rangedDefense').setupRangedDefense()
+  require('../../src/engine/projectileGuard').setupProjectileGuard()
 })
 
 bot.on('entityHurt', (e) => {
