@@ -173,23 +173,7 @@ function createBot() {
   bot.loadPlugin(toolPlugin)
   state.bot = bot
 
-  // Fix mineflayer/minecraft-data version mismatch: entity_velocity packet
-  // uses vec3i16 (packet.velocity.x/y/z) but feature flag says to use
-  // packet.velocityX/Y/Z (which is undefined → NaN → position corruption).
-  // Patch: sanitize velocity after any entity_velocity packet for the bot.
   bot.once('inject_allowed', () => {
-    const { Vec3 } = require('vec3')
-    bot._client.prependListener('entity_velocity', (packet) => {
-      if (packet.entityId === bot.entity?.id && packet.velocity) {
-        // Ensure velocity fields are accessible as flat properties for legacy code path
-        if (packet.velocityX === undefined) {
-          packet.velocityX = packet.velocity.x
-          packet.velocityY = packet.velocity.y
-          packet.velocityZ = packet.velocity.z
-        }
-      }
-    })
-
     // Difficulty: on 1.21.x the protocol already maps the difficulty packet's varint
     // to its name ("peaceful"), and mineflayer's game.js then indexes its own name
     // array with that string → bot.game.difficulty is always undefined. Runs after
