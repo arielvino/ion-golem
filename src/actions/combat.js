@@ -64,11 +64,10 @@ async function doAttack(targetName) {
     await equipBestWeapon(bot)
     await equipShield(bot)
     bot.pvp.attack(entity)
-    // Wait until pvp reports it stopped, or 30s; the timeout stops the attack.
-    // stopAll() above didn't await pvp.stop(), so the PREVIOUS attack's
-    // stoppedAttacking can arrive after this one has started: only an event with
-    // pvp no longer on this target ends this attack.
-    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => { timedOut = true; bot.pvp.stop() }, () => bot.pvp.target !== entity)
+    // Wait until pvp reports it stopped attacking this target, or 30s; the timeout
+    // stops the attack. stopAll() above didn't await pvp.stop(), so the previous
+    // attack's stoppedAttacking can still arrive: it names that attack's target.
+    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => { timedOut = true; bot.pvp.stop() }, (target) => target === entity)
     await raceAbort(waiter, 30000)
     if (!entity.isValid && require('../engine/creeperDefense').didExplode(entity)) {
       console.log('  exploded'); logEvent(`attack: ${label} exploded`)
