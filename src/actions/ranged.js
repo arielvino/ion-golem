@@ -456,24 +456,27 @@ async function throwItem(bot, target, name, pick) {
   const w = WEAPONS[name]
   const next = pick()
   if (!next) throw new Error(`out of ${name}s`)
+  // Healing heals the living and harming heals the undead: either shows as health going up.
+  const heals = !!w.potion && ['healing', 'harming'].includes(base(potionOf(next)))
   if (bot.heldItem !== next) await raceAbort(bot.equip(next, 'hand'), 5000)
   if (target.self) {   // straight down at our own feet
     await bot.look(bot.entity.yaw, -Math.PI / 2, true)
     await raceAbort(bot.waitForTicks(2), 2000)
     bot.activateItem()
     bot.deactivateItem()
-    return watchArrow(bot, target, { arc: 'down', pitch: -Math.PI / 2, ticks: 6, point: bot.entity.position }, w.projectiles, w.effectDelay)
+    return watchArrow(bot, target, { arc: 'down', pitch: -Math.PI / 2, ticks: 6, point: bot.entity.position }, w.projectiles, w.effectDelay, heals)
   }
   const shot = await aim(bot, target, w, 2)
   bot.activateItem()
   bot.deactivateItem()
-  return watchArrow(bot, target, shot, w.projectiles, w.effectDelay)
+  return watchArrow(bot, target, shot, w.projectiles, w.effectDelay, heals)
 }
 
 // Where our arrow ended up, and whether the target took damage meanwhile. The server
 // sends an arrow's position only about once a second, so it can't be tracked in
-// flight: wait past its flight time and read where it came to rest.
-function watchArrow(bot, target, aim, projectiles = ARROWS, grace = 6) {
+// flight: wait past its flight time and read where it came to rest. `heals` = an
+// instant heal was thrown, so the target's health going up is its hit.
+function watchArrow(bot, target, aim, projectiles = ARROWS, grace = 6, heals = false) {
   return new Promise((resolve) => {
     let arrow = null, ticks = 0, hit = false, goneAt = null
     const settle = Math.ceil(aim.ticks) + Math.max(25, grace + 5)
@@ -492,12 +495,14 @@ function watchArrow(bot, target, aim, projectiles = ARROWS, grace = 6) {
       return idx >= 0 ? JSON.stringify(e.metadata?.[idx] || []) : '[]'
     }
     // An instant heal shows neither: only the mob's synced health going up does.
+    // Only for one: anything else would read natural regeneration during the
+    // flight as a hit (an arrow blocked by a shield was logged HIT).
     const health = (e) => {
       const idx = bot.registry.entitiesByName[e.name]?.metadataKeys?.indexOf('health')
       return idx >= 0 ? e.metadata?.[idx] : undefined
     }
     const particles0 = victim && !target.self ? particles(victim) : null
-    const health0 = victim && !target.self ? health(victim) : undefined
+    const health0 = heals && victim && !target.self ? health(victim) : undefined
     const onUpdate = (e) => {
       if (e !== victim || particles0 === null) return
       if (particles(e) !== particles0 && particles(e) !== '[]') hit = true
