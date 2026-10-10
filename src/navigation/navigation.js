@@ -205,10 +205,9 @@ const PLACE_FACES = [...faces, { off: new Vec3(0, 1, 0), face: new Vec3(0, -1, 0
 // otherwise the placed block stays "unknown" and the STRICT liveStep (dbSolid
 // check) refuses to stand/climb on it.
 //
-// Robust to mineflayer's "Event blockUpdate ... did not fire within timeout" —
-// which it raises even when the server DID place the block. placeBlock is awaited
-// in a single try/catch frame so that rejection is always consumed (it
-// self-times-out at ~5s, so no hang), then we verify against the live world.
+// placeBlock is awaited in a single try/catch frame so its rejection (a refusal,
+// or "blockUpdate ... did not fire" when nothing changed; it self-times-out at
+// ~5s, so no hang) is always consumed, then we verify against the live world.
 // (This is why we don't wrap placeBlock in raceAbort: layering a timer over its
 // own blockUpdate wait leaked the rejection as UNHANDLED and misreported real
 // placements as failures — the old staircase "couldn't place step" bug.)

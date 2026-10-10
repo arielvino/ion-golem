@@ -281,12 +281,12 @@ async function doSail(target) {
       else {
         const yaw = bot.entity.yaw
         goalX = pos.x - Math.sin(yaw) * dist
-        goalZ = pos.z + Math.cos(yaw) * dist
+        goalZ = pos.z - Math.cos(yaw) * dist
       }
     } else {
       const yaw = bot.entity.yaw
       goalX = pos.x - Math.sin(yaw) * dist
-      goalZ = pos.z + Math.cos(yaw) * dist
+      goalZ = pos.z - Math.cos(yaw) * dist
     }
   }
 
@@ -300,51 +300,38 @@ async function doSail(target) {
   let lastDist = Infinity
   let stuckCount = 0
 
-  // Mineflayer doesn't simulate boat physics or send the boat's position, and
-  // the server treats boat movement as client-authoritative — so player_input
-  // (bot.moveVehicle) alone never moves the boat. We drive it ourselves: each
-  // tick, step the boat toward the goal and send a serverbound vehicle_move with
-  // the new position + heading (the same packet the vanilla client sends).
+  // Steer like a player: mineflayer simulates the boat we drive and sends its
+  // vehicle_move, so we only hold the paddle inputs. Each tick, turn toward the
+  // goal and paddle forward once roughly facing it. Shores and walls are the
+  // boat physics' business; a boat that stops moving is caught by the stuck check.
   const toDeg = r => r * 180 / Math.PI
-  const SPEED = 0.32 // blocks per 50ms tick (~6.4 m/s, within boat speed limits)
+  const wrap = a => Math.atan2(Math.sin(a), Math.cos(a))
+  const TURN_DEADBAND = 8 * Math.PI / 180   // close enough: paddle straight
+  const PADDLE_WITHIN = Math.PI / 3          // only paddle forward when within 60° of the goal
 
   if (state.activeSailTick) { clearInterval(state.activeSailTick); state.activeSailTick = null }
   let lastInput = '-'
   const sailInterval = setInterval(() => {
     const boat = bot.vehicle
     if (!boat) return
-    const bx = boat.position.x, by = boat.position.y, bz = boat.position.z
-    const dx = goalX - bx, dz = goalZ - bz
-    const horiz = Math.sqrt(dx * dx + dz * dz)
-    if (horiz < 0.5) { lastInput = 'arrived'; return }
-    const ux = dx / horiz, uz = dz / horiz
-    const step = Math.min(SPEED, horiz)
-    const nx = bx + ux * step, nz = bz + uz * step
-
-    // Shore guard: don't drive into a solid block at the boat's level.
-    const ahead = bot.blockAt(new Vec3(Math.floor(nx), Math.floor(by), Math.floor(nz)))
-    if (ahead && ahead.boundingBox === 'block') { lastInput = 'BLOCKED'; return }
-
-    // Notchian yaw facing the travel direction: x=-sin(yaw), z=cos(yaw).
-    const yawDeg = toDeg(Math.atan2(-ux, uz))
-    // Move boat + rider locally (server is authoritative for our own vehicle, so
-    // it won't echo this back) and tell the server where the boat now is.
-    boat.position.set(nx, by, nz)
-    boat.yaw = Math.PI - Math.atan2(-ux, uz)
-    bot.entity.position.translate(ux * step, 0, uz * step)
-    bot._client.write('vehicle_move', { x: nx, y: by, z: nz, yaw: yawDeg, pitch: 0, onGround: false })
-    lastInput = `drive ${step.toFixed(2)}`
+    const dx = goalX - boat.position.x, dz = goalZ - boat.position.z
+    if (dx * dx + dz * dz < 0.25) { bot.moveVehicle(0, 0); lastInput = 'arrived'; return }
+    // mineflayer yaw faces (-sin, -cos); left input turns the boat toward larger yaw.
+    const err = wrap(Math.atan2(-dx, -dz) - boat.yaw)
+    const left = Math.abs(err) < TURN_DEADBAND ? 0 : (err > 0 ? 1 : -1)
+    const forward = Math.abs(err) < PADDLE_WITHIN ? 1 : 0
+    bot.moveVehicle(left, forward)
+    lastInput = `L${left} F${forward} err${Math.round(toDeg(err))}`
   }, 50)
   state.activeSailTick = sailInterval
-  console.log(`  sail loop starting (manual vehicle_move driver)`)
+  console.log(`  sail loop starting (steering with moveVehicle)`)
 
   let loopIter = 0
   let movedTotal = 0
   let prevPos = bot.entity.position.clone()
   let notResponding = false
   // try/finally so the driving interval is ALWAYS torn down — a throw inside the
-  // loop used to leak the interval, which kept spamming vehicle_move forever and
-  // desynced the boat's tracked position.
+  // loop used to leak the interval, which kept the boat paddling forever.
   try {
     while (true) {
       try { await tickWait(250) } catch(e) { break }
@@ -360,8 +347,8 @@ async function doSail(target) {
       if (loopIter <= 6 || loopIter % 8 === 0) {
         const v = bot.vehicle
         const speed = v ? Math.sqrt(v.velocity.x ** 2 + v.velocity.z ** 2) : 0
-        const boatYaw = v ? Math.round(toDeg(Math.PI - v.yaw)) : 0
-        const bearing = dist > 0 ? Math.round(toDeg(Math.atan2(-dx / dist, dz / dist))) : 0
+        const boatYaw = v ? Math.round(toDeg(wrap(v.yaw))) : 0
+        const bearing = Math.round(toDeg(Math.atan2(-dx, -dz)))
         console.log(`  sail[${loopIter}]: pos=${pos.x.toFixed(1)},${pos.z.toFixed(1)} dist=${Math.round(dist)} step=${stepMoved.toFixed(2)} spd=${speed.toFixed(2)} boatYaw=${boatYaw} bearing=${bearing} in=${lastInput} veh=${!!v}`)
       }
 
@@ -369,11 +356,10 @@ async function doSail(target) {
       if (Date.now() - start > timeout) { console.log(`  sail timeout`); break }
       if (!bot.vehicle) { console.log(`  sail: no longer in vehicle`); break }
 
-      // After ~3s of driving, flag if the boat barely moved (stuck/blocked, or
-      // the server is rejecting our vehicle_move).
+      // After ~3s of driving, flag if the boat barely moved (on land, or blocked).
       if (loopIter === 12 && movedTotal < 0.5) {
         notResponding = true
-        console.log(`  sail: boat not moving (moved ${movedTotal.toFixed(2)}m in ~3s) — stuck/blocked or server rejecting vehicle_move`)
+        console.log(`  sail: boat not moving (moved ${movedTotal.toFixed(2)}m in ~3s) — on land or blocked`)
       }
 
       if (Math.abs(dist - lastDist) < 0.3) stuckCount++
