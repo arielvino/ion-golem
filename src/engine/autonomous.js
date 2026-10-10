@@ -116,7 +116,7 @@ function setupAutonomous(interruptFn) {
 
   // --- DAMAGE RESPONSE ---
   let lastEnvDamage = 0
-  bot.on('entityHurt', (entity) => {
+  bot.on('entityHurt', (entity, source) => {
     if (entity !== bot.entity) return
 
     // A projectile: the guard knows what it was, where it came from and who shot it,
@@ -133,7 +133,20 @@ function setupAutonomous(interruptFn) {
       return
     }
 
-    // Check for nearby hostile attacker (mineflayer doesn't provide source)
+    // The server names who did it (damage_event, 1.19.4+), and mineflayer passes it
+    // on as source. Fight back if it's a mob, as for a projectile's shooter.
+    if (source?.isValid && source !== bot.entity) {
+      const name = source.username || source.name || source.displayName
+      const fought = !source.username && (source.type === 'hostile' || source.type === 'mob') &&
+        autoFight(source, `attacked by ${name}!`, `Under attack by ${name}!`)
+      if (!fought) {
+        console.log(`  [AUTO] hit by ${name}, HP=${Math.round(bot.health)}`)
+        require('../core/utils').logEvent(`hit by ${name}`)
+      }
+      return
+    }
+
+    // No source (older versions send none): guess a nearby hostile attacker.
     // An archer hits from range: one in sight counts too.
     // A neutral mob (enderman) standing by is the attacker only if nothing else is.
     const { isNeutral } = require('../perception/entityClass')
