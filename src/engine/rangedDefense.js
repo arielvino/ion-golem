@@ -75,9 +75,10 @@ function setupRangedDefense() {
     }
 
     if (hasShield()) {
-      // Our own flag, not bot.usingHeldItem: mineflayer clears that on every
-      // entity_status packet for any entity, and re-raising restarts the shield's
-      // 5-tick warm-up. pvp drops and re-raises it around swings on its own.
+      // Our own flag, not bot.usingHeldItem: it says whether this reflex raised the
+      // shield (so only this reflex lowers it), and usingHeldItem also clears on a
+      // main-hand change, where re-raising would restart the 5-tick warm-up.
+      // pvp drops and re-raises it around swings on its own.
       // Not while retreating from a swarm: a raised shield slows the bot to a crawl.
       if (threat && !raised && !state.retreating) {
         // pvp already looks at its own target; turn only if that isn't the archer.
