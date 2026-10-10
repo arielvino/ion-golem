@@ -281,12 +281,12 @@ async function doSail(target) {
       else {
         const yaw = bot.entity.yaw
         goalX = pos.x - Math.sin(yaw) * dist
-        goalZ = pos.z + Math.cos(yaw) * dist
+        goalZ = pos.z - Math.cos(yaw) * dist
       }
     } else {
       const yaw = bot.entity.yaw
       goalX = pos.x - Math.sin(yaw) * dist
-      goalZ = pos.z + Math.cos(yaw) * dist
+      goalZ = pos.z - Math.cos(yaw) * dist
     }
   }
 
