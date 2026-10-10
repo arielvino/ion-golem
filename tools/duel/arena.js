@@ -49,12 +49,21 @@ async function build() {
   await cmd(`fill -1 ${Y + 1} -6 1 ${Y + 3} -6 cobblestone`)
   await cmd(`fill -1 ${Y + 1} 6 1 ${Y + 3} 6 cobblestone`)
   await cmd(`kill @e[type=!player,${box}]`)
+  for (const [side, c] of Object.entries(COLORS)) {
+    await cmd(`team add duel_${side}`)
+    await cmd(`team modify duel_${side} color ${c.team}`)
+  }
 }
 
 const ARMOR = [
   ['armor.head', 'iron_helmet'], ['armor.chest', 'iron_chestplate'],
   ['armor.legs', 'iron_leggings'], ['armor.feet', 'iron_boots']
 ]
+// A side shows its colour in its armour trim (iron can't be dyed) and its name tag.
+const COLORS = {
+  red: { trim: 'redstone', team: 'red' },
+  blue: { trim: 'lapis', team: 'blue' }
+}
 
 // The strategy's kit in iron armour, full health, at the side's corner. Hunger
 // and saturation are left to the game, so regeneration runs at its normal pace.
@@ -62,7 +71,10 @@ async function prepare(name, side, kit) {
   const s = SPAWNS[side]
   await cmd(`clear ${name}`)
   await cmd(`effect clear ${name}`)
-  for (const [slot, item] of [...ARMOR, ...kit.hands]) await cmd(`item replace entity ${name} ${slot} with ${item}`)
+  const trim = `[trim={material:"${COLORS[side].trim}",pattern:"sentry"}]`
+  for (const [slot, item] of ARMOR) await cmd(`item replace entity ${name} ${slot} with ${item}${trim}`)
+  for (const [slot, item] of kit.hands) await cmd(`item replace entity ${name} ${slot} with ${item}`)
+  await cmd(`team join duel_${side} ${name}`)
   for (const [item, n] of kit.bag) await cmd(`give ${name} ${item} ${n}`)
   await cmd(`effect give ${name} instant_health 1 10 true`)
   await cmd(`spawnpoint ${name} ${s.x} ${s.y} ${s.z}`)
