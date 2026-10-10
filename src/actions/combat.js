@@ -88,11 +88,6 @@ async function doAttack(targetName) {
     else { console.error('  pvp err:', err.message); recordFailure(`attack:${targetName} - ${err.message}`) }
   } finally {
     if (waiter) waiter.cancel()
-    // pvp raises the shield after every swing and never lowers it when the fight
-    // ends: left up, it slows every step and the bot walks around blocking.
-    // (bot.usingHeldItem can't tell: mineflayer clears it on any entity_status.)
-    // Not while the creeper reflex holds it against a fuse.
-    if (bot.inventory.slots[45]?.name === 'shield' && !state.creeperReflex) bot.deactivateItem()
   }
   state.currentTask = null
   // Success = the target actually died. Stopping/timing out without a kill is not "done".
