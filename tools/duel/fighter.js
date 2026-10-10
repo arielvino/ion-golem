@@ -71,7 +71,8 @@ setInterval(() => {
   if (!round || !PROBE) return
   const e = bot.players[round.opponent]?.entity
   console.log('PROBE', username, bot.entity.position.toString(), 'hp', bot.health, 'opp', e ? e.position.toString() : 'none',
-    'pvpTarget', !!bot.pvp.target, 'moving', bot.pathfinder.isMoving())
+    'pvpTarget', !!bot.pvp.target, 'moving', bot.pathfinder.isMoving(),
+    'dist', e ? e.position.distanceTo(bot.entity.position).toFixed(2) : '-')
 }, 1000)
 
 process.on('message', async (msg) => {
