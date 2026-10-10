@@ -160,9 +160,6 @@ async function doFill(targetName) {
   await bot.equip(bucket, 'hand')
   await sleep(200)
 
-  // Use raw use_item packet — mineflayer's activateItem() is broken on 1.21+
-  // (sends rotation {0,0} instead of actual yaw/pitch, so server doesn't know
-  // the bot is aiming at water). See: github.com/PrismarineJS/mineflayer/issues/3731
   for (let attempt = 0; attempt < 3; attempt++) {
     // Re-check bucket is equipped
     const heldItem = bot.heldItem
@@ -176,15 +173,8 @@ async function doFill(targetName) {
     await bot.lookAt(chosenTarget.offset(0.5, 0.5, 0.5))
     await sleep(200)
 
-    // Send raw use_item with the bot's actual look direction
-    bot._client.write('use_item', {
-      hand: 0,
-      sequence: 0,
-      rotation: {
-        x: bot.entity.yaw,
-        y: bot.entity.pitch
-      }
-    })
+    // use_item carries the look rotation, which the server raycasts along (1.21.2+)
+    bot.activateItem()
     await sleep(600)
 
     // Check if we got the filled bucket
