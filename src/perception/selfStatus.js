@@ -4,7 +4,6 @@
 // vehicle, and what the server prints on screen (title, action bar). The action bar
 // is where the server explains itself — "You may not rest now; there are monsters
 // nearby", "Respawn point set" — and nothing else ever reads it.
-const { processNbtMessage } = require('prismarine-chat')
 const { logEvent } = require('../core/utils')
 
 const REPEAT_MS = 30000   // the same on-screen text again within this is one record
@@ -14,14 +13,6 @@ let bound = null
 function record(text) {
   console.log(`  [EVT] ${text}`)
   logEvent(text)
-}
-
-// Plain text of an NBT text component, as node-minecraft-protocol decodes chat.
-function nbtText(bot, nbt) {
-  try {
-    const ChatMessage = require('prismarine-chat')(bot.registry)
-    return ChatMessage.fromNotch(processNbtMessage(nbt)).toString().trim()
-  } catch { return '' }
 }
 
 function bind(bot) {
@@ -36,19 +27,14 @@ function bind(bot) {
   })
 
   let mode = bot.game?.gameMode ?? null
+  let difficulty = bot.game?.difficulty ?? null
   bot.on('game', () => {
     const now = bot.game.gameMode
     if (mode && now && now !== mode) record(`game: mode ${mode} → ${now}`)
     mode = now || mode
-  })
-
-  // bot.game.difficulty is unreliable on 1.21+ (see bot.js), so read the packet.
-  const NAMES = ['peaceful', 'easy', 'normal', 'hard']
-  let difficulty = bot.game?.difficulty ?? null
-  bot._client.on('difficulty', (p) => {
-    const now = typeof p.difficulty === 'string' ? p.difficulty : NAMES[p.difficulty]
-    if (difficulty && now && now !== difficulty) record(`game: difficulty ${difficulty} → ${now}`)
-    difficulty = now || difficulty
+    const diff = bot.game.difficulty
+    if (difficulty && diff && diff !== difficulty) record(`game: difficulty ${difficulty} → ${diff}`)
+    difficulty = diff || difficulty
   })
 
   bot.on('spawnReset', () => record('spawn: no bed or respawn anchor to respawn at (missing or blocked), so the bed spawn point is gone'))
@@ -64,13 +50,10 @@ function bind(bot) {
     shown.set(text, t)
     record(`${kind}: "${text}"`)
   }
-  // The server's own explanations come as overlay system chat (mineflayer's actionBar);
-  // /title sends dedicated packets, which mineflayer either drops (action bar) or
-  // passes on undecoded when the text is styled (title), so read those directly.
+  // The server explains itself on the action bar (overlay chat or its own packet,
+  // both mineflayer's actionBar); /title sends titles and subtitles.
   bot.on('actionBar', (msg) => onScreen('action bar', msg?.toString().trim()))
-  bot._client.on('action_bar', (p) => onScreen('action bar', nbtText(bot, p.text)))
-  bot._client.on('set_title_text', (p) => onScreen('title', nbtText(bot, p.text)))
-  bot._client.on('set_title_subtitle', (p) => onScreen('subtitle', nbtText(bot, p.text)))
+  bot.on('title', (text, type) => onScreen(type === 'subtitle' ? 'subtitle' : 'title', String(text ?? '').trim()))
 }
 
 module.exports = { bind }
