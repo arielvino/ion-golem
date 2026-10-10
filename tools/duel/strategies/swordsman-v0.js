@@ -1,6 +1,6 @@
 // Swordsman v0 — the bot's own `attack` action: best weapon in hand, shield in the
 // off-hand, mineflayer-pvp chases and swings until the target dies or 30s pass.
-const { sleep } = require('./common')
+const { sleep, nearestOpponent } = require('./common')
 const { doAttack } = require('../../../src/actions/combat')
 
 const kit = {
@@ -8,9 +8,10 @@ const kit = {
   bag: [['cooked_beef', 8]]
 }
 
-async function run(bot, { opponent, signal }) {
+async function run(bot, { opponents, signal }) {
   while (!signal.aborted) {
-    await doAttack(opponent)
+    const e = nearestOpponent(bot, opponents)
+    if (e) await doAttack(e.username)
     await sleep(250)
   }
 }

@@ -11,12 +11,13 @@ const CONSOLE = process.env.MC_CONSOLE ||
 const Y = 150
 const R = 12
 const TOP = Y + 12
-const SPAWNS = {
-  red: { x: -10, y: Y + 1, z: -10 },
-  blue: { x: 10, y: Y + 1, z: 10 }
-}
+// Fighters take the corners in turn: NW, SE, NE, SW (a fifth starts 3 blocks in
+// from the first, and so on).
+const CORNERS = [[-10, -10], [10, 10], [10, -10], [-10, 10]]
 // Where a spectator sees the whole floor.
 const VIEW = { x: 0, y: Y + 9, z: -R }
+// The dead respawn here, on the barrier roof: out of the fight, watching it.
+const BENCH = { x: 0, y: TOP + 1, z: 0 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -52,6 +53,7 @@ async function build() {
   for (const [side, c] of Object.entries(COLORS)) {
     await cmd(`team add duel_${side}`)
     await cmd(`team modify duel_${side} color ${c.team}`)
+    await cmd(`team modify duel_${side} friendlyFire false`)
   }
 }
 
@@ -65,19 +67,21 @@ const COLORS = {
   blue: { trim: 'lapis', team: 'blue' }
 }
 
-// The strategy's kit in iron armour, full health, at the side's corner. Hunger
+// The strategy's kit in iron armour, full health, at corner number `n`. Hunger
 // and saturation are left to the game, so regeneration runs at its normal pace.
-async function prepare(name, side, kit) {
-  const s = SPAWNS[side]
+async function prepare(name, side, kit, n) {
+  const [cx, cz] = CORNERS[n % CORNERS.length]
+  const inward = Math.floor(n / CORNERS.length) * 3
+  const s = { x: cx - Math.sign(cx) * inward, y: Y + 1, z: cz - Math.sign(cz) * inward }
   await cmd(`clear ${name}`)
   await cmd(`effect clear ${name}`)
   const trim = `[trim={material:"${COLORS[side].trim}",pattern:"sentry"}]`
   for (const [slot, item] of ARMOR) await cmd(`item replace entity ${name} ${slot} with ${item}${trim}`)
   for (const [slot, item] of kit.hands) await cmd(`item replace entity ${name} ${slot} with ${item}`)
   await cmd(`team join duel_${side} ${name}`)
-  for (const [item, n] of kit.bag) await cmd(`give ${name} ${item} ${n}`)
+  for (const [item, count] of kit.bag) await cmd(`give ${name} ${item} ${count}`)
   await cmd(`effect give ${name} instant_health 1 10 true`)
-  await cmd(`spawnpoint ${name} ${s.x} ${s.y} ${s.z}`)
+  await cmd(`spawnpoint ${name} ${BENCH.x} ${BENCH.y} ${BENCH.z}`)
   await cmd(`tp ${name} ${s.x + 0.5} ${s.y} ${s.z + 0.5} facing 0 ${s.y + 1} 0`)
 }
 
@@ -86,4 +90,4 @@ async function sweep() {
   await cmd(`kill @e[type=!player,${box}]`)
 }
 
-module.exports = { build, prepare, sweep, cmd, SPAWNS, VIEW, Y, R }
+module.exports = { build, prepare, sweep, cmd, VIEW, BENCH, Y, R }

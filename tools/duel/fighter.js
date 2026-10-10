@@ -26,7 +26,7 @@ state.bot = bot
 state.chatMuted = true
 
 const send = (msg) => process.send && process.send(msg)
-let round = null   // { controller, opponent, hitsDealt, hitsTaken }
+let round = null   // { controller, opponents, hitsDealt, hitsTaken }
 
 // DUEL_PROBE=1 prints each pathfinder result and, every second, where both fighters are.
 const PROBE = !!process.env.DUEL_PROBE
@@ -43,7 +43,7 @@ bot.once('spawn', () => {
 bot.on('entityHurt', (e) => {
   if (!round) return
   if (e === bot.entity) round.hitsTaken++
-  else if (e.username === round.opponent) round.hitsDealt++
+  else if (round.opponents.includes(e.username)) round.hitsDealt++
 })
 
 bot.on('death', () => {
@@ -69,7 +69,7 @@ function halt() {
 
 setInterval(() => {
   if (!round || !PROBE) return
-  const e = bot.players[round.opponent]?.entity
+  const e = require('./strategies/common').nearestOpponent(bot, round.opponents)
   console.log('PROBE', username, bot.entity.position.toString(), 'hp', bot.health, 'opp', e ? e.position.toString() : 'none',
     'pvpTarget', !!bot.pvp.target, 'moving', bot.pathfinder.isMoving(),
     'dist', e ? e.position.distanceTo(bot.entity.position).toFixed(2) : '-')
@@ -79,10 +79,10 @@ process.on('message', async (msg) => {
   if (msg.type === 'start') {
     halt()
     const controller = new AbortController()
-    round = { controller, opponent: msg.opponent, hitsDealt: 0, hitsTaken: 0 }
+    round = { controller, opponents: msg.opponents, hitsDealt: 0, hitsTaken: 0 }
     state.abortSignal = false
     try {
-      await strategy.run(bot, { opponent: msg.opponent, role: msg.role, signal: controller.signal })
+      await strategy.run(bot, { opponents: msg.opponents, signal: controller.signal })
     } catch (e) {
       if (!controller.signal.aborted && e.name !== 'AbortError') console.error(`[${username}] strategy error:`, e)
     }
