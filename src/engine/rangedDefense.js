@@ -28,7 +28,21 @@ function drawing(bot, e) {
   return idx >= 0 && ((e.metadata?.[idx] || 0) & 1) === 1
 }
 
-// Nearest archer in line of sight; drawingOnly limits it to one mid-draw.
+// Whether the archer is looking our way: its head yaw within AIM_TOLERANCE of the
+// bearing to us, and its pitch within it of the straight line (an arc to us at
+// these ranges stays well inside that). A drawing player aiming elsewhere — an
+// ally hunting a skeleton — is no threat.
+const AIM_TOLERANCE = 25 * Math.PI / 180
+function aimedAt(bot, e) {
+  const d = bot.entity.position.offset(0, 1, 0).minus(e.position.offset(0, (e.height || 1.8) * 0.85, 0))
+  const h = Math.hypot(d.x, d.z)
+  const bearing = Math.atan2(-d.x, -d.z)   // mineflayer yaw: 0 faces -z, +π/2 faces -x
+  const yawOff = Math.abs(Math.atan2(Math.sin((e.headYaw ?? e.yaw) - bearing), Math.cos((e.headYaw ?? e.yaw) - bearing)))
+  return yawOff <= AIM_TOLERANCE && Math.abs(e.pitch - Math.atan2(d.y, h)) <= AIM_TOLERANCE
+}
+
+// Nearest archer in line of sight; drawingOnly limits it to one mid-draw and
+// aiming at us.
 function nearestArcher(bot, range = THREAT_RANGE, drawingOnly = false) {
   const pos = bot.entity.position
   const eye = pos.offset(0, 1.62, 0)
@@ -36,7 +50,7 @@ function nearestArcher(bot, range = THREAT_RANGE, drawingOnly = false) {
   return bot.nearestEntity(e =>
     isArcher(e) &&
     e.position.distanceTo(pos) < range &&
-    (!drawingOnly || drawing(bot, e)) &&
+    (!drawingOnly || (drawing(bot, e) && aimedAt(bot, e))) &&
     hasLineOfSight(eye, e.position, e.height || 1.8)
   )
 }
