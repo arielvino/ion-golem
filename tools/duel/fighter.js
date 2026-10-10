@@ -1,13 +1,15 @@
-// One duelist: a bare mineflayer client (no AI, no chat) run as a child of the
-// referee. The referee says when a round starts and stops; the strategy module
-// does the fighting. Each fighter is its own process so neither strategy can
-// starve the other's physics loop.
+// One duelist: a mineflayer client (no AI, no chat) run as a child of the referee.
+// The referee says when a round starts and stops; the strategy module does the
+// fighting, and may call the bot's real actions (doAttack, doShoot): this client is
+// installed as state.bot, and a round's end aborts them through state.abortSignal.
+// Each fighter is its own process so neither can starve the other's physics loop.
 //
 //   node tools/duel/fighter.js <username> <strategy>
 const path = require('path')
 const mineflayer = require('mineflayer')
 const { pathfinder } = require('mineflayer-pathfinder')
 const pvp = require('mineflayer-pvp').plugin
+const state = require('../../src/core/state')
 
 const [username, strategyName] = process.argv.slice(2)
 const strategy = require(path.join(__dirname, 'strategies', strategyName))
@@ -20,6 +22,8 @@ const bot = mineflayer.createBot({
 })
 bot.loadPlugin(pathfinder)
 bot.loadPlugin(pvp)
+state.bot = bot
+state.chatMuted = true
 
 const send = (msg) => process.send && process.send(msg)
 let round = null   // { controller, opponent, hitsDealt, hitsTaken }
@@ -53,6 +57,7 @@ function halt() {
   if (!round) return
   round.controller.abort()
   round = null
+  state.abortSignal = true
   try { bot.pvp.forceStop() } catch (e) {}
   try { bot.pathfinder.stop() } catch (e) {}
   bot.clearControlStates()
@@ -71,10 +76,11 @@ process.on('message', async (msg) => {
     halt()
     const controller = new AbortController()
     round = { controller, opponent: msg.opponent, hitsDealt: 0, hitsTaken: 0 }
+    state.abortSignal = false
     try {
       await strategy.run(bot, { opponent: msg.opponent, role: msg.role, signal: controller.signal })
     } catch (e) {
-      if (!controller.signal.aborted) console.error(`[${username}] strategy error:`, e)
+      if (!controller.signal.aborted && e.name !== 'AbortError') console.error(`[${username}] strategy error:`, e)
     }
   } else if (msg.type === 'stop') {
     const s = stats()

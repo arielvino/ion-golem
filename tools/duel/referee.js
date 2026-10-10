@@ -1,9 +1,9 @@
-// Duel referee: builds the arena, starts a hunter and a defender, and runs rounds.
-// The hunter wins by killing the defender before time runs out; the defender wins
-// by surviving (or by killing the hunter). Each round is appended to
-// <data dir>/duel/results.jsonl so strategy versions can be compared over time.
+// Duel referee: builds the arena, starts two fighters, and runs rounds to the
+// death. Red and blue each run a strategy from strategies/ in that strategy's kit;
+// a kill wins the round, the clock running out is a draw. Each round is appended
+// to <data dir>/duel/results.jsonl so strategy versions can be compared over time.
 //
-//   node tools/duel/referee.js [--rounds 5] [--time 60] [--hunter hunter-v0] [--defender defender-v0]
+//   node tools/duel/referee.js [--red archer-v0] [--blue swordsman-v0] [--rounds 5] [--time 60]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -14,8 +14,9 @@ const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filt
   .map(a => a.trim().split(/\s+/)))
 const ROUNDS = parseInt(args.rounds || '5', 10)
 const TIME_MS = parseInt(args.time || '60', 10) * 1000
-const NAMES = { hunter: 'BotHunter', defender: 'BotDefender' }
-const STRATEGY = { hunter: args.hunter || 'hunter-v0', defender: args.defender || 'defender-v0' }
+const SIDES = ['red', 'blue']
+const NAMES = { red: 'BotRed', blue: 'BotBlue' }
+const STRATEGY = { red: args.red || 'archer-v0', blue: args.blue || 'swordsman-v0' }
 
 const DATA = process.env.IONGOLEM_DATA_DIR ||
   path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'), 'iongolem')
@@ -24,9 +25,10 @@ const RESULTS = path.join(DATA, 'duel', 'results.jsonl')
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 // A fighter child and a queue of its messages.
-function spawnFighter(role) {
-  const child = fork(path.join(__dirname, 'fighter.js'), [NAMES[role], STRATEGY[role]])
-  const f = { role, name: NAMES[role], child, inbox: [], waiters: [] }
+function spawnFighter(side) {
+  const child = fork(path.join(__dirname, 'fighter.js'), [NAMES[side], STRATEGY[side]])
+  const f = { side, name: NAMES[side], strategy: STRATEGY[side], child, inbox: [], waiters: [] }
+  f.kit = require(path.join(__dirname, 'strategies', f.strategy)).kit
   child.on('message', (m) => {
     const i = f.waiters.findIndex(w => w.type === m.type)
     if (i >= 0) f.waiters.splice(i, 1)[0].resolve(m)
@@ -45,44 +47,49 @@ function next(f, type) {
 
 function drop(f, type) { f.inbox = f.inbox.filter(m => m.type !== type) }
 
-async function playRound(n, hunter, defender) {
-  await Promise.all([next(hunter, 'ready'), next(defender, 'ready')])
+async function playRound(n, fighters) {
+  const [a, b] = fighters
+  await Promise.all(fighters.map(f => next(f, 'ready')))
   await arena.sweep()
-  await arena.prepare(hunter.name, 'hunter')
-  await arena.prepare(defender.name, 'defender')
+  for (const f of fighters) await arena.prepare(f.name, f.side, f.kit)
   await sleep(1500)   // let kits, health and the teleport reach the clients
-  drop(hunter, 'died'); drop(defender, 'died')
+  for (const f of fighters) drop(f, 'died')
 
-  console.log(`\nRound ${n}: ${hunter.name} (${STRATEGY.hunter}) vs ${defender.name} (${STRATEGY.defender})`)
+  console.log(`\nRound ${n}: ${a.name} (${a.strategy}) vs ${b.name} (${b.strategy})`)
   const t0 = Date.now()
-  hunter.child.send({ type: 'start', role: 'hunter', opponent: defender.name })
-  defender.child.send({ type: 'start', role: 'defender', opponent: hunter.name })
+  a.child.send({ type: 'start', opponent: b.name })
+  b.child.send({ type: 'start', opponent: a.name })
 
   const outcome = await Promise.race([
-    next(defender, 'died').then(s => ({ winner: 'hunter', how: 'kill', dead: 'defender', s })),
-    next(hunter, 'died').then(s => ({ winner: 'defender', how: 'kill', dead: 'hunter', s })),
-    sleep(TIME_MS).then(() => ({ winner: 'defender', how: 'timeout' }))
+    ...fighters.map(f => next(f, 'died').then(s => ({ dead: f, s }))),
+    sleep(TIME_MS).then(() => ({}))
   ])
   const ms = Date.now() - t0
+  // The other side's 'died' waiter lost the race: drop it, or that fighter's next
+  // death resolves this stale waiter instead of the next round's.
+  for (const f of fighters) f.waiters = f.waiters.filter(w => w.type !== 'died')
 
   // The survivors report their stats on stop; a dead fighter already reported in 'died'.
   const stats = {}
-  for (const f of [hunter, defender]) {
-    if (outcome.dead === f.role) { stats[f.role] = outcome.s; continue }
+  for (const f of fighters) {
+    if (outcome.dead === f) { stats[f.side] = outcome.s; continue }
     f.child.send({ type: 'stop' })
-    stats[f.role] = await next(f, 'stats')
+    stats[f.side] = await next(f, 'stats')
+    f.inbox.push({ type: 'ready' })   // still on the arena floor
   }
-  // A survivor still on the arena floor is "ready" for the next round.
-  for (const f of [hunter, defender]) if (outcome.dead !== f.role) f.inbox.push({ type: 'ready' })
 
+  const winner = outcome.dead ? fighters.find(f => f !== outcome.dead) : null
   const result = {
-    t: new Date().toISOString(), round: n, hunter: STRATEGY.hunter, defender: STRATEGY.defender,
-    winner: outcome.winner, how: outcome.how, seconds: +(ms / 1000).toFixed(1),
-    hunterHp: +stats.hunter.hp.toFixed(1), defenderHp: +stats.defender.hp.toFixed(1),
-    hunterHits: stats.hunter.hitsDealt, defenderHits: stats.defender.hitsDealt
+    t: new Date().toISOString(), round: n, red: STRATEGY.red, blue: STRATEGY.blue,
+    winner: winner ? winner.side : 'draw', winnerStrategy: winner ? winner.strategy : null,
+    seconds: +(ms / 1000).toFixed(1)
   }
-  console.log(`  ${result.winner.toUpperCase()} wins by ${result.how} in ${result.seconds}s — ` +
-    `hp H ${result.hunterHp} / D ${result.defenderHp}, hits landed H ${result.hunterHits} / D ${result.defenderHits}`)
+  for (const side of SIDES) {
+    result[`${side}Hp`] = +stats[side].hp.toFixed(1)
+    result[`${side}Hits`] = stats[side].hitsDealt
+  }
+  console.log(`  ${winner ? `${winner.strategy} (${winner.side}) KILLS` : 'DRAW (time)'} in ${result.seconds}s — ` +
+    `hp red ${result.redHp} / blue ${result.blueHp}, hits landed red ${result.redHits} / blue ${result.blueHits}`)
   fs.appendFileSync(RESULTS, JSON.stringify(result) + '\n')
   return result
 }
@@ -91,19 +98,19 @@ async function main() {
   fs.mkdirSync(path.dirname(RESULTS), { recursive: true })
   console.log('Building arena…')
   await arena.build()
-  const hunter = spawnFighter('hunter')
-  const defender = spawnFighter('defender')
+  const fighters = SIDES.map(spawnFighter)
 
   const results = []
-  for (let n = 1; n <= ROUNDS; n++) results.push(await playRound(n, hunter, defender))
+  for (let n = 1; n <= ROUNDS; n++) results.push(await playRound(n, fighters))
 
-  const wins = (r) => results.filter(x => x.winner === r).length
+  const wins = (side) => results.filter(x => x.winner === side).length
   const avg = (k) => (results.reduce((a, x) => a + x[k], 0) / results.length).toFixed(1)
-  console.log(`\n== ${STRATEGY.hunter} ${wins('hunter')} : ${wins('defender')} ${STRATEGY.defender} ==`)
-  console.log(`avg round ${avg('seconds')}s, avg hits landed H ${avg('hunterHits')} / D ${avg('defenderHits')}`)
+  console.log(`\n== red ${STRATEGY.red} ${wins('red')} : ${wins('blue')} ${STRATEGY.blue} blue ` +
+    `(${wins('draw')} draws) ==`)
+  console.log(`avg round ${avg('seconds')}s, avg hits landed red ${avg('redHits')} / blue ${avg('blueHits')}`)
   console.log(`results appended to ${RESULTS}`)
 
-  for (const f of [hunter, defender]) { f.child.removeAllListeners('exit'); f.child.send({ type: 'quit' }) }
+  for (const f of fighters) { f.child.removeAllListeners('exit'); f.child.send({ type: 'quit' }) }
   await sleep(1000)
   process.exit(0)
 }

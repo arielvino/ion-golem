@@ -12,8 +12,8 @@ const Y = 150
 const R = 12
 const TOP = Y + 12
 const SPAWNS = {
-  hunter: { x: -10, y: Y + 1, z: -10 },
-  defender: { x: 10, y: Y + 1, z: 10 }
+  red: { x: -10, y: Y + 1, z: -10 },
+  blue: { x: 10, y: Y + 1, z: 10 }
 }
 // Where a spectator sees the whole floor.
 const VIEW = { x: 0, y: Y + 9, z: -R }
@@ -51,22 +51,20 @@ async function build() {
   await cmd(`kill @e[type=!player,${box}]`)
 }
 
-const KIT = [
+const ARMOR = [
   ['armor.head', 'iron_helmet'], ['armor.chest', 'iron_chestplate'],
-  ['armor.legs', 'iron_leggings'], ['armor.feet', 'iron_boots'],
-  ['weapon.mainhand', 'iron_sword'], ['weapon.offhand', 'shield']
+  ['armor.legs', 'iron_leggings'], ['armor.feet', 'iron_boots']
 ]
-const BAG = [['iron_axe', 1], ['bow', 1], ['arrow', 32], ['cooked_beef', 8]]
 
-// Fresh kit, full health and hunger, at the role's corner.
-async function prepare(name, role) {
-  const s = SPAWNS[role]
+// The strategy's kit in iron armour, full health, at the side's corner. Hunger
+// and saturation are left to the game, so regeneration runs at its normal pace.
+async function prepare(name, side, kit) {
+  const s = SPAWNS[side]
   await cmd(`clear ${name}`)
   await cmd(`effect clear ${name}`)
-  for (const [slot, item] of KIT) await cmd(`item replace entity ${name} ${slot} with ${item}`)
-  for (const [item, n] of BAG) await cmd(`give ${name} ${item} ${n}`)
+  for (const [slot, item] of [...ARMOR, ...kit.hands]) await cmd(`item replace entity ${name} ${slot} with ${item}`)
+  for (const [item, n] of kit.bag) await cmd(`give ${name} ${item} ${n}`)
   await cmd(`effect give ${name} instant_health 1 10 true`)
-  await cmd(`effect give ${name} saturation 1 20 true`)
   await cmd(`spawnpoint ${name} ${s.x} ${s.y} ${s.z}`)
   await cmd(`tp ${name} ${s.x + 0.5} ${s.y} ${s.z + 0.5} facing 0 ${s.y + 1} 0`)
 }

@@ -1,6 +1,11 @@
-// Defender v0 — the turtle: face the hunter behind a raised shield, back off when
+// Turtle v0 — face the opponent behind a raised shield, back off when
 // crowded, and drop the shield only for a fully charged counter-hit in reach.
 const { opponentEntity, nextTick, hold } = require('./common')
+
+const kit = {
+  hands: [['weapon.mainhand', 'iron_sword'], ['weapon.offhand', 'shield']],
+  bag: [['cooked_beef', 8]]
+}
 
 const REACH = 3.0
 const SWORD_COOLDOWN_MS = 625   // attack speed 1.6/s
@@ -30,4 +35,4 @@ async function run(bot, { opponent, signal }) {
   }
 }
 
-module.exports = { run }
+module.exports = { kit, run }
