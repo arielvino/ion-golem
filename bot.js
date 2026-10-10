@@ -218,29 +218,6 @@ function createBot() {
     state.joinedAt = Date.now()
     console.log('Bot has joined')
 
-    // --- Sound registry off-by-one fix ---
-    // minecraft-data's pc/<ver>/sounds.json is 1-indexed (id 0 missing) for 1.21.1+
-    // (regression; 1.20.4 was 0-indexed), but the wire protocol's sound_effect soundId
-    // is 0-indexed. mineflayer resolves names via bot.registry.sounds[soundId]
-    // (sound.js), so every heard sound is mislabeled as the NEXT sound in registry
-    // order — e.g. entity.player.hurt (1251) read as entity.player.death → "Player dies"
-    // → the AI narrates deaths that never happened. Verified against the server's own
-    // --reports dump: server[N].name === minecraft_data[N+1].name for all ids.
-    // Shift the registry down by one so mineflayer's own resolution becomes correct.
-    // Idempotent: prismarine-registry caches the registry object across reconnects, so
-    // the sounds[0]===undefined guard prevents a double shift. (Upstream bug: report to
-    // PrismarineJS/minecraft-data.)
-    const snd = bot.registry?.sounds
-    if (snd && snd[0] === undefined && snd[1] !== undefined) {
-      const fixed = {}
-      for (const k of Object.keys(snd)) {
-        const id = Number(k) - 1
-        fixed[id] = { ...snd[k], id }
-      }
-      bot.registry.sounds = fixed
-      console.log(`  [SOUND] corrected off-by-one sound registry (${Object.keys(fixed).length} ids, now 0-indexed)`)
-    }
-
     require('./src/world/memory').checkStateVersion(bot.version)
 
     const mcData = require('minecraft-data')(bot.version)
