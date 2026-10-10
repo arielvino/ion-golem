@@ -4,7 +4,6 @@
 // vehicle, and what the server prints on screen (title, action bar). The action bar
 // is where the server explains itself — "You may not rest now; there are monsters
 // nearby", "Respawn point set" — and nothing else ever reads it.
-const { processNbtMessage } = require('prismarine-chat')
 const { logEvent } = require('../core/utils')
 
 const REPEAT_MS = 30000   // the same on-screen text again within this is one record
@@ -14,14 +13,6 @@ let bound = null
 function record(text) {
   console.log(`  [EVT] ${text}`)
   logEvent(text)
-}
-
-// Plain text of an NBT text component, as node-minecraft-protocol decodes chat.
-function nbtText(bot, nbt) {
-  try {
-    const ChatMessage = require('prismarine-chat')(bot.registry)
-    return ChatMessage.fromNotch(processNbtMessage(nbt)).toString().trim()
-  } catch { return '' }
 }
 
 function bind(bot) {
@@ -59,13 +50,10 @@ function bind(bot) {
     shown.set(text, t)
     record(`${kind}: "${text}"`)
   }
-  // The server's own explanations come as overlay system chat (mineflayer's actionBar);
-  // /title sends dedicated packets, which mineflayer either drops (action bar) or
-  // passes on undecoded when the text is styled (title), so read those directly.
+  // The server explains itself on the action bar (overlay chat or its own packet,
+  // both mineflayer's actionBar); /title sends titles and subtitles.
   bot.on('actionBar', (msg) => onScreen('action bar', msg?.toString().trim()))
-  bot._client.on('action_bar', (p) => onScreen('action bar', nbtText(bot, p.text)))
-  bot._client.on('set_title_text', (p) => onScreen('title', nbtText(bot, p.text)))
-  bot._client.on('set_title_subtitle', (p) => onScreen('subtitle', nbtText(bot, p.text)))
+  bot.on('title', (text, type) => onScreen(type === 'subtitle' ? 'subtitle' : 'title', String(text ?? '').trim()))
 }
 
 module.exports = { bind }
