@@ -174,14 +174,6 @@ function createBot() {
   state.bot = bot
 
   bot.once('inject_allowed', () => {
-    // Difficulty: on 1.21.x the protocol already maps the difficulty packet's varint
-    // to its name ("peaceful"), and mineflayer's game.js then indexes its own name
-    // array with that string → bot.game.difficulty is always undefined. Runs after
-    // mineflayer's handler, so this assignment wins. (Upstream bug in game.js.)
-    bot._client.on('difficulty', (packet) => {
-      if (typeof packet.difficulty === 'string') bot.game.difficulty = packet.difficulty
-    })
-
     // Locator Bar (MC 1.21.6+): the server pushes tracked_waypoint for other
     // players even when they're out of render range. It carries either an exact
     // position (vec3i), a rough chunk position (chunk), or — for very distant
