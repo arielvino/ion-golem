@@ -36,19 +36,14 @@ function bind(bot) {
   })
 
   let mode = bot.game?.gameMode ?? null
+  let difficulty = bot.game?.difficulty ?? null
   bot.on('game', () => {
     const now = bot.game.gameMode
     if (mode && now && now !== mode) record(`game: mode ${mode} → ${now}`)
     mode = now || mode
-  })
-
-  // bot.game.difficulty is unreliable on 1.21+ (see bot.js), so read the packet.
-  const NAMES = ['peaceful', 'easy', 'normal', 'hard']
-  let difficulty = bot.game?.difficulty ?? null
-  bot._client.on('difficulty', (p) => {
-    const now = typeof p.difficulty === 'string' ? p.difficulty : NAMES[p.difficulty]
-    if (difficulty && now && now !== difficulty) record(`game: difficulty ${difficulty} → ${now}`)
-    difficulty = now || difficulty
+    const diff = bot.game.difficulty
+    if (difficulty && diff && diff !== difficulty) record(`game: difficulty ${difficulty} → ${diff}`)
+    difficulty = diff || difficulty
   })
 
   bot.on('spawnReset', () => record('spawn: no bed or respawn anchor to respawn at (missing or blocked), so the bed spawn point is gone'))
