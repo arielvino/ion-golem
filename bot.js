@@ -1,5 +1,4 @@
 // Entry point — PID, createBot, shutdown, signals
-require('./src/lib/physicsEpsilonFix')   // before mineflayer's physics: vanilla collision tolerance
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const pvp = require('mineflayer-pvp').plugin
@@ -174,31 +173,7 @@ function createBot() {
   bot.loadPlugin(toolPlugin)
   state.bot = bot
 
-  // Fix mineflayer/minecraft-data version mismatch: entity_velocity packet
-  // uses vec3i16 (packet.velocity.x/y/z) but feature flag says to use
-  // packet.velocityX/Y/Z (which is undefined → NaN → position corruption).
-  // Patch: sanitize velocity after any entity_velocity packet for the bot.
   bot.once('inject_allowed', () => {
-    const { Vec3 } = require('vec3')
-    bot._client.prependListener('entity_velocity', (packet) => {
-      if (packet.entityId === bot.entity?.id && packet.velocity) {
-        // Ensure velocity fields are accessible as flat properties for legacy code path
-        if (packet.velocityX === undefined) {
-          packet.velocityX = packet.velocity.x
-          packet.velocityY = packet.velocity.y
-          packet.velocityZ = packet.velocity.z
-        }
-      }
-    })
-
-    // Difficulty: on 1.21.x the protocol already maps the difficulty packet's varint
-    // to its name ("peaceful"), and mineflayer's game.js then indexes its own name
-    // array with that string → bot.game.difficulty is always undefined. Runs after
-    // mineflayer's handler, so this assignment wins. (Upstream bug in game.js.)
-    bot._client.on('difficulty', (packet) => {
-      if (typeof packet.difficulty === 'string') bot.game.difficulty = packet.difficulty
-    })
-
     // Locator Bar (MC 1.21.6+): the server pushes tracked_waypoint for other
     // players even when they're out of render range. It carries either an exact
     // position (vec3i), a rough chunk position (chunk), or — for very distant
@@ -234,29 +209,6 @@ function createBot() {
     reconnectAttempts = 0
     state.joinedAt = Date.now()
     console.log('Bot has joined')
-
-    // --- Sound registry off-by-one fix ---
-    // minecraft-data's pc/<ver>/sounds.json is 1-indexed (id 0 missing) for 1.21.1+
-    // (regression; 1.20.4 was 0-indexed), but the wire protocol's sound_effect soundId
-    // is 0-indexed. mineflayer resolves names via bot.registry.sounds[soundId]
-    // (sound.js), so every heard sound is mislabeled as the NEXT sound in registry
-    // order — e.g. entity.player.hurt (1251) read as entity.player.death → "Player dies"
-    // → the AI narrates deaths that never happened. Verified against the server's own
-    // --reports dump: server[N].name === minecraft_data[N+1].name for all ids.
-    // Shift the registry down by one so mineflayer's own resolution becomes correct.
-    // Idempotent: prismarine-registry caches the registry object across reconnects, so
-    // the sounds[0]===undefined guard prevents a double shift. (Upstream bug: report to
-    // PrismarineJS/minecraft-data.)
-    const snd = bot.registry?.sounds
-    if (snd && snd[0] === undefined && snd[1] !== undefined) {
-      const fixed = {}
-      for (const k of Object.keys(snd)) {
-        const id = Number(k) - 1
-        fixed[id] = { ...snd[k], id }
-      }
-      bot.registry.sounds = fixed
-      console.log(`  [SOUND] corrected off-by-one sound registry (${Object.keys(fixed).length} ids, now 0-indexed)`)
-    }
 
     require('./src/world/memory').checkStateVersion(bot.version)
 

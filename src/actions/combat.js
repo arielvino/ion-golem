@@ -60,20 +60,14 @@ async function doAttack(targetName) {
   let killed = false
   let timedOut = false
   let waiter = null
-  // When the target goes, pvp.stop() waits up to 5s for a path_stop that the pathfinder
-  // only sends once its goal is reset, so a bot standing at the corpse lingers 5s
-  // before stoppedAttacking. Reset the goal ourselves: path_stop fires now.
-  const onGone = (e) => { if (e === entity) bot.pathfinder.setGoal(null) }
-  bot.on('entityGone', onGone)
   try {
     await equipBestWeapon(bot)
     await equipShield(bot)
     bot.pvp.attack(entity)
-    // Wait until pvp reports it stopped, or 30s; the timeout stops the attack.
-    // stopAll() above didn't await pvp.stop(), so the PREVIOUS attack's
-    // stoppedAttacking can arrive after this one has started: only an event with
-    // pvp no longer on this target ends this attack.
-    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => { timedOut = true; bot.pvp.stop() }, () => bot.pvp.target !== entity)
+    // Wait until pvp reports it stopped attacking this target, or 30s; the timeout
+    // stops the attack. stopAll() above didn't await pvp.stop(), so the previous
+    // attack's stoppedAttacking can still arrive: it names that attack's target.
+    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => { timedOut = true; bot.pvp.stop() }, (target) => target === entity)
     await raceAbort(waiter, 30000)
     if (!entity.isValid && require('../engine/creeperDefense').didExplode(entity)) {
       console.log('  exploded'); logEvent(`attack: ${label} exploded`)
@@ -94,7 +88,6 @@ async function doAttack(targetName) {
     else { console.error('  pvp err:', err.message); recordFailure(`attack:${targetName} - ${err.message}`) }
   } finally {
     if (waiter) waiter.cancel()
-    bot.removeListener('entityGone', onGone)
     // pvp raises the shield after every swing and never lowers it when the fight
     // ends: left up, it slows every step and the bot walks around blocking.
     // (bot.usingHeldItem can't tell: mineflayer clears it on any entity_status.)

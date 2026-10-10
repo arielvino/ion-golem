@@ -1,11 +1,11 @@
 // projectileGuard.js — reflex against any incoming projectile.
 //
 // A projectile spawns as an entity whose spawn packet carries its velocity and its
-// shooter (objectData). On 26.1 mineflayer scales that velocity by 1/8000 (the
-// protocol already decodes it to blocks/tick), and the server sends a projectile's
-// position only every few ticks, so the guard keeps its own copy from the raw
-// packets and plays the vanilla flight physics forward to see whether, and in how
-// many ticks, the projectile meets the bot. Then, on physicsTick:
+// shooter (objectData). The server sends a projectile's position only every few
+// ticks, so the guard keeps its own copy, taken on each spawn and velocity packet
+// (velocity from mineflayer's entity, which its handlers have already updated), and
+// plays the vanilla flight physics forward to see whether, and in how many ticks,
+// the projectile meets the bot. Then, on physicsTick:
 //   - ghast fireball or wind charge: return it. A melee hit sends it off along the
 //     hitter's look, so look at the shooter and swing once it's within reach;
 //   - shield in the off-hand: face the projectile and raise the shield early enough
@@ -95,7 +95,8 @@ function setupProjectileGuard() {
     r[key]++; r.last = Date.now(); r.from = cameFrom(t.vel); tally.set(t.ownerTag, r)
   }
 
-  const raw = (v) => new Vec3(v.x, v.y, v.z)
+  // mineflayer's own spawn_entity/entity_velocity handlers run first; copy, since it mutates.
+  const velOf = (id) => bot.entities[id]?.velocity?.clone()
   bot._client.on('spawn_entity', (p) => {
     const name = bot.registry.entities[p.type]?.name
     if (bot.registry.entitiesByName[name]?.type !== 'projectile' || HARMLESS.has(name)) return
@@ -104,14 +105,15 @@ function setupProjectileGuard() {
     const owner = bot.entities[p.objectData]
     tracked.set(p.entityId, {
       name, owner: p.objectData, ownerTag: owner ? entityTag(owner) : 'unseen shooter',
-      pos, vel: raw(p.velocity || { x: 0, y: 0, z: 0 }), at: tick, seen: pos.clone(), origin: pos.clone(),
+      pos, vel: velOf(p.entityId) || new Vec3(0, 0, 0), at: tick, seen: pos.clone(), origin: pos.clone(),
       answered: null, swings: 0
     })
   })
   bot._client.on('entity_velocity', (p) => {
     const t = tracked.get(p.entityId)
     if (!t) return
-    const v = raw(p.velocity)
+    const v = velOf(p.entityId)
+    if (!v) return
     if (t.swings && t.vel.dot(v) < 0 && !t.returned) {
       t.returned = true
       count(t, 'returned')
