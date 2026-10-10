@@ -1,4 +1,5 @@
-// rangedDefense.js — reflexes against archers (skeletons, strays, bogged, pillagers).
+// rangedDefense.js — reflexes against archers: skeletons, strays, bogged, pillagers,
+// and players holding a bow or crossbow.
 //
 // An archer's draw shows in its living_entity_flags (bit 0x01, "hand active"): on
 // for ~1s before the arrow leaves, off at release. That second is the window — far
@@ -6,16 +7,20 @@
 //   - shield in the off-hand: face the archer and raise it for the draw, lower it
 //     once the arrow has landed. In melee mineflayer-pvp owns the shield (it drops
 //     it for each swing and raises it after), so with a pvp target we only raise;
-//   - no shield: sidestep across the line of fire just before the release.
+//   - no shield: juke. Late in the draw, lean sideways; at the release, cut the
+//     other way. An archer that leads its target aims where the lean was taking us.
 const state = require('../core/state')
 
 const ARCHERS = new Set(['skeleton', 'stray', 'bogged', 'pillager'])
+const BOWS = new Set(['bow', 'crossbow'])
+const isArcher = (e) => ARCHERS.has(e.name) || (e.type === 'player' && BOWS.has(e.heldItem?.name))
 const THREAT_RANGE = 24
 const SHIELD_HOLD_MS = 400   // keep the shield up this long after the draw ends (arrow flight)
-// An arrow flies at where the bot is at release (~950ms into the draw): be moving
-// across the line by then and keep moving through the flight.
-const DODGE_AFTER_MS = 700
-const DODGE_MS = 600
+// A full bow draw is ~1s. Lean from LEAN_AFTER_MS into it, so we're moving sideways
+// when the archer takes its aim; at the release cut the other way for CUT_MS (the
+// arrow's flight and then some).
+const LEAN_AFTER_MS = 500
+const CUT_MS = 600
 const SUMMARY_AFTER_MS = 3000  // journal an archer's tally once it hasn't drawn for this long
 
 function drawing(bot, e) {
@@ -29,7 +34,7 @@ function nearestArcher(bot, range = THREAT_RANGE, drawingOnly = false) {
   const eye = pos.offset(0, 1.62, 0)
   const { hasLineOfSight } = require('../perception/vision')
   return bot.nearestEntity(e =>
-    ARCHERS.has(e.name) &&
+    isArcher(e) &&
     e.position.distanceTo(pos) < range &&
     (!drawingOnly || drawing(bot, e)) &&
     hasLineOfSight(eye, e.position, e.height || 1.8)
@@ -39,8 +44,9 @@ function nearestArcher(bot, range = THREAT_RANGE, drawingOnly = false) {
 function setupRangedDefense() {
   const bot = state.bot
   let raised = false, lastThreatAt = 0
-  const drawSeen = new Map()   // archer id → ms its current draw started (-1: dodged)
-  let dodgeUntil = 0, dodgeDir = 'left'
+  const drawSeen = new Map()   // archer id → ms its current draw started
+  // The juke: which way we lean ('left'/'right'), then cut. cutUntil = 0: not cutting.
+  let lean = null, cut = null, cutUntil = 0, side = 'left'
   // Per archer: how often we answered its draws. One journal record per encounter,
   // not one per arrow.
   const tally = new Map()   // id → { tag, shield, dodge, last }
@@ -68,7 +74,13 @@ function setupRangedDefense() {
     const now = Date.now()
     if (tally.size) flushTally(now)
     const threat = nearestArcher(bot, THREAT_RANGE, true)
-    for (const id of drawSeen.keys()) if (!threat || id !== threat.id) drawSeen.delete(id)
+    // An archer we saw drawing that no longer is has just loosed (or given up).
+    let released = null
+    for (const id of drawSeen.keys()) {
+      if (threat && id === threat.id) continue
+      drawSeen.delete(id)
+      released = bot.entities[id] || null
+    }
     if (threat) {
       lastThreatAt = now
       if (!drawSeen.has(threat.id)) drawSeen.set(threat.id, now)
@@ -94,21 +106,28 @@ function setupRangedDefense() {
       return
     }
 
-    // No shield: one sidestep per draw, alternating sides so it isn't predictable.
-    if (dodgeUntil && now >= dodgeUntil) {
-      bot.setControlState(dodgeDir, false)
-      dodgeUntil = 0
-    }
-    const drawStart = threat ? drawSeen.get(threat.id) : -1
-    if (threat && !dodgeUntil && drawStart !== -1 && now - drawStart >= DODGE_AFTER_MS) {
+    // No shield: the juke. Lean late in the draw, cut the other way at the release.
+    const opposite = (d) => d === 'left' ? 'right' : 'left'
+    if (cut && now >= cutUntil) { bot.setControlState(cut, false); cut = null }
+    if (threat && !lean && !cut && now - drawSeen.get(threat.id) >= LEAN_AFTER_MS) {
       if (bot.pvp?.target !== threat) face(threat)
-      dodgeDir = dodgeDir === 'left' ? 'right' : 'left'
-      bot.setControlState(dodgeDir, true)
-      dodgeUntil = now + DODGE_MS
-      drawSeen.set(threat.id, -1)
-      count(threat, 'dodge')
-      console.log(`  [DODGE] ${dodgeDir} vs ${threat.name} at ${threat.position.distanceTo(bot.entity.position).toFixed(1)}m`)
+      side = opposite(side)   // alternate, so the lean isn't predictable either
+      lean = side
+      bot.setControlState(lean, true)
     }
+    if (released && !cut) {
+      // No lean (a short draw): any way across the line beats standing still.
+      const dir = lean ? opposite(lean) : (side = opposite(side))
+      if (lean) bot.setControlState(lean, false)
+      lean = null
+      cut = dir
+      bot.setControlState(cut, true)
+      cutUntil = now + CUT_MS
+      count(released, 'dodge')
+      console.log(`  [DODGE] juke ${cut} vs ${released.username || released.name} at ${released.position.distanceTo(bot.entity.position).toFixed(1)}m`)
+    }
+    // The archer stopped without a release we saw (out of sight, gone): stop leaning.
+    if (lean && !threat && !released) { bot.setControlState(lean, false); lean = null }
   })
 }
 
