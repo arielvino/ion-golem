@@ -146,7 +146,7 @@ async function main() {
   const wins = (w) => results.filter(r => r.winner === w).length
   const avg = (k) => (results.reduce((a, r) => a + (r[k] || 0), 0) / results.length).toFixed(1)
   console.log(`\n== ${BOT} ${wins(BOT)} : ${wins(MOB)} ${MOB} (${wins('draw')} draws) ==` +
-    (results.some(r => r.effectSeconds) ? `; ${results.filter(r => r.diedAfter).length} wins died afterwards to lingering effects, avg hp ${avg('botHp')} at the kill → ${avg('settledHp')} settled, effects dealt ${avg('effectDamage')} per win` : ''))
+    (results.some(r => r.effectDamage) ? `; ${results.filter(r => r.diedAfter).length} wins died afterwards to lingering effects, avg hp ${avg('botHp')} at the kill → ${avg('settledHp')} settled, effects dealt ${avg('effectDamage')} per win` : ''))
   console.log(`avg round ${avg('seconds')}s, avg ${BOT} hp left ${avg('botHp')}, shield ${avg('shield')}, juke ${avg('juke')}, sidestep ${avg('projSidestep')}, hits taken ${avg('hitsTaken')} per round`)
   console.log(`results appended to ${RESULTS}`)
 
