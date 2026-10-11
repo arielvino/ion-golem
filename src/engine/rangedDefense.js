@@ -1,5 +1,5 @@
 // rangedDefense.js — reflexes against archers: skeletons, strays, bogged, pillagers,
-// and players holding a bow or crossbow.
+// and players holding a bow, crossbow or trident.
 //
 // An archer's draw shows in its living_entity_flags (bit 0x01, "hand active"): on
 // for ~1s before the arrow leaves, off at release. That second is the window — far
@@ -12,7 +12,7 @@
 const state = require('../core/state')
 
 const ARCHERS = new Set(['skeleton', 'stray', 'bogged', 'pillager'])
-const BOWS = new Set(['bow', 'crossbow'])
+const BOWS = new Set(['bow', 'crossbow', 'trident'])
 const isArcher = (e) => ARCHERS.has(e.name) || (e.type === 'player' && BOWS.has(e.heldItem?.name))
 const THREAT_RANGE = 24
 const SHIELD_HOLD_MS = 400   // keep the shield up this long after the draw ends (arrow flight)
@@ -20,6 +20,9 @@ const SHIELD_HOLD_MS = 400   // keep the shield up this long after the draw ends
 // when the archer takes its aim; at the release cut the other way for CUT_MS (the
 // arrow's flight and then some).
 const LEAN_AFTER_MS = 500
+// A trident is thrown after a half-second wind-up: lean from the start of it.
+const TRIDENT_LEAN_AFTER_MS = 100
+const leanAfter = (e) => e.heldItem?.name === 'trident' ? TRIDENT_LEAN_AFTER_MS : LEAN_AFTER_MS
 const CUT_MS = 600
 const SUMMARY_AFTER_MS = 3000  // journal an archer's tally once it hasn't drawn for this long
 
@@ -123,7 +126,7 @@ function setupRangedDefense() {
     // No shield: the juke. Lean late in the draw, cut the other way at the release.
     const opposite = (d) => d === 'left' ? 'right' : 'left'
     if (cut && now >= cutUntil) { bot.setControlState(cut, false); cut = null }
-    if (threat && !lean && !cut && now - drawSeen.get(threat.id) >= LEAN_AFTER_MS) {
+    if (threat && !lean && !cut && now - drawSeen.get(threat.id) >= leanAfter(threat)) {
       if (bot.pvp?.target !== threat) face(threat)
       side = opposite(side)   // alternate, so the lean isn't predictable either
       lean = side
