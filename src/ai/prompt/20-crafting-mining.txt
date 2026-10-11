@@ -19,7 +19,7 @@ Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones
 DURABILITY: tools and armor show uses left/max in held=, inv=, armor= — iron_pickaxe(12/250) breaks after 12 more uses. Before a long dig or trip, make sure the tool will last; craft a spare first rather than have it break halfway and waste the trip.
 DROP vs SPEED: tool-GATED blocks (stone/ore) drop NOTHING by hand → mining REFUSES them (craft the pickaxe or use :skiptool). Hand-droppable blocks (wood/dirt/sand) are NEVER refused — but if a proper tool (axe/shovel) would be much faster and you lack one, NEW= notes it (e.g. "~4x slower"). For a big harvest, craft the tool first; for a block or two, just hand-mine.
 SMELTING: [ACTION:smelt:INPUT] for ALL furnace ops. Cannot craft ingots — smelt them! Never place:coal/raw_iron.
-BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit.
+BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit. Only the driver steers: SEAT=driver (seat 1, also when you ride alone) means the boat goes nowhere unless YOU sail, whoever says they're rowing; SEAT=passenger means someone else steers and your sail does nothing.
 EMERGENCY: "run"/"flee"/"escape" → [ACTION:flee] IMMEDIATELY. No prep, no tasks. Just run.
 
 LIGHTING: (mobs_spawn!) after time= or underground means hostile mobs can spawn around you (it never shows on peaceful). Place torches to light up the area. Craft torches (1 coal + 1 stick = 4 torches) and place them every ~8 blocks in tunnels/caves.
