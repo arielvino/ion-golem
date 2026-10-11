@@ -29,8 +29,11 @@ const KITS = {
 }
 const KIT = KITS[args.kit || 'shield']
 // The mob's own gear: summoning with NBT skips its spawn equipment.
-const MOB_GEAR = { skeleton: 'equipment:{mainhand:{id:"minecraft:bow",count:1}},' }
-const TAG = 'mobduel'
+const MOB_GEAR = {
+  skeleton: 'equipment:{mainhand:{id:"minecraft:bow",count:1}},',
+  wither_skeleton: 'equipment:{mainhand:{id:"minecraft:stone_sword",count:1}},'
+}
+const TAG = `mobduel_${BOT}`   // per bot: referees can run side by side
 
 const DATA = process.env.IONGOLEM_DATA_DIR ||
   path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'), 'iongolem')
@@ -55,7 +58,7 @@ const health = async (sel) => {
   return m ? +(+m[1]).toFixed(1) : null
 }
 const mobAlive = async () =>
-  /passed/.test(await ask(`execute if entity @e[type=${MOB},tag=${TAG}]`, /Test (passed|failed)/) || '')
+  /passed/.test(await ask(`execute if entity @e[type=${MOB},tag=${TAG},${arena.box}]`, /Test (passed|failed)/) || '')
 
 // What the bot did between two wall-clock times, from its own log (lines stamped HH:MM:SS.mmm).
 function botActions(t0, t1) {
@@ -93,7 +96,7 @@ async function playRound(n) {
     t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', arena: `${CX},${CZ}`, winner,
     seconds: +((t1 - t0) / 1000).toFixed(1),
     botHp: winner === MOB ? 0 : await health(BOT),
-    mobHp: winner === BOT ? 0 : await health(`@e[type=${MOB},tag=${TAG},limit=1]`),
+    mobHp: winner === BOT ? 0 : await health(`@e[type=${MOB},tag=${TAG},${arena.box},limit=1]`),
     ...botActions(t0, t1)
   }
   console.log(`Round ${n}: ${winner === 'draw' ? 'DRAW (time)' : `${winner} WINS`} in ${result.seconds}s — ` +

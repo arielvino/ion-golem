@@ -7,6 +7,7 @@
 // radius r (default R); the module itself is the one at 0,0. Arenas whose shells
 // don't overlap can run at once.
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 
 const CONSOLE = process.env.MC_CONSOLE ||
@@ -38,19 +39,37 @@ async function cmd(line) {
 }
 
 // Sends a console command and returns its reply from the server log: the first new
-// line matching `pattern`, or null after `ms`.
-async function ask(line, pattern, ms = 3000) {
-  const from = fs.statSync(LOG).size
-  await cmd(line)
-  for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(100)) {
-    const fd = fs.openSync(LOG, 'r')
-    const buf = Buffer.alloc(fs.fstatSync(fd).size - from)
-    fs.readSync(fd, buf, 0, buf.length, from)
-    fs.closeSync(fd)
-    const m = buf.toString().match(pattern)
-    if (m) return m[0]
+// line matching `pattern`, or null after `ms`. A reply doesn't say which command it
+// answers, so referees running at once take turns: a lock file around each
+// question and its answer (one left by a dead process goes stale after STALE_MS).
+const LOCK = path.join(os.tmpdir(), 'iongolem-console.lock')
+const STALE_MS = 10000
+async function lockConsole() {
+  for (;;) {
+    try { fs.closeSync(fs.openSync(LOCK, 'wx')); return } catch (e) {
+      if (e.code !== 'EEXIST') throw e
+      try { if (Date.now() - fs.statSync(LOCK).mtimeMs > STALE_MS) fs.unlinkSync(LOCK) } catch (e) {}
+      await sleep(20)
+    }
   }
-  return null
+}
+async function ask(line, pattern, ms = 3000) {
+  await lockConsole()
+  try {
+    const from = fs.statSync(LOG).size
+    await cmd(line)
+    for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(50)) {
+      const fd = fs.openSync(LOG, 'r')
+      const buf = Buffer.alloc(fs.fstatSync(fd).size - from)
+      fs.readSync(fd, buf, 0, buf.length, from)
+      fs.closeSync(fd)
+      const m = buf.toString().match(pattern)
+      if (m) return m[0]
+    }
+    return null
+  } finally {
+    try { fs.unlinkSync(LOCK) } catch (e) {}
+  }
 }
 
 const ARMOR = [
