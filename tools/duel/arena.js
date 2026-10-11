@@ -110,8 +110,10 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
   // if it doesn't, and built from scratch (and copied) only when there's no copy.
   async function ready() {
     await cmd(`forceload add ${x0} ${z0} ${x1} ${z1}`)
-    if (await matchesCopy()) return 'intact'
+    // An arena that matches a copy of an older design (no tinted roof, no barrier
+    // bottom) is rebuilt too.
     if (!await copyExists()) { await build(); await saveCopy(); return 'built' }
+    if (await matchesCopy()) return 'intact'
     await cmd(`clone ${x0} ${COPY_Y} ${z0} ${x1} ${COPY_TOP} ${z1} ${x0} ${BOTTOM} ${z0}`)
     if (await matchesCopy()) return 'repaired'
     await build()
