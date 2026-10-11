@@ -54,17 +54,27 @@ const a = -R - 1, b = R + 1
 const matchesCopy = async () =>
   /passed/.test(await ask(`execute if blocks ${a} ${Y} ${a} ${b} ${TOP} ${b} ${a} ${COPY_Y} ${a} all`, /Test (passed|failed)/) || '')
 
+// Whether the copy is there at all: its barrier roof and stone-brick floor. Without
+// it, restoring from the copy would clone raw underground (gravel and all) into the
+// sky.
+const copyExists = async () =>
+  /passed/.test(await ask(`execute if block ${a} ${COPY_Y + TOP - Y} ${a} barrier`, /Test (passed|failed)/) || '') &&
+  /passed/.test(await ask(`execute if block 0 ${COPY_Y} 0 stone_bricks`, /Test (passed|failed)/) || '')
+
 // The arena as built: left alone if it matches its copy, restored from the copy if
 // it doesn't, and built from scratch (and copied) only when there's no copy yet.
 async function ready() {
   await cmd(`forceload add ${a} ${a} ${b} ${b}`)
   if (await matchesCopy()) return 'intact'
+  if (!await copyExists()) { await build(); await saveCopy(); return 'built' }
   await cmd(`clone ${a} ${COPY_Y} ${a} ${b} ${COPY_Y + TOP - Y} ${b} ${a} ${Y} ${a}`)
   if (await matchesCopy()) return 'repaired'
   await build()
-  await cmd(`clone ${a} ${Y} ${a} ${b} ${TOP} ${b} ${a} ${COPY_Y} ${a}`)
+  await saveCopy()
   return 'built'
 }
+
+const saveCopy = () => cmd(`clone ${a} ${Y} ${a} ${b} ${TOP} ${b} ${a} ${COPY_Y} ${a}`)
 
 async function build() {
   await cmd(`fill ${a} ${Y} ${a} ${b} ${TOP} ${b} barrier hollow`)
@@ -125,4 +135,4 @@ async function sweep() {
   await cmd(`kill @e[type=!player,${box}]`)
 }
 
-module.exports = { ready, build, prepare, sweep, cmd, VIEW, BENCH, Y, R }
+module.exports = { ready, build, saveCopy, prepare, sweep, cmd, VIEW, BENCH, Y, R }
