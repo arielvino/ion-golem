@@ -395,10 +395,6 @@ function createBot() {
   // 'whisper' ("X whispers to you: …" isn't chat's <X> form), so it takes the same path.
   const onChat = (username, message) => {
     if (username === bot.username) return
-    if (username.startsWith('Bot') && username !== bot.username) {
-      console.log(`<${username}> ${message}  [ignored: other bot]`)
-      return
-    }
     console.log(color(c.bold + c.white, `\n<${username}> ${message}`))
     // !nobreak / !defend / !float / !lead on|off are for the bot, not the AI; a yes/no to a pending break request is
     // recorded here and still reaches the AI below.
@@ -467,10 +463,6 @@ function createBot() {
           message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`
         })
       }
-      return
-    }
-    if (eventPlayer && eventPlayer.startsWith('Bot') && eventPlayer !== bot.username) {
-      console.log(`  [EVENT] ${msg}  [ignored: other bot]`)
       return
     }
     console.log(color(c.yellow, `\n  [EVENT] ${msg}`))
