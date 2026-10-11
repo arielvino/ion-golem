@@ -4,7 +4,7 @@
 // and console replies for who dies. Each round, with what the bot did (from its own
 // log), is appended to <data dir>/duel/mob-results.jsonl.
 //
-//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0]
+//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -17,13 +17,14 @@ const MOB = args.mob || 'skeleton'
 const ROUNDS = parseInt(args.rounds || '30', 10)
 const TIME_MS = parseInt(args.time || '90', 10) * 1000
 const [CX, CZ] = (args.at || '40,0').split(',').map(Number)
-const arena = makeArena({ cx: CX, cz: CZ })
+const arena = makeArena({ cx: CX, cz: CZ, r: parseInt(args.r || '12', 10) })
 
-// Iron armour (from prepare), sword and shield in hand, a bow and food in the bag.
-const KIT = {
-  hands: [['weapon.mainhand', 'iron_sword'], ['weapon.offhand', 'shield']],
-  bag: [['bow', 1], ['arrow', 32], ['cooked_beef', 8]]
+// Iron armour (from prepare), a sword (and shield) in hand, a bow and food in the bag.
+const KITS = {
+  shield: { hands: [['weapon.mainhand', 'iron_sword'], ['weapon.offhand', 'shield']] },
+  noshield: { hands: [['weapon.mainhand', 'iron_sword']] }
 }
+const KIT = { ...KITS[args.kit || 'shield'], bag: [['bow', 1], ['arrow', 32], ['cooked_beef', 8]] }
 // The mob's own gear: summoning with NBT skips its spawn equipment.
 const MOB_GEAR = { skeleton: 'equipment:{mainhand:{id:"minecraft:bow",count:1}},' }
 const TAG = 'mobduel'
@@ -86,7 +87,7 @@ async function playRound(n) {
   }
   const t1 = Date.now()
   const result = {
-    t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, winner,
+    t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', arena: `${CX},${CZ}`, winner,
     seconds: +((t1 - t0) / 1000).toFixed(1),
     botHp: winner === MOB ? 0 : await health(BOT),
     mobHp: winner === BOT ? 0 : await health(`@e[type=${MOB},tag=${TAG},limit=1]`),

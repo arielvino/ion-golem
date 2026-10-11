@@ -2,8 +2,9 @@
 // nothing gets in or out, with four cover walls around the centre. Built and reset
 // through the server console FIFO; nothing here needs an op client.
 //
-// makeArena({ cx, cz }) gives an arena centred on cx,cz; the module itself is the
-// one at 0,0. Arenas at least 2R+3 apart don't overlap, and can run at once.
+// makeArena({ cx, cz, r }) gives an arena centred on cx,cz with a play area of
+// radius r (default R); the module itself is the one at 0,0. Arenas whose shells
+// don't overlap can run at once.
 const fs = require('fs')
 const path = require('path')
 
@@ -24,8 +25,8 @@ const TOP = Y + 12
 const COPY_Y = -50
 const COPY_TOP = COPY_Y + TOP - BOTTOM
 // Fighters take the corners in turn: NW, SE, NE, SW (a fifth starts 3 blocks in
-// from the first, and so on). Offsets from the centre.
-const CORNERS = [[-10, -10], [10, 10], [10, -10], [-10, 10]]
+// from the first, and so on), 2 blocks in from the walls.
+const CORNERS = [[-1, -1], [1, 1], [1, -1], [-1, 1]]
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -61,12 +62,15 @@ const COLORS = {
   blue: { trim: 'lapis', team: 'blue' }
 }
 
-function makeArena({ cx = 0, cz = 0 } = {}) {
+function makeArena({ cx = 0, cz = 0, r = R } = {}) {
   // x0..x1, z0..z1: the barrier shell's footprint.
-  const x0 = cx - R - 1, x1 = cx + R + 1, z0 = cz - R - 1, z1 = cz + R + 1
-  const box = `x=${x0},y=${Y},z=${z0},dx=${2 * R + 2},dy=${TOP - Y},dz=${2 * R + 2}`
+  const x0 = cx - r - 1, x1 = cx + r + 1, z0 = cz - r - 1, z1 = cz + r + 1
+  const box = `x=${x0},y=${Y},z=${z0},dx=${2 * r + 2},dy=${TOP - Y},dz=${2 * r + 2}`
+  // Cover walls stand halfway out; lights every 6 blocks.
+  const c = Math.round(r / 2)
+  const LIGHTS = [-9, -3, 3, 9].filter(o => Math.abs(o) < r)
   // Where a spectator sees the whole floor.
-  const VIEW = { x: cx, y: Y + 9, z: cz - R }
+  const VIEW = { x: cx, y: Y + 9, z: cz - r }
   // The dead respawn here, on the barrier roof: out of the fight, watching it.
   const BENCH = { x: cx, y: TOP + 1, z: cz }
 
@@ -106,15 +110,15 @@ function makeArena({ cx = 0, cz = 0 } = {}) {
     await cmd(`fill ${x0} ${Y + 1} ${z0} ${x0} ${Y + 3} ${z1} stone_bricks`)
     await cmd(`fill ${x1} ${Y + 1} ${z0} ${x1} ${Y + 3} ${z1} stone_bricks`)
     // Lit from the floor and, invisibly, from under the ceiling.
-    for (const x of [-9, -3, 3, 9]) for (const z of [-9, -3, 3, 9]) {
+    for (const x of LIGHTS) for (const z of LIGHTS) {
       await cmd(`setblock ${cx + x} ${Y} ${cz + z} glowstone`)
       await cmd(`setblock ${cx + x} ${TOP - 1} ${cz + z} light[level=15]`)
     }
     // Cover: four 3-wide, 3-high walls in a broken ring around the centre.
-    await cmd(`fill ${cx - 6} ${Y + 1} ${cz - 1} ${cx - 6} ${Y + 3} ${cz + 1} cobblestone`)
-    await cmd(`fill ${cx + 6} ${Y + 1} ${cz - 1} ${cx + 6} ${Y + 3} ${cz + 1} cobblestone`)
-    await cmd(`fill ${cx - 1} ${Y + 1} ${cz - 6} ${cx + 1} ${Y + 3} ${cz - 6} cobblestone`)
-    await cmd(`fill ${cx - 1} ${Y + 1} ${cz + 6} ${cx + 1} ${Y + 3} ${cz + 6} cobblestone`)
+    await cmd(`fill ${cx - c} ${Y + 1} ${cz - 1} ${cx - c} ${Y + 3} ${cz + 1} cobblestone`)
+    await cmd(`fill ${cx + c} ${Y + 1} ${cz - 1} ${cx + c} ${Y + 3} ${cz + 1} cobblestone`)
+    await cmd(`fill ${cx - 1} ${Y + 1} ${cz - c} ${cx + 1} ${Y + 3} ${cz - c} cobblestone`)
+    await cmd(`fill ${cx - 1} ${Y + 1} ${cz + c} ${cx + 1} ${Y + 3} ${cz + c} cobblestone`)
     await cmd(`kill @e[type=!player,${box}]`)
     for (const [side, c] of Object.entries(COLORS)) {
       await cmd(`team add duel_${side}`)
@@ -125,7 +129,7 @@ function makeArena({ cx = 0, cz = 0 } = {}) {
 
   // Corner number n, as a standing position.
   function corner(n) {
-    const [ox, oz] = CORNERS[n % CORNERS.length]
+    const [ox, oz] = CORNERS[n % CORNERS.length].map(s => s * (r - 2))
     const inward = Math.floor(n / CORNERS.length) * 3
     return { x: cx + ox - Math.sign(ox) * inward + 0.5, y: Y + 1, z: cz + oz - Math.sign(oz) * inward + 0.5 }
   }
