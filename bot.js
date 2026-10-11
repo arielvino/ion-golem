@@ -116,9 +116,11 @@ const stamp = (s) => {
 const origStdoutWrite = process.stdout.write.bind(process.stdout)
 const origStderrWrite = process.stderr.write.bind(process.stderr)
 const stripAnsi = (s) => typeof s === 'string' ? s.replace(/\x1b\[[0-9;]*m/g, '') : s
-// Debug filter: in non-debug mode, only show important lines (Bot chat, join, errors) on stdout.
+// Debug filter: in non-debug mode, show only what the bot says, hears and does on
+// stdout: its chat, players' chat, game events, its actions starting and finishing
+// ([BG]), the model's one-line why ([LOG]), the watchdog, joins and errors.
 // Everything always goes to the log file.
-const SHOW_RE = /\[Bot\]|Bot has joined|Shutting down|ERROR|FATAL|unhandledRejection/
+const SHOW_RE = /\[Bot\]|Bot has joined|Shutting down|ERROR|FATAL|unhandledRejection|^\s*<\w+> |\[(BG|LOG|EVENT|WATCHDOG)\] /
 process.stdout.write = (chunk, ...args) => {
   logStream.write(stamp(stripAnsi(chunk)))
   if (!DEBUG_MODE && typeof chunk === 'string') {
