@@ -23,8 +23,9 @@ const SHIELD_HOLD_MS = 400   // keep the shield up this long after the draw ends
 // the release is due, or at the release if we see it first. A full bow draw is 20
 // ticks; a trident throws after 10. A crossbow's draw is its loading, and the shot
 // comes whenever its holder likes after that: no clock, cut at the release.
-// The cut lasts CUT_MS (the flight and then some). A draw held past the cut gets
-// another lean of at least LEAN_HOLD_MS, then another cut.
+// The cut lasts CUT_MS (the flight and then some). A lean lasts at least
+// LEAN_HOLD_MS before its cut. A draw that's past its cut, held or turned on us
+// late, gets cut after cut: the release may come any tick.
 const JUKE = {
   bow: { lean: 500, cut: 850 },
   trident: { lean: 100, cut: 400 },
@@ -71,7 +72,11 @@ function nearestArcher(bot, range = THREAT_RANGE, drawingOnly = false) {
 function setupRangedDefense() {
   const bot = state.bot
   let raised = false, lastThreatAt = 0
-  const drawSeen = new Map()   // archer id → ms its current draw started
+  // Every archer's current draw, aimed or not: the ms its hand went up. One that
+  // draws aside and then turns to us can loose at once, so the clock can't start
+  // at the turn.
+  const drawStart = new Map()
+  const aimedDraws = new Set()   // archers whose current draw has been aimed at us
   // The juke: which way we lean ('left'/'right'), then cut. cutUntil = 0: not cutting.
   let lean = null, leanSince = 0, cut = null, cutUntil = 0, side = 'left'
   // Per archer: how often we answered its draws. One journal record per encounter,
@@ -101,16 +106,24 @@ function setupRangedDefense() {
     const now = Date.now()
     if (tally.size) flushTally(now)
     const threat = nearestArcher(bot, THREAT_RANGE, true)
-    // An archer we saw drawing that no longer is has just loosed (or given up).
+    const pos = bot.entity.position
+    for (const e of Object.values(bot.entities)) {
+      if (drawStart.has(e.id) || e === bot.entity || !isArcher(e) || !drawing(bot, e)) continue
+      if (e.position.distanceTo(pos) < THREAT_RANGE) drawStart.set(e.id, now)
+    }
+    // A draw that ended has just loosed (or given up): a release at us if it was
+    // aimed at us. Aim wavering mid-draw is not a release.
     let released = null
-    for (const id of drawSeen.keys()) {
-      if (threat && id === threat.id) continue
-      drawSeen.delete(id)
-      released = bot.entities[id] || null
+    for (const id of drawStart.keys()) {
+      const e = bot.entities[id]
+      if (e && drawing(bot, e)) continue
+      drawStart.delete(id)
+      if (aimedDraws.delete(id) && e) released = e
     }
     if (threat) {
       lastThreatAt = now
-      if (!drawSeen.has(threat.id)) drawSeen.set(threat.id, now)
+      aimedDraws.add(threat.id)
+      if (!drawStart.has(threat.id)) drawStart.set(threat.id, now)
     }
 
     if (hasShield()) {
@@ -138,15 +151,17 @@ function setupRangedDefense() {
     const opposite = (d) => d === 'left' ? 'right' : 'left'
     if (cut && now >= cutUntil) { bot.setControlState(cut, false); cut = null }
     const timing = threat && jukeTiming(threat)
-    const drawn = threat ? now - drawSeen.get(threat.id) : 0
-    if (threat && !lean && !cut && drawn >= timing.lean) {
+    const drawn = threat ? now - drawStart.get(threat.id) : 0
+    // A draw already past its cut when it turns on us gets the cut at once, no lean.
+    const late = threat && timing.cut !== null && drawn >= timing.cut
+    if (threat && !lean && !cut && drawn >= timing.lean && !late) {
       if (bot.pvp?.target !== threat) face(threat)
       side = opposite(side)   // alternate, so the lean isn't predictable either
       lean = side
       leanSince = now
       bot.setControlState(lean, true)
     }
-    const due = threat && lean && timing.cut !== null && drawn >= timing.cut && now - leanSince >= LEAN_HOLD_MS
+    const due = late && !cut && (!lean || now - leanSince >= LEAN_HOLD_MS)
     if (!released && due) released = threat
     if (released && !cut) {
       // No lean (a short draw): any way across the line beats standing still.
