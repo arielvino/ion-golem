@@ -79,7 +79,6 @@ async function playRound(n) {
   await cmd(`effect give ${BOT} saturation 1 10 true`)
   const m = arena.corner(1)
   await cmd(`summon ${MOB} ${m.x} ${m.y} ${m.z} {${MOB_GEAR[MOB] || ''}Tags:["${TAG}"],PersistenceRequired:1b}`)
-  await cmd(`effect give @e[type=${MOB},tag=${TAG}] fire_resistance infinite 0 true`)   // the roof lets daylight in
   await sleep(500)
   const from = logSize()
   const t0 = Date.now()

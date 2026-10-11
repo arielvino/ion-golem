@@ -1,5 +1,6 @@
 // The duel arena: a walled stone-brick floor in the air, sealed with barriers so
-// nothing gets in or out, with four cover walls around the centre. Built and reset
+// nothing gets in or out (under a tinted-glass roof that keeps the daylight out),
+// with four cover walls around the centre. Built and reset
 // through the server console FIFO; nothing here needs an op client.
 //
 // makeArena({ cx, cz, r }) gives an arena centred on cx,cz with a play area of
@@ -71,19 +72,19 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
   const LIGHTS = [-9, -3, 3, 9].filter(o => Math.abs(o) < r)
   // Where a spectator sees the whole floor.
   const VIEW = { x: cx, y: Y + 9, z: cz - r }
-  // The dead respawn here, on the barrier roof: out of the fight, watching it.
+  // The dead respawn here, on the roof: out of the fight, watching it.
   const BENCH = { x: cx, y: TOP + 1, z: cz }
 
   const matchesCopy = async () =>
     /passed/.test(await ask(`execute if blocks ${x0} ${BOTTOM} ${z0} ${x1} ${TOP} ${z1} ${x0} ${COPY_Y} ${z0} all`, /Test (passed|failed)/) || '')
 
-  // Whether the copy is there at all: its barrier roof and bottom and its
+  // Whether the copy is there at all: its tinted-glass roof, barrier bottom and its
   // stone-brick floor. Without it, restoring from the copy would clone raw
   // underground (gravel and all) into the sky.
   const isBlock = async (x, y, z, block) =>
     /passed/.test(await ask(`execute if block ${x} ${y} ${z} ${block}`, /Test (passed|failed)/) || '')
   const copyExists = async () =>
-    await isBlock(x0, COPY_TOP, z0, 'barrier') && await isBlock(x0, COPY_Y, z0, 'barrier') &&
+    await isBlock(x0, COPY_TOP, z0, 'tinted_glass') && await isBlock(x0, COPY_Y, z0, 'barrier') &&
     await isBlock(cx, COPY_Y + Y - BOTTOM, cz, 'stone_bricks')
 
   // The arena as built: left alone if it matches its copy, restored from the copy
@@ -103,6 +104,9 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
 
   async function build() {
     await cmd(`fill ${x0} ${BOTTOM} ${z0} ${x1} ${TOP} ${z1} barrier hollow`)
+    // A tinted-glass roof: see-through, but it stops daylight, which barriers let in
+    // (undead burned under them). The light blocks below keep the arena lit.
+    await cmd(`fill ${x0} ${TOP} ${z0} ${x1} ${TOP} ${z1} tinted_glass`)
     await cmd(`fill ${x0} ${Y} ${z0} ${x1} ${Y} ${z1} stone_bricks`)
     // The four walls one at a time: a `hollow` box would also roof the floor over.
     await cmd(`fill ${x0} ${Y + 1} ${z0} ${x1} ${Y + 3} ${z0} stone_bricks`)
