@@ -134,14 +134,15 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
     return { x: cx + ox - Math.sign(ox) * inward + 0.5, y: Y + 1, z: cz + oz - Math.sign(oz) * inward + 0.5 }
   }
 
-  // The strategy's kit in iron armour, full health, at corner number `n`. Hunger
+  // The strategy's kit in iron armour (none if kit.armor is false), full health, at
+  // corner number `n`. Hunger
   // and saturation are left to the game, so regeneration runs at its normal pace.
   async function prepare(name, side, kit, n) {
     const s = corner(n)
     await cmd(`clear ${name}`)
     await cmd(`effect clear ${name}`)
     const trim = `[trim={material:"${COLORS[side].trim}",pattern:"sentry"}]`
-    for (const [slot, item] of ARMOR) await cmd(`item replace entity ${name} ${slot} with ${item}${trim}`)
+    if (kit.armor !== false) for (const [slot, item] of ARMOR) await cmd(`item replace entity ${name} ${slot} with ${item}${trim}`)
     for (const [slot, item] of kit.hands) await cmd(`item replace entity ${name} ${slot} with ${item}`)
     await cmd(`team join duel_${side} ${name}`)
     for (const [item, count] of kit.bag) await cmd(`give ${name} ${item} ${count}`)

@@ -4,7 +4,7 @@
 // and console replies for who dies. Each round, with what the bot did (from its own
 // log), is appended to <data dir>/duel/mob-results.jsonl.
 //
-//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield]
+//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -19,12 +19,15 @@ const TIME_MS = parseInt(args.time || '90', 10) * 1000
 const [CX, CZ] = (args.at || '40,0').split(',').map(Number)
 const arena = makeArena({ cx: CX, cz: CZ, r: parseInt(args.r || '12', 10) })
 
-// Iron armour (from prepare), a sword (and shield) in hand, a bow and food in the bag.
+// Iron armour (from prepare), a sword (and shield) in hand, a bow and food in the bag;
+// none: bare-handed, no armour, nothing in the bag.
+const GEAR_BAG = [['bow', 1], ['arrow', 32], ['cooked_beef', 8]]
 const KITS = {
-  shield: { hands: [['weapon.mainhand', 'iron_sword'], ['weapon.offhand', 'shield']] },
-  noshield: { hands: [['weapon.mainhand', 'iron_sword']] }
+  shield: { hands: [['weapon.mainhand', 'iron_sword'], ['weapon.offhand', 'shield']], bag: GEAR_BAG },
+  noshield: { hands: [['weapon.mainhand', 'iron_sword']], bag: GEAR_BAG },
+  none: { armor: false, hands: [], bag: [] }
 }
-const KIT = { ...KITS[args.kit || 'shield'], bag: [['bow', 1], ['arrow', 32], ['cooked_beef', 8]] }
+const KIT = KITS[args.kit || 'shield']
 // The mob's own gear: summoning with NBT skips its spawn equipment.
 const MOB_GEAR = { skeleton: 'equipment:{mainhand:{id:"minecraft:bow",count:1}},' }
 const TAG = 'mobduel'
