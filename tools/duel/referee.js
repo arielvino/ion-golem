@@ -119,8 +119,7 @@ async function playRound(n, fighters) {
 
 async function main() {
   fs.mkdirSync(path.dirname(RESULTS), { recursive: true })
-  console.log('Building arena…')
-  await arena.build()
+  console.log(`Arena ${await arena.ready()}`)
   const fighters = SIDES.flatMap(side => TEAM[side].map((_, i) => spawnFighter(side, i)))
 
   const results = []

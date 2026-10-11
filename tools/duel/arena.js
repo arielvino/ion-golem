@@ -6,11 +6,16 @@ const path = require('path')
 
 const CONSOLE = process.env.MC_CONSOLE ||
   path.resolve(__dirname, '../../../server/server.stdin')
+// The console's replies land in the server log.
+const LOG = process.env.MC_LOG || path.join(path.dirname(CONSOLE), 'logs', 'latest.log')
 
 // Floor at Y, play area X/Z in [-R, R], barrier shell one block outside it.
 const Y = 150
 const R = 12
 const TOP = Y + 12
+// A pristine copy of the arena, buried at the same X/Z: a run checks the arena
+// against it and repairs it from it instead of rebuilding.
+const COPY_Y = -50
 // Fighters take the corners in turn: NW, SE, NE, SW (a fifth starts 3 blocks in
 // from the first, and so on).
 const CORNERS = [[-10, -10], [10, 10], [10, -10], [-10, 10]]
@@ -29,9 +34,49 @@ async function cmd(line) {
 
 const box = `x=${-R - 1},y=${Y},z=${-R - 1},dx=${2 * R + 2},dy=${TOP - Y},dz=${2 * R + 2}`
 
-async function build() {
-  const a = -R - 1, b = R + 1
+// Sends a console command and returns its reply from the server log: the first new
+// line matching `pattern`, or null after `ms`.
+async function ask(line, pattern, ms = 3000) {
+  const from = fs.statSync(LOG).size
+  await cmd(line)
+  for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(100)) {
+    const fd = fs.openSync(LOG, 'r')
+    const buf = Buffer.alloc(fs.fstatSync(fd).size - from)
+    fs.readSync(fd, buf, 0, buf.length, from)
+    fs.closeSync(fd)
+    const m = buf.toString().match(pattern)
+    if (m) return m[0]
+  }
+  return null
+}
+
+const a = -R - 1, b = R + 1
+const matchesCopy = async () =>
+  /passed/.test(await ask(`execute if blocks ${a} ${Y} ${a} ${b} ${TOP} ${b} ${a} ${COPY_Y} ${a} all`, /Test (passed|failed)/) || '')
+
+// Whether the copy is there at all: its barrier roof and stone-brick floor. Without
+// it, restoring from the copy would clone raw underground (gravel and all) into the
+// sky.
+const copyExists = async () =>
+  /passed/.test(await ask(`execute if block ${a} ${COPY_Y + TOP - Y} ${a} barrier`, /Test (passed|failed)/) || '') &&
+  /passed/.test(await ask(`execute if block 0 ${COPY_Y} 0 stone_bricks`, /Test (passed|failed)/) || '')
+
+// The arena as built: left alone if it matches its copy, restored from the copy if
+// it doesn't, and built from scratch (and copied) only when there's no copy yet.
+async function ready() {
   await cmd(`forceload add ${a} ${a} ${b} ${b}`)
+  if (await matchesCopy()) return 'intact'
+  if (!await copyExists()) { await build(); await saveCopy(); return 'built' }
+  await cmd(`clone ${a} ${COPY_Y} ${a} ${b} ${COPY_Y + TOP - Y} ${b} ${a} ${Y} ${a}`)
+  if (await matchesCopy()) return 'repaired'
+  await build()
+  await saveCopy()
+  return 'built'
+}
+
+const saveCopy = () => cmd(`clone ${a} ${Y} ${a} ${b} ${TOP} ${b} ${a} ${COPY_Y} ${a}`)
+
+async function build() {
   await cmd(`fill ${a} ${Y} ${a} ${b} ${TOP} ${b} barrier hollow`)
   await cmd(`fill ${a} ${Y} ${a} ${b} ${Y} ${b} stone_bricks`)
   // The four walls one at a time: a `hollow` box would also roof the floor over.
@@ -90,4 +135,4 @@ async function sweep() {
   await cmd(`kill @e[type=!player,${box}]`)
 }
 
-module.exports = { build, prepare, sweep, cmd, VIEW, BENCH, Y, R }
+module.exports = { ready, build, saveCopy, prepare, sweep, cmd, VIEW, BENCH, Y, R }

@@ -1,5 +1,5 @@
 // rangedDefense.js — reflexes against archers: skeletons, strays, bogged, pillagers,
-// and players holding a bow or crossbow.
+// and players holding a bow, crossbow or trident.
 //
 // An archer's draw shows in its living_entity_flags (bit 0x01, "hand active"): on
 // for ~1s before the arrow leaves, off at release. That second is the window — far
@@ -7,19 +7,32 @@
 //   - shield in the off-hand: face the archer and raise it for the draw, lower it
 //     once the arrow has landed. In melee mineflayer-pvp owns the shield (it drops
 //     it for each swing and raises it after), so with a pvp target we only raise;
-//   - no shield: juke. Late in the draw, lean sideways; at the release, cut the
-//     other way. An archer that leads its target aims where the lean was taking us.
+//   - no shield: juke. Late in the draw, lean sideways; just before the release is
+//     due, cut the other way. An archer that leads its target aims where the lean
+//     was taking us. Up close the shot lands within a tick of the release, so
+//     waiting to see it is too late: the cut goes on the draw's clock.
 const state = require('../core/state')
 
 const ARCHERS = new Set(['skeleton', 'stray', 'bogged', 'pillager'])
-const BOWS = new Set(['bow', 'crossbow'])
+const BOWS = new Set(['bow', 'crossbow', 'trident'])
 const isArcher = (e) => ARCHERS.has(e.name) || (e.type === 'player' && BOWS.has(e.heldItem?.name))
 const THREAT_RANGE = 24
 const SHIELD_HOLD_MS = 400   // keep the shield up this long after the draw ends (arrow flight)
-// A full bow draw is ~1s. Lean from LEAN_AFTER_MS into it, so we're moving sideways
-// when the archer takes its aim; at the release cut the other way for CUT_MS (the
-// arrow's flight and then some).
-const LEAN_AFTER_MS = 500
+// Per weapon, ms after we see the draw start: lean from `lean`, so we're moving
+// sideways when the archer takes its aim; cut the other way at `cut`, just before
+// the release is due, or at the release if we see it first. A full bow draw is 20
+// ticks; a trident throws after 10. A crossbow's draw is its loading, and the shot
+// comes whenever its holder likes after that: no clock, cut at the release.
+// The cut lasts CUT_MS (the flight and then some). A draw held past the cut gets
+// another lean of at least LEAN_HOLD_MS, then another cut.
+const JUKE = {
+  bow: { lean: 500, cut: 850 },
+  trident: { lean: 100, cut: 400 },
+  crossbow: { lean: 500, cut: null }
+}
+const MOB_WEAPON = { skeleton: 'bow', stray: 'bow', bogged: 'bow', pillager: 'crossbow' }
+const jukeTiming = (e) => JUKE[e.type === 'player' ? e.heldItem?.name : MOB_WEAPON[e.name]] || JUKE.bow
+const LEAN_HOLD_MS = 250
 const CUT_MS = 600
 const SUMMARY_AFTER_MS = 3000  // journal an archer's tally once it hasn't drawn for this long
 
@@ -60,7 +73,7 @@ function setupRangedDefense() {
   let raised = false, lastThreatAt = 0
   const drawSeen = new Map()   // archer id → ms its current draw started
   // The juke: which way we lean ('left'/'right'), then cut. cutUntil = 0: not cutting.
-  let lean = null, cut = null, cutUntil = 0, side = 'left'
+  let lean = null, leanSince = 0, cut = null, cutUntil = 0, side = 'left'
   // Per archer: how often we answered its draws. One journal record per encounter,
   // not one per arrow.
   const tally = new Map()   // id → { tag, shield, dodge, last }
@@ -120,15 +133,21 @@ function setupRangedDefense() {
       return
     }
 
-    // No shield: the juke. Lean late in the draw, cut the other way at the release.
+    // No shield: the juke. Lean late in the draw, cut the other way when the
+    // release is due or seen.
     const opposite = (d) => d === 'left' ? 'right' : 'left'
     if (cut && now >= cutUntil) { bot.setControlState(cut, false); cut = null }
-    if (threat && !lean && !cut && now - drawSeen.get(threat.id) >= LEAN_AFTER_MS) {
+    const timing = threat && jukeTiming(threat)
+    const drawn = threat ? now - drawSeen.get(threat.id) : 0
+    if (threat && !lean && !cut && drawn >= timing.lean) {
       if (bot.pvp?.target !== threat) face(threat)
       side = opposite(side)   // alternate, so the lean isn't predictable either
       lean = side
+      leanSince = now
       bot.setControlState(lean, true)
     }
+    const due = threat && lean && timing.cut !== null && drawn >= timing.cut && now - leanSince >= LEAN_HOLD_MS
+    if (!released && due) released = threat
     if (released && !cut) {
       // No lean (a short draw): any way across the line beats standing still.
       const dir = lean ? opposite(lean) : (side = opposite(side))
@@ -138,7 +157,7 @@ function setupRangedDefense() {
       bot.setControlState(cut, true)
       cutUntil = now + CUT_MS
       count(released, 'dodge')
-      console.log(`  [DODGE] juke ${cut} vs ${released.username || released.name} at ${released.position.distanceTo(bot.entity.position).toFixed(1)}m`)
+      console.log(`  [DODGE] juke ${cut}${due ? ' (due)' : ''} vs ${released.username || released.name} at ${released.position.distanceTo(bot.entity.position).toFixed(1)}m`)
     }
     // The archer stopped without a release we saw (out of sight, gone): stop leaning.
     if (lean && !threat && !released) { bot.setControlState(lean, false); lean = null }
