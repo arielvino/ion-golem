@@ -33,6 +33,9 @@ const MOB_GEAR = {
   skeleton: 'equipment:{mainhand:{id:"minecraft:bow",count:1}},',
   wither_skeleton: 'equipment:{mainhand:{id:"minecraft:stone_sword",count:1}},'
 }
+// After a win, wait at most this long for the mob's lingering effects to wear off.
+const SETTLE_MS = 20000
+const LINGERING_RE = /minecraft:(wither|poison)"/
 const TAG = `mobduel_${BOT}`   // per bot: referees can run side by side
 
 const DATA = process.env.IONGOLEM_DATA_DIR ||
@@ -92,16 +95,32 @@ async function playRound(n) {
     await sleep(300)
   }
   const t1 = Date.now()
+  const botHp = winner === MOB ? 0 : await health(BOT)
+  // A win isn't over while the mob's poison works on: wait, unhealed, for Wither or
+  // Poison to wear off (or kill the bot), and record what it cost.
+  let settled = botHp, diedAfter = false, effectSeconds = 0
+  if (winner === BOT) {
+    const s0 = Date.now()
+    while (Date.now() - s0 < SETTLE_MS) {
+      if (DEATH_RE.test(logSince(from))) { diedAfter = true; settled = 0; break }
+      if (!LINGERING_RE.test(await ask(`data get entity ${BOT} active_effects`, new RegExp(`${BOT} has the following entity data: .*|Found no elements.*`)) || '')) break
+      await sleep(500)
+    }
+    effectSeconds = +((Date.now() - s0) / 1000).toFixed(1)
+    if (!diedAfter) settled = await health(BOT)
+  }
   const result = {
     t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', arena: `${CX},${CZ}`, winner,
     seconds: +((t1 - t0) / 1000).toFixed(1),
-    botHp: winner === MOB ? 0 : await health(BOT),
+    botHp, settledHp: settled, diedAfter, effectSeconds,
     mobHp: winner === BOT ? 0 : await health(`@e[type=${MOB},tag=${TAG},${arena.box},limit=1]`),
     ...botActions(t0, t1)
   }
   console.log(`Round ${n}: ${winner === 'draw' ? 'DRAW (time)' : `${winner} WINS`} in ${result.seconds}s — ` +
-    `hp ${BOT} ${result.botHp} / ${MOB} ${result.mobHp}; actions ${result.actions.join(', ') || 'none'}; ` +
+    `hp ${BOT} ${result.botHp}${winner === BOT ? ` → ${diedAfter ? 'DIED' : settled} after ${effectSeconds}s of effects` : ''} / ${MOB} ${result.mobHp}; ` +
+    `actions ${result.actions.join(', ') || 'none'}; ` +
     `shield ${result.shield}, juke ${result.juke}, sidestep ${result.projSidestep}, hit ${result.hitsTaken}x`)
+  if (diedAfter) await sleep(3000)
   fs.appendFileSync(RESULTS, JSON.stringify(result) + '\n')
   if (winner === MOB) await sleep(3000)   // respawn on the roof before the next round's teleport
   return result
@@ -120,7 +139,8 @@ async function main() {
 
   const wins = (w) => results.filter(r => r.winner === w).length
   const avg = (k) => (results.reduce((a, r) => a + (r[k] || 0), 0) / results.length).toFixed(1)
-  console.log(`\n== ${BOT} ${wins(BOT)} : ${wins(MOB)} ${MOB} (${wins('draw')} draws) ==`)
+  console.log(`\n== ${BOT} ${wins(BOT)} : ${wins(MOB)} ${MOB} (${wins('draw')} draws) ==` +
+    (results.some(r => r.effectSeconds) ? `; ${results.filter(r => r.diedAfter).length} wins died afterwards to lingering effects, avg hp ${avg('botHp')} at the kill → ${avg('settledHp')} settled` : ''))
   console.log(`avg round ${avg('seconds')}s, avg ${BOT} hp left ${avg('botHp')}, shield ${avg('shield')}, juke ${avg('juke')}, sidestep ${avg('projSidestep')}, hits taken ${avg('hitsTaken')} per round`)
   console.log(`results appended to ${RESULTS}`)
 
