@@ -46,6 +46,18 @@ bot.on('entityHurt', (e) => {
   else if (round.opponents.includes(e.username)) round.hitsDealt++
 })
 
+// A critical hit on an opponent shows as its crit particles.
+bot.on('entityCriticalEffect', (e) => {
+  if (round && e && round.opponents.includes(e.username)) console.log(`  [CRIT] ${username} → ${e.username}`)
+})
+
+// DUEL_PROBE: each loss of health, to tell plain hits from crits by their damage.
+let lastHp = null
+bot.on('health', () => {
+  if (PROBE && round && lastHp !== null && bot.health < lastHp) console.log(`  [HP] ${username} -${(lastHp - bot.health).toFixed(2)} → ${bot.health.toFixed(2)}`)
+  lastHp = bot.health
+})
+
 bot.on('death', () => {
   if (round) send({ type: 'died', hp: 0, ...stats() })
   halt()
