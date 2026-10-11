@@ -161,9 +161,10 @@ function getBotContext() {
   if (bot.vehicle) {
     // passengers is server seat-order; seat 0 is the controlling seat for
     // steerable mounts (camel, boat), so sail/steer only works as the driver.
+    // Stated even alone: a lone rider is the driver, and nothing moves unless it steers.
     const passengers = bot.vehicle.passengers || []
     const seat = passengers.findIndex(e => e && e.id === bot.entity.id)
-    const seatStr = passengers.length > 1
+    const seatStr = seat >= 0
       ? ` SEAT=${seat === 0 ? 'driver' : 'passenger'}(${seat + 1}/${passengers.length})`
       : ''
     vehicleStr = ` RIDING=${bot.vehicle.name || 'vehicle'}${seatStr}`
