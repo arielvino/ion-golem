@@ -65,7 +65,8 @@ function botActions(t0, t1) {
   const count = (re) => lines.filter(l => re.test(l)).length
   return {
     actions: lines.map(l => (l.match(/\[BG\] launching: (\S+)/) || [])[1]).filter(Boolean),
-    shield: count(/\[SHIELD\] up/), juke: count(/\[DODGE\]/), projSidestep: count(/\[PROJ\] .*→ sidestep/)
+    shield: count(/\[SHIELD\] up/), juke: count(/\[DODGE\]/), projSidestep: count(/\[PROJ\] .*→ sidestep/),
+    hitsTaken: count(/\[AUTO\] hit by/)
   }
 }
 
@@ -95,7 +96,7 @@ async function playRound(n) {
   }
   console.log(`Round ${n}: ${winner === 'draw' ? 'DRAW (time)' : `${winner} WINS`} in ${result.seconds}s — ` +
     `hp ${BOT} ${result.botHp} / ${MOB} ${result.mobHp}; actions ${result.actions.join(', ') || 'none'}; ` +
-    `shield ${result.shield}, juke ${result.juke}, sidestep ${result.projSidestep}`)
+    `shield ${result.shield}, juke ${result.juke}, sidestep ${result.projSidestep}, hit ${result.hitsTaken}x`)
   fs.appendFileSync(RESULTS, JSON.stringify(result) + '\n')
   if (winner === MOB) await sleep(3000)   // respawn on the roof before the next round's teleport
   return result
@@ -115,7 +116,7 @@ async function main() {
   const wins = (w) => results.filter(r => r.winner === w).length
   const avg = (k) => (results.reduce((a, r) => a + (r[k] || 0), 0) / results.length).toFixed(1)
   console.log(`\n== ${BOT} ${wins(BOT)} : ${wins(MOB)} ${MOB} (${wins('draw')} draws) ==`)
-  console.log(`avg round ${avg('seconds')}s, avg ${BOT} hp left ${avg('botHp')}, shield ${avg('shield')}, juke ${avg('juke')}, sidestep ${avg('projSidestep')} per round`)
+  console.log(`avg round ${avg('seconds')}s, avg ${BOT} hp left ${avg('botHp')}, shield ${avg('shield')}, juke ${avg('juke')}, sidestep ${avg('projSidestep')}, hits taken ${avg('hitsTaken')} per round`)
   console.log(`results appended to ${RESULTS}`)
 
   await arena.sweep()
