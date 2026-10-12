@@ -96,8 +96,9 @@ What the bot knows about a world is kept **per world** under its dir, so one bot
 several worlds without mixing them up:
 
 ```
-iongolem/<username>/                  pid, logs/, chat-logs/, behaviour modes (*-mode.json)
-iongolem/<username>/worlds/<world>/   blocks.db, journal.json, agenda.json, eye-throws.json, world.json
+iongolem/<username>/                  pid, logs/, chat-logs/
+iongolem/<username>/worlds/<world>/   blocks.db, journal.json, agenda.json, eye-throws.json,
+                                      behaviour modes (*-mode.json), world.json
 ```
 
 `<world>` is the server address plus the hashed world seed the server sends on login, e.g.

@@ -1,7 +1,8 @@
 // dataDir.js — where runtime state lives: a dir per bot, and in it a dir per world.
 //
-//   <base>/<BotName>/                    per bot: bot.pid, logs/, bot.log, chat-logs/, *-mode.json
-//   <base>/<BotName>/worlds/<worldKey>/  per world: blocks.db, journal.json, agenda.json, eye-throws.json
+//   <base>/<BotName>/                    per bot: bot.pid, logs/, bot.log, chat-logs/
+//   <base>/<BotName>/worlds/<worldKey>/  per world: blocks.db, journal.json, agenda.json, eye-throws.json,
+//                                        defend/lead/float/break-mode.json, world.json
 //
 // The bot dir is known at startup. The world dir only once the server's login packet
 // says which world this is, so world memory opens there (bot.js), never before.
@@ -32,7 +33,8 @@ function resolveDataBase() {
 
 // What a bot knew about its one world before per-world dirs, kept in the bot dir itself.
 // No longer read: a bot starts each world fresh, and these are left where they are.
-const OLD_WORLD_FILES = ['blocks.db', 'journal.json', 'agenda.json', 'eye-throws.json', 'block-memory.json', 'placed-blocks.json']
+const OLD_WORLD_FILES = ['blocks.db', 'journal.json', 'agenda.json', 'eye-throws.json', 'block-memory.json', 'placed-blocks.json',
+  'defend-mode.json', 'lead-mode.json', 'float-mode.json', 'break-mode.json']
 
 // The hashed seed from a login/respawn packet (protodef's i64: [hi, lo] or a BigInt) as
 // 16 hex digits, or null when the server sent none.

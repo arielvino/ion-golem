@@ -186,6 +186,9 @@ function enterWorld(bot, info) {
   }
   state.worldKey = key
   state.WORLD_DATA_DIR = dir
+  // The modes load lazily from the world dir; forget any read before it (or from the last world).
+  state.defendMode = state.leadMode = state.floatMode = undefined
+  state.breakMode = null
   console.log(`  [DATA] world dir: ${dir}`)
   initDB()
   if (switching) {

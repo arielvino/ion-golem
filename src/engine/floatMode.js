@@ -3,12 +3,12 @@
 // On by default: the autonomous layer holds jump whenever the bot's eyes are under
 // water and the pathfinder isn't steering. A player can switch it off (`!float off`)
 // to let the bot stay under water on purpose; the drowning swimup still applies.
-// Persisted per bot like the defend mode.
+// Persisted per world like the defend mode.
 const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
 
-function modeFile() { return state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'float-mode.json') : null }
+function modeFile() { return state.WORLD_DATA_DIR ? path.join(state.WORLD_DATA_DIR, 'float-mode.json') : null }
 
 function isOn() {
   if (state.floatMode === undefined) {
