@@ -75,7 +75,7 @@ function botActions(t0, t1) {
   const count = (re) => lines.filter(l => re.test(l)).length
   return {
     actions: lines.map(l => (l.match(/\[BG\] launching: (\S+)/) || [])[1]).filter(Boolean),
-    shield: count(/\[SHIELD\] up/), juke: count(/\[DODGE\]/), projSidestep: count(/\[PROJ\] .*→ sidestep/),
+    shield: count(/\[SHIELD\] up|\[PROJ\] .*→ shield/), juke: count(/\[DODGE\]/), projSidestep: count(/\[PROJ\] .*→ sidestep/),
     hitsTaken: count(/\[AUTO\] hit by/)
   }
 }

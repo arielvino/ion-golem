@@ -78,7 +78,7 @@ function botActions(t0, t1) {
   }
   const hitBy = {}
   for (const l of lines) { const m = l.match(/\[AUTO\] hit by ([a-z_]+)/); if (m) hitBy[m[1]] = (hitBy[m[1]] || 0) + 1 }
-  return { actions, hitBy, kills: count(/ killed!/), shield: count(/\[SHIELD\] up/), juke: count(/\[DODGE\]/), sidestep: count(/\[PROJ\] .*→ sidestep/) }
+  return { actions, hitBy, kills: count(/ killed!/), shield: count(/\[SHIELD\] up|\[PROJ\] .*→ shield/), juke: count(/\[DODGE\]/), sidestep: count(/\[PROJ\] .*→ sidestep/) }
 }
 
 async function playRound(n) {
