@@ -161,32 +161,22 @@ async function doCome(requested, opts = {}) {
   return ok
 }
 
+// The model's [ACTION:flee] is the retreat reflex's run, requested (see retreat.js):
+// one escape behaviour, which steers away from the hostiles as they move and turns
+// on whatever catches up. Joins the reflex's run if one is already going.
 async function doFlee() {
   stopAll()
-  const bot = state.bot
   state.currentTask = 'fleeing'
-  const pos = bot.entity.position
-  // Away from every hostile around at once, toward open floor.
-  const hostiles = Object.values(bot.entities).filter(e =>
-    e.type === 'hostile' && e.position.distanceTo(pos) < 16)
-  const { escapeDir } = require('../engine/retreat')
-  const dir = escapeDir(bot, hostiles)
-  let fleeDir
-  if (dir) {
-    fleeDir = new Vec3(dir.dx, 0, dir.dz)
-    console.log(`  fleeing from ${hostiles.length} hostile(s) toward ${dir.clear}+ blocks of open floor`)
-  } else {
-    const yaw = bot.entity.yaw
-    fleeDir = new Vec3(-Math.sin(yaw), 0, -Math.cos(yaw))
-    console.log('  fleeing (no open direction known, running forward)')
+  const retreat = require('../engine/retreat')
+  try {
+    const why = await raceAbort(retreat.flee(), 20000)
+    console.log(`  flee: over (${why})`)
+  } catch (e) {
+    retreat.stopFlee()
+    throw e
+  } finally {
+    state.currentTask = null
   }
-  const dest = pos.plus(fleeDir.scaled(30))
-  bot.setControlState('sprint', true)
-  const ok = await navigateTo(dest.x, pos.y, dest.z, 3, 15000, { noReachCheck: true })
-  bot.setControlState('sprint', false)
-  if (ok) console.log('  fled safely')
-  else console.log('  flee: partial escape')
-  state.currentTask = null
 }
 
 async function doMount(targetName) {

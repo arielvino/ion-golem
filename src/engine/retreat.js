@@ -7,6 +7,11 @@
 // run continues. Once at most one is left close, stop: the fight reflexes take them
 // one at a time. While this runs, the fight and eat reflexes stand down.
 //
+// The [ACTION:flee] the model asks for is this same run, requested: flee() starts
+// one (or takes over the one already going) that runs from every hostile within
+// FLEE_RANGE, not only the melee crowd, and keeps going until none is left that
+// close (at most FLEE_MAX_MS). Boxed in, it runs straight ahead rather than stop.
+//
 // Floor and walls come from the block DB (dbBlock), never bot.blockAt (x-ray).
 const state = require('../core/state')
 const { PASSABLE, HAZARDS } = require('../config/blocks')
@@ -22,6 +27,8 @@ const LOOKAHEAD = 6          // blocks scanned along each candidate direction
 const SWING_RANGE = 3
 const SWING_MS = 650         // sword attack cooldown
 const DIRS = 16
+const FLEE_RANGE = 16        // a requested flee runs from every hostile this close
+const FLEE_MAX_MS = 15000
 
 function meleeHostiles(bot, range) {
   const { ARCHERS } = require('./rangedDefense')
@@ -77,6 +84,30 @@ function escapeDir(bot, hostiles) {
   return best
 }
 
+// Every hostile mob within range, archers too: what a requested flee runs from.
+function allHostiles(bot, range) {
+  const pos = bot.entity.position
+  return Object.values(bot.entities).filter(e =>
+    e.type === 'hostile' && e !== bot.entity && e.position.distanceTo(pos) < range)
+}
+
+// Straight ahead, as an escape direction.
+function ahead(bot) {
+  const yaw = bot.entity.yaw
+  return { dx: -Math.sin(yaw), dz: -Math.cos(yaw), clear: 0 }
+}
+
+let requestFlee = null, cancelFlee = null
+
+// Run from danger now, as the model's [ACTION:flee]: resolves when the run is over.
+function flee() {
+  if (!requestFlee) return Promise.resolve('no retreat reflex')
+  return requestFlee()
+}
+
+// Stop a requested run early (the flee action was aborted).
+function stopFlee() { if (cancelFlee) cancelFlee() }
+
 const tally = (hs) => {
   const c = {}
   for (const h of hs) c[h.name] = (c[h.name] || 0) + 1
@@ -94,14 +125,46 @@ function setupRetreat(interruptFn) {
   const end = (why) => {
     const moved = bot.entity.position.distanceTo(run.from)
     const secs = ((Date.now() - run.at) / 1000).toFixed(1)
-    logEvent(`reflex: retreat over (${why}) after ${Math.round(moved)}m in ${secs}s, struck ${run.swings}x`)
+    logEvent(`reflex: ${run.requested ? 'flee' : 'retreat'} over (${why}) after ${Math.round(moved)}m in ${secs}s, struck ${run.swings}x`)
     console.log(`  [RETREAT] over: ${why}, ${Math.round(moved)}m, ${secs}s, ${run.swings} swings`)
     release()
     state.retreating = false
+    const done = run.done
     run = null
+    for (const d of done) d(why)
   }
 
-  bot.on('death', () => { if (run) { run = null; state.retreating = false } })
+  const begin = (hs, dir, requested) => {
+    // Drops a running attack, keeps the model's turn. Not for a requested run: the
+    // flee action asking for it is the running action.
+    if (!requested) interruptFn({ keepResponse: true })
+    try { bot.pvp.stop() } catch (e) {}
+    state.retreating = true
+    run = { at: Date.now(), from: bot.entity.position.clone(), dir, swings: 0, lastSwing: 0, requested, done: [] }
+  }
+
+  requestFlee = () => new Promise(resolve => {
+    if (!bot.entity || bot.health <= 0) return resolve('dead')
+    if (run) {
+      if (!run.requested) console.log('  [RETREAT] flee requested: keeps running past the crowd')
+      run.requested = true
+      run.at = Date.now()   // the flee's own clock
+    } else {
+      const hs = allHostiles(bot, FLEE_RANGE)
+      begin(hs, (hs.length && escapeDir(bot, hs)) || escapeDir(bot, []) || ahead(bot), true)
+      logEvent(`reflex: flee from ${hs.length ? `${hs.length} (${tally(hs)})` : 'nothing in sight'}`)
+      console.log(`  [RETREAT] flee requested: ${hs.length ? `${hs.length} hostiles (${tally(hs)})` : 'no hostile in sight'}, HP=${Math.round(bot.health)}`)
+    }
+    run.done.push(resolve)
+  })
+  cancelFlee = () => { if (run && run.requested) end('flee stopped') }
+
+  bot.on('death', () => {
+    if (!run) return
+    const done = run.done
+    run = null; state.retreating = false
+    for (const d of done) d('died')
+  })
 
   bot.on('physicsTick', () => {
     if (!bot.entity || bot.health <= 0) return
@@ -109,30 +172,34 @@ function setupRetreat(interruptFn) {
     ticks++
 
     if (!run) {
-      if (ticks % 5 || now < corneredUntil || state.currentTask === 'fleeing') return
+      if (ticks % 5 || now < corneredUntil) return
       const hs = meleeHostiles(bot, SWARM_RANGE)
       const need = bot.health <= LOW_HP ? SWARM_COUNT - 1 : SWARM_COUNT
       if (hs.length < need) return
       const dir = escapeDir(bot, hs)
       if (!dir) { corneredUntil = now + CORNERED_PAUSE_MS; return }
-      interruptFn({ keepResponse: true })  // drops a running attack, keeps the model's turn
-      try { bot.pvp.stop() } catch (e) {}
-      state.retreating = true
-      run = { at: now, from: bot.entity.position.clone(), dir, swings: 0, lastSwing: 0 }
+      begin(hs, dir, false)
       logEvent(`reflex: swarmed by ${hs.length} (${tally(hs)}) at ${Math.round(bot.health)} HP → retreat`)
       console.log(`  [RETREAT] ${hs.length} hostiles (${tally(hs)}), HP=${Math.round(bot.health)}`)
       sendChat(`Too many of them (${tally(hs)}), falling back!`)
     }
 
-    if (state.currentTask === 'fleeing') return end('flee action took over')
     const hs = meleeHostiles(bot, SWARM_RANGE)
     const age = now - run.at
-    if (age > MIN_RETREAT_MS && hs.length <= END_COUNT) return end(hs.length ? 'one left' : 'clear')
-    if (age > MAX_RETREAT_MS) return end('ran too long')
-    if (ticks % 4 === 0) {
-      const dir = escapeDir(bot, hs)
-      if (!dir) { corneredUntil = now + CORNERED_PAUSE_MS; return end('cornered') }
-      run.dir = dir
+    if (run.requested) {
+      // A requested flee: until nothing hostile is within FLEE_RANGE.
+      const threats = allHostiles(bot, FLEE_RANGE)
+      if (age > MIN_RETREAT_MS && threats.length === 0) return end('clear')
+      if (age > FLEE_MAX_MS) return end('ran long enough')
+      if (ticks % 4 === 0) run.dir = (threats.length && escapeDir(bot, threats)) || run.dir
+    } else {
+      if (age > MIN_RETREAT_MS && hs.length <= END_COUNT) return end(hs.length ? 'one left' : 'clear')
+      if (age > MAX_RETREAT_MS) return end('ran too long')
+      if (ticks % 4 === 0) {
+        const dir = escapeDir(bot, hs)
+        if (!dir) { corneredUntil = now + CORNERED_PAUSE_MS; return end('cornered') }
+        run.dir = dir
+      }
     }
 
     if (state.creeperReflex) return         // creeper reflex is steering
@@ -154,4 +221,4 @@ function setupRetreat(interruptFn) {
   })
 }
 
-module.exports = { setupRetreat, escapeDir, meleeHostiles }
+module.exports = { setupRetreat, escapeDir, meleeHostiles, flee, stopFlee }
