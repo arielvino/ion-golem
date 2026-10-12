@@ -98,6 +98,8 @@ const COLORS = {
 
 // A command may touch at most this many blocks (fill, clone, execute if blocks).
 const MAX_BLOCKS = 32768
+// The smallest arena with cover walls.
+const MIN_COVER_R = 8
 
 // dark: no lights, and tinted-glass sides as well as roof, so no daylight gets in
 // either: the floor is at light 0 and monsters spawn on it.
@@ -179,11 +181,14 @@ function makeArena({ cx = 0, cz = 0, r = R, dark = false } = {}) {
       await cmd(`setblock ${cx + x} ${Y} ${cz + z} glowstone`)
       await cmd(`setblock ${cx + x} ${TOP - 1} ${cz + z} light[level=15]`)
     }
-    // Cover: four 3-wide, 3-high walls in a broken ring around the centre.
-    await cmd(`fill ${cx - c} ${Y + 1} ${cz - 1} ${cx - c} ${Y + 3} ${cz + 1} cobblestone`)
-    await cmd(`fill ${cx + c} ${Y + 1} ${cz - 1} ${cx + c} ${Y + 3} ${cz + 1} cobblestone`)
-    await cmd(`fill ${cx - 1} ${Y + 1} ${cz - c} ${cx + 1} ${Y + 3} ${cz - c} cobblestone`)
-    await cmd(`fill ${cx - 1} ${Y + 1} ${cz + c} ${cx + 1} ${Y + 3} ${cz + c} cobblestone`)
+    // Cover: four 3-wide, 3-high walls in a broken ring around the centre. A small
+    // room (a spawner room's size) has none: they'd fill it.
+    if (r >= MIN_COVER_R) {
+      await cmd(`fill ${cx - c} ${Y + 1} ${cz - 1} ${cx - c} ${Y + 3} ${cz + 1} cobblestone`)
+      await cmd(`fill ${cx + c} ${Y + 1} ${cz - 1} ${cx + c} ${Y + 3} ${cz + 1} cobblestone`)
+      await cmd(`fill ${cx - 1} ${Y + 1} ${cz - c} ${cx + 1} ${Y + 3} ${cz - c} cobblestone`)
+      await cmd(`fill ${cx - 1} ${Y + 1} ${cz + c} ${cx + 1} ${Y + 3} ${cz + c} cobblestone`)
+    }
     await cmd(`kill @e[type=!player,${box}]`)
     for (const [side, c] of Object.entries(COLORS)) {
       await cmd(`team add duel_${side}`)

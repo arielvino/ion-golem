@@ -9,7 +9,7 @@
 // model turn for every death and chat line on the server. Use an AI bot only when
 // its choices are what's being measured, and ask the user first.
 //
-//   node tools/duel/mob-referee.js [--bot BotTest] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none] [--feed no]
+//   node tools/duel/mob-referee.js [--bot BotTest] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none] [--feed no] [--fireres yes]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -25,6 +25,9 @@ const [CX, CZ] = (args.at || '40,0').split(',').map(Number)
 // --feed no: no saturation top-up each round, so regeneration runs at what the bot's
 // own food allows (a fed bot out-heals Wither I).
 const FEED = args.feed !== 'no'
+// --fireres yes: Fire Resistance for the whole round (a blaze's fireballs still hit,
+// but don't burn).
+const FIRE_RES = args.fireres === 'yes'
 const arena = makeArena({ cx: CX, cz: CZ, r: parseInt(args.r || '12', 10) })
 
 // Iron armour (from prepare), a sword (and shield) in hand, a bow and food in the bag;
@@ -81,6 +84,7 @@ async function playRound(n) {
   await arena.sweep()
   await arena.prepare(BOT, 'blue', KIT, 0)
   if (FEED) await cmd(`effect give ${BOT} saturation 1 10 true`)
+  if (FIRE_RES) await cmd(`effect give ${BOT} fire_resistance infinite 0 true`)
   const m = arena.corner(1)
   await cmd(`summon ${MOB} ${m.x} ${m.y} ${m.z} {${MOB_GEAR[MOB] || ''}Tags:["${TAG}"],PersistenceRequired:1b}`)
   await sleep(500)
@@ -114,7 +118,7 @@ async function playRound(n) {
     if (!diedAfter) settled = await health(BOT)
   }
   const result = {
-    t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', fed: FEED, arena: `${CX},${CZ}`, winner,
+    t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', fed: FEED, fireRes: FIRE_RES, arena: `${CX},${CZ}`, winner,
     seconds: +((t1 - t0) / 1000).toFixed(1),
     botHp, settledHp: settled, diedAfter, effectSeconds, effectDamage: +effectDamage.toFixed(1),
     mobHp: winner === BOT ? 0 : await health(`@e[type=${MOB},tag=${TAG},${arena.box},limit=1]`),
