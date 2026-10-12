@@ -9,7 +9,7 @@ const state = require('../src/core/state')
 const memory = require('../src/world/memory')
 const { dbProps, dbBlock } = require('../src/navigation/atomicSteps')
 
-state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'blockstate-'))
+state.WORLD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'blockstate-'))
 memory.initDB()
 const registry = require('prismarine-registry')('26.1')
 const Block = require('prismarine-block')(registry)

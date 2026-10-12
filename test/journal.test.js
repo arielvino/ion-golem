@@ -141,8 +141,8 @@ test('loading drops note references that no longer resolve', () => {
 test('a leading @node in a note is the attachment, not text', () => {
   const state = require('../src/core/state')
   const { applyNoteTags } = require('../src/world/journalStore')
-  const saved = { journal: state.journal, agenda: state.agenda, dir: state.BOT_DATA_DIR }
-  state.BOT_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jnode-'))
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.WORLD_DATA_DIR }
+  state.WORLD_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jnode-'))
   state.journal = new Journal()
   state.journal.record('x')
   const nodes = new Map([['g1', {}], ['s3', {}]])
@@ -155,7 +155,7 @@ test('a leading @node in a note is the attachment, not text', () => {
   assert.deepStrictEqual([c.node, c.text], ['s3', 'plain'])
   assert.deepStrictEqual([d.node, d.text], ['s3', 'unknown node'])
   assert.match(state.journal.renderNotes(), /^n1 @g1 \(0s ago\) third attempt \[r1\]$/m)
-  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, BOT_DATA_DIR: saved.dir })
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
 })
 
 test('ago reads like a person says it', () => {
@@ -168,8 +168,8 @@ test('a note written as its goal closes keeps pointing at it, and shows how it e
   const { applyNoteTags, currentNode, renderNotesBlock } = require('../src/world/journalStore')
   const { Agenda } = require('../src/engine/agenda')
   const planOps = require('../src/engine/planOps')
-  const saved = { journal: state.journal, agenda: state.agenda, dir: state.BOT_DATA_DIR }
-  state.BOT_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jclosed-'))
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.WORLD_DATA_DIR }
+  state.WORLD_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jclosed-'))
   state.journal = new Journal()
   state.journal.record('come: reached Sargon564')
   state.agenda = new Agenda()
@@ -183,5 +183,5 @@ test('a note written as its goal closes keeps pointing at it, and shows how it e
   assert.match(renderNotesBlock(), new RegExp(`^n2 @${g.id}\\(done 0s ago\\) \\(0s ago\\) reached Sargon564`, 'm'))
   // Survives a save/load of the agenda.
   assert.deepStrictEqual(Agenda.fromJSON(JSON.parse(JSON.stringify(state.agenda))).nodeState(g.id).status, 'done')
-  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, BOT_DATA_DIR: saved.dir })
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
 })

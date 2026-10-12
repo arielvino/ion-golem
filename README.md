@@ -91,6 +91,26 @@ So it survives re-cloning or upgrading, and works from a read-only/global instal
 resolved path is printed at startup (`[DATA] runtime dir: …`). To keep state next to the
 code instead (convenient for hacking or a quick reset), set `IONGOLEM_DATA_DIR=./runtime`.
 
+What the bot knows about a world is kept **per world** under its dir, so one bot can play
+several worlds without mixing them up:
+
+```
+iongolem/<username>/                  pid, logs/, chat-logs/
+iongolem/<username>/worlds/<world>/   blocks.db, journal.json, agenda.json, eye-throws.json,
+                                      behaviour modes (*-mode.json), world.json
+```
+
+`<world>` is the server host plus the hashed world seed the server sends on login, e.g.
+`localhost_1a2b3c4d5e6f7a8b` — so another world on the same host gets a fresh memory. The port
+is left out, so an open-to-LAN world keeps its memory although its port changes; a world
+regenerated with the same seed keeps its key too, so delete its dir to start over. It is
+opened on login and printed (`[DATA] world dir: …`); `world.json` records which server
+(host, port) and seed it is.
+
+Data from before per-world dirs (`blocks.db` etc. directly in `iongolem/<username>/`) is no
+longer used: each world starts with a fresh memory. The old files are left untouched (the
+bot notes them at startup); delete them, or move them into a `worlds/<world>/` dir by hand.
+
 ## Project layout
 
 ```

@@ -13,7 +13,9 @@ function gameDay() { return state.bot?.time?.day || 0 }
 function currentDim() { return (state.bot?.game?.dimension || 'overworld').replace(/^minecraft:/, '') }
 
 function initDB() {
-  const DB_PATH = path.join(state.BOT_DATA_DIR, 'blocks.db')
+  // World memory belongs to one world, so it waits until bot.js knows which (on login).
+  if (!state.WORLD_DATA_DIR) throw new Error('initDB before the world is known (WORLD_DATA_DIR unset)')
+  const DB_PATH = path.join(state.WORLD_DATA_DIR, 'blocks.db')
   const db = new Database(DB_PATH)
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = NORMAL')
@@ -238,8 +240,8 @@ function initDB() {
 
   // One-time migration from JSON files to SQLite
   try {
-    const MEMORY_FILE = path.join(state.BOT_DATA_DIR, 'block-memory.json')
-    const PLACED_FILE = path.join(state.BOT_DATA_DIR, 'placed-blocks.json')
+    const MEMORY_FILE = path.join(state.WORLD_DATA_DIR, 'block-memory.json')
+    const PLACED_FILE = path.join(state.WORLD_DATA_DIR, 'placed-blocks.json')
     if (fs.existsSync(MEMORY_FILE)) {
       const blockMemory = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'))
       const allBlocks = []

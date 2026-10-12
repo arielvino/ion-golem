@@ -12,7 +12,7 @@ const { logTaskAction } = require('../world/memory')
 const { Agenda } = require('./agenda')
 const planOps = require('./planOps')
 
-const AGENDA_FILE = () => path.join(state.BOT_DATA_DIR, 'agenda.json')
+const AGENDA_FILE = () => path.join(state.WORLD_DATA_DIR, 'agenda.json')
 
 function syncStack() { state.taskStack = state.agenda.stackView() }
 

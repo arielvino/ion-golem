@@ -9,7 +9,7 @@ const path = require('path')
 const state = require('../core/state')
 const { Journal, ago } = require('./journal')
 
-const JOURNAL_FILE = () => path.join(state.BOT_DATA_DIR, 'journal.json')
+const JOURNAL_FILE = () => path.join(state.WORLD_DATA_DIR, 'journal.json')
 
 function loadJournal() {
   state.journal = new Journal()

@@ -10,7 +10,7 @@ const state = require('../src/core/state')
 const memory = require('../src/world/memory')
 const { around } = require('../src/ai/ctxProviders')
 
-state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'around-'))
+state.WORLD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'around-'))
 memory.initDB()
 const put = (x, y, z, name) => state.stmts.upsertBlock.run(x, y, z, name, 0, null)
 for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) {

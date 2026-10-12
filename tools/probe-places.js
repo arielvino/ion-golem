@@ -34,7 +34,7 @@ const SURFACE = [
 // Scratch runtime dir so the probe never touches a real character's memory.
 const DATA_DIR = process.env.PROBE_DATA_DIR || path.join(__dirname, '..', '..', '.probe-runtime')
 fs.mkdirSync(DATA_DIR, { recursive: true })
-state.BOT_DATA_DIR = DATA_DIR
+state.WORLD_DATA_DIR = DATA_DIR
 require('../src/world/memory').initDB()
 const { recognize, formatRecognition } = require('../src/perception/recognize')
 

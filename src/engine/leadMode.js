@@ -2,7 +2,7 @@
 //
 // Off by default (an experiment). When a player switches it on (`!lead on`), an idle
 // bot with nothing on its agenda gets a turn to pick a goal of its own, at most once
-// per LEAD_WAKE_MS. Players' requests still come first. Persisted per bot like the
+// per LEAD_WAKE_MS. Players' requests still come first. Persisted per world like the
 // defend mode.
 const fs = require('fs')
 const path = require('path')
@@ -10,7 +10,7 @@ const state = require('../core/state')
 
 const LEAD_WAKE_MS = 30000
 
-function modeFile() { return state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'lead-mode.json') : null }
+function modeFile() { return state.WORLD_DATA_DIR ? path.join(state.WORLD_DATA_DIR, 'lead-mode.json') : null }
 
 function isOn() {
   if (state.leadMode === undefined) {
