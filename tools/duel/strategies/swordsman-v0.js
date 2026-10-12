@@ -1,5 +1,5 @@
 // Swordsman v0 — the bot's own `attack` action: best weapon in hand, shield in the
-// off-hand, mineflayer-pvp chases and swings until the target dies or 30s pass.
+// off-hand, src/combat/melee.js chases and swings until the target dies or 30s pass.
 const { sleep, nearestOpponent } = require('./common')
 const { doAttack } = require('../../../src/actions/combat')
 
