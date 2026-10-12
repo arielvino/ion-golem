@@ -5,7 +5,7 @@ const { sendChat, fuzzyMatch, logEvent, recordFailure } = require('../core/utils
 const { logGameEvent } = require('../world/memory')
 const { entityTag, tagOf, findTagged } = require('../perception/entityTag')
 
-// Melee damage per second (damage × attacks/s) for weapons pvp swings at full
+// Melee damage per second (damage × attacks/s) for weapons swung at full
 // cooldown. A bare hand is 1 × 4 = 4; anything below that isn't worth equipping.
 const MATERIALS = ['wooden', 'golden', 'stone', 'copper', 'iron', 'diamond', 'netherite']
 const SWORD_DMG = { wooden: 4, golden: 4, stone: 5, copper: 5, iron: 6, diamond: 7, netherite: 8 }
@@ -63,11 +63,11 @@ async function doAttack(targetName) {
   try {
     await equipBestWeapon(bot)
     await equipShield(bot)
-    bot.pvp.attack(entity)
-    // Wait until pvp reports it stopped attacking this target, or 30s; the timeout
-    // stops the attack. stopAll() above didn't await pvp.stop(), so the previous
+    bot.melee.attack(entity)
+    // Wait until melee reports it stopped attacking this target, or 30s; the timeout
+    // stops the attack. stopAll() above didn't await melee.stop(), so the previous
     // attack's stoppedAttacking can still arrive: it names that attack's target.
-    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => { timedOut = true; bot.pvp.stop() }, (target) => target === entity)
+    waiter = waitForEventOrTimeout(bot, 'stoppedAttacking', 30000, () => { timedOut = true; bot.melee.stop() }, (target) => target === entity)
     await raceAbort(waiter, 30000)
     if (!entity.isValid && require('../engine/creeperDefense').didExplode(entity)) {
       console.log('  exploded'); logEvent(`attack: ${label} exploded`)
@@ -84,8 +84,8 @@ async function doAttack(targetName) {
       recordFailure(`attack:${targetName} - ${timedOut ? 'still alive after 30s of fighting' : 'gave up the chase (lost the target or no path to it)'}, ${label} ${d}m away`)
     }
   } catch (err) {
-    if (err instanceof AbortError) { bot.pvp.stop(); throw err }
-    else { console.error('  pvp err:', err.message); recordFailure(`attack:${targetName} - ${err.message}`) }
+    if (err instanceof AbortError) { bot.melee.stop(); throw err }
+    else { console.error('  melee err:', err.message); recordFailure(`attack:${targetName} - ${err.message}`) }
   } finally {
     if (waiter) waiter.cancel()
   }

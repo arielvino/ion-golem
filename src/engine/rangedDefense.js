@@ -5,8 +5,8 @@
 // for ~1s before the arrow leaves, off at release. That second is the window — far
 // too short for a model turn, so this runs on physicsTick:
 //   - shield in the off-hand: face the archer and raise it for the draw, lower it
-//     once the arrow has landed. In melee mineflayer-pvp owns the shield (it drops
-//     it for each swing and raises it after), so with a pvp target we only raise;
+//     once the arrow has landed. In melee, src/combat/melee.js owns the shield (it drops
+//     it for each swing and raises it after), so with a melee target we only raise;
 //   - no shield: juke. Late in the draw, lean sideways; just before the release is
 //     due, cut the other way. An archer that leads its target aims where the lean
 //     was taking us. Up close the shot lands within a tick of the release, so
@@ -130,17 +130,17 @@ function setupRangedDefense() {
       // Our own flag, not bot.usingHeldItem: it says whether this reflex raised the
       // shield (so only this reflex lowers it), and usingHeldItem also clears on a
       // main-hand change, where re-raising would restart the 5-tick warm-up.
-      // pvp drops and re-raises it around swings on its own.
+      // melee drops and re-raises it around swings on its own.
       // Not while retreating from a swarm: a raised shield slows the bot to a crawl.
       if (threat && !raised && !state.retreating) {
-        // pvp already looks at its own target; turn only if that isn't the archer.
-        if (bot.pvp?.target !== threat) face(threat)
+        // melee already looks at its own target; turn only if that isn't the archer.
+        if (bot.melee?.target !== threat) face(threat)
         bot.activateItem(true)
         raised = true
         count(threat, 'shield')
         console.log(`  [SHIELD] up vs ${threat.name} at ${threat.position.distanceTo(bot.entity.position).toFixed(1)}m`)
       } else if (raised && now - lastThreatAt > SHIELD_HOLD_MS) {
-        if (!bot.pvp?.target && !state.creeperReflex) bot.deactivateItem()   // in melee pvp keeps it up between swings
+        if (!bot.melee?.target && !state.creeperReflex) bot.deactivateItem()   // in melee, melee.js keeps it up between swings
         raised = false
       }
       return
@@ -155,7 +155,7 @@ function setupRangedDefense() {
     // A draw already past its cut when it turns on us gets the cut at once, no lean.
     const late = threat && timing.cut !== null && drawn >= timing.cut
     if (threat && !lean && !cut && drawn >= timing.lean && !late) {
-      if (bot.pvp?.target !== threat) face(threat)
+      if (bot.melee?.target !== threat) face(threat)
       side = opposite(side)   // alternate, so the lean isn't predictable either
       lean = side
       leanSince = now

@@ -138,7 +138,7 @@ function setupRetreat(interruptFn) {
     // Drops a running attack, keeps the model's turn. Not for a requested run: the
     // flee action asking for it is the running action.
     if (!requested) interruptFn({ keepResponse: true })
-    try { bot.pvp.stop() } catch (e) {}
+    try { bot.melee.stop() } catch (e) {}
     state.retreating = true
     run = { at: Date.now(), from: bot.entity.position.clone(), dir, swings: 0, lastSwing: 0, requested, done: [] }
   }

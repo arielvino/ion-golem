@@ -1,7 +1,7 @@
 // Entry point — PID, createBot, shutdown, signals
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
-const pvp = require('mineflayer-pvp').plugin
+const { Melee } = require('./src/combat/melee')
 const toolPlugin = require('mineflayer-tool').plugin
 const http = require('http')
 const fs = require('fs')
@@ -202,7 +202,7 @@ function enterWorld(bot, info) {
 function createBot() {
   const bot = mineflayer.createBot(BOT_OPTIONS)
   bot.loadPlugin(pathfinder)
-  bot.loadPlugin(pvp)
+  bot.melee = new Melee(bot)
   bot.loadPlugin(toolPlugin)
   state.bot = bot
   bot._client.on('login', (packet) => enterWorld(bot, packet.worldState || packet))

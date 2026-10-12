@@ -4,12 +4,12 @@
 // off beyond ~7. Its swell_dir metadata goes to 1 when the fuse starts. Then:
 //   - shield in the off-hand: stand, face the creeper and block. A raised shield
 //     takes the whole blast if it comes from in front, so with a shield the creeper
-//     is lured in, not avoided. Keep it a step away: pvp's own creeper block
+//     is lured in, not avoided. Keep it a step away: melee's own creeper block
 //     (checkExplosion) keeps following its target and walks the bot into the
 //     creeper, where the blast centre is on top of it and "in front" is a toss-up;
 //   - no shield: hit and run. Sprint out of range until the fuse is called off,
-//     then pvp walks back in for the next hit.
-// pvp is held off its swings meanwhile via its blockingExplosion flag.
+//     then melee walks back in for the next hit.
+// melee is held off its swings meanwhile via its blockingExplosion flag.
 const state = require('../core/state')
 const { goals } = require('mineflayer-pathfinder')
 
@@ -44,11 +44,11 @@ function setupCreeperDefense() {
 
   const finish = (outcome) => {
     const { kind, hp, tag } = mode
-    if (kind === 'block' && !bot.pvp?.target) bot.deactivateItem()
+    if (kind === 'block' && !bot.melee?.target) bot.deactivateItem()
     for (const c of ['forward', 'sprint', 'back']) bot.setControlState(c, false)
-    // Back to the fight: pvp re-follows its target (we cleared its goal).
-    if (bot.pvp?.target?.isValid) bot.pathfinder.setGoal(new goals.GoalFollow(bot.pvp.target, bot.pvp.followRange), true)
-    if (bot.pvp) bot.pvp.blockingExplosion = false
+    // Back to the fight: melee re-follows its target (we cleared its goal).
+    if (bot.melee?.target?.isValid) bot.pathfinder.setGoal(new goals.GoalFollow(bot.melee.target, bot.melee.followRange), true)
+    if (bot.melee) bot.melee.blockingExplosion = false
     const lost = Math.max(0, hp - bot.health)
     const did = kind === 'block' ? 'blocked with shield' : 'ran from'
     logEvent(`reflex: ${did} ${tag}'s fuse → ${outcome}${lost ? `, took ${Math.round(lost)} damage` : ', no damage'}`)
@@ -80,8 +80,8 @@ function setupCreeperDefense() {
       const d = c.position.distanceTo(pos)
       if (mode.kind === 'block') {
         if (!fusing(bot, c)) return finish('fuse called off')
-        bot.pvp.blockingExplosion = true
-        if (bot.pathfinder.goal) bot.pathfinder.setGoal(null)   // a fresh pvp.attack sets one
+        bot.melee.blockingExplosion = true
+        if (bot.pathfinder.goal) bot.pathfinder.setGoal(null)   // a fresh melee.attack sets one
         bot.setControlState('forward', false)
         bot.setControlState('back', d < BLOCK_DIST)
         bot.lookAt(c.position.offset(0, 1, 0), true).catch(() => {})
@@ -91,7 +91,7 @@ function setupCreeperDefense() {
       }
       // evade
       if (!fusing(bot, c) && d >= SAFE_DIST) return finish('fuse called off')
-      bot.pvp.blockingExplosion = true
+      bot.melee.blockingExplosion = true
       if (bot.pathfinder.goal) bot.pathfinder.setGoal(null)
       const { escapeDir } = require('./retreat')
       const dir = escapeDir(bot, [c]) || { dx: pos.x - c.position.x, dz: pos.z - c.position.z }
@@ -104,7 +104,7 @@ function setupCreeperDefense() {
     if (!lit) return
     const tag = entityTag(lit)
     bot.pathfinder.setGoal(null)
-    if (bot.pvp) bot.pvp.blockingExplosion = true
+    if (bot.melee) bot.melee.blockingExplosion = true
     state.creeperReflex = true
     if (hasShield()) {
       bot.lookAt(lit.position.offset(0, 1, 0), true).catch(() => {})

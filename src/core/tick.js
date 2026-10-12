@@ -55,7 +55,7 @@ function stopAll() {
   state.followTarget = null
   if (state.followInterval) { clearInterval(state.followInterval); state.followInterval = null }
   if (state.activeSailTick) { try { clearInterval(state.activeSailTick) } catch(e) {}; state.activeSailTick = null }
-  try { state.bot.pvp.stop() } catch (e) {}
+  try { state.bot.melee.stop() } catch (e) {}
   try { state.bot.setControlState('forward', false) } catch (e) {}
   try { state.bot.setControlState('back', false) } catch (e) {}
   try { state.bot.setControlState('left', false) } catch (e) {}
