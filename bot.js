@@ -10,7 +10,7 @@ const path = require('path')
 const state = require('./src/core/state')
 const { c, color } = require('./src/lib/colors')
 const { initDB } = require('./src/world/memory')
-const { resolveDataBase, worldKey, openWorldDir } = require('./src/core/dataDir')
+const { resolveDataBase, worldKey, openWorldDir, oldLayoutFiles } = require('./src/core/dataDir')
 const { loadAgenda, agendaTitles } = require('./src/engine/tasks')
 const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
 const { initChatLogs, initAI } = require('./src/ai/ai')
@@ -76,6 +76,8 @@ const RUNTIME_DIR = path.join(resolveDataBase(), BOT_NAME)
 state.BOT_DATA_DIR = RUNTIME_DIR
 fs.mkdirSync(RUNTIME_DIR, { recursive: true })
 console.log(`  [DATA] runtime dir: ${RUNTIME_DIR}`)
+const oldFiles = oldLayoutFiles(RUNTIME_DIR)
+if (oldFiles.length) console.log(`  [DATA] old per-bot world data in ${RUNTIME_DIR} (${oldFiles.join(', ')}) is no longer used; each world now has its own dir under worlds/`)
 
 // --- Rotating log files ---
 const LOG_DIR = path.join(RUNTIME_DIR, 'logs')

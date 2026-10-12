@@ -105,9 +105,9 @@ iongolem/<username>/worlds/<world>/   blocks.db, journal.json, agenda.json, eye-
 memory. It is opened on login and printed (`[DATA] world dir: …`); `world.json` records which
 server and seed it is. Set `IONGOLEM_WORLD=<name>` to choose the name yourself.
 
-Data from before per-world dirs (`blocks.db` etc. directly in `iongolem/<username>/`) is
-moved into the first world the bot joins. Once any world dir exists, old files left there
-are not touched; move them into the right `worlds/<world>/` yourself.
+Data from before per-world dirs (`blocks.db` etc. directly in `iongolem/<username>/`) is no
+longer used: each world starts with a fresh memory. The old files are left untouched (the
+bot notes them at startup); delete them, or move them into a `worlds/<world>/` dir by hand.
 
 ## Project layout
 

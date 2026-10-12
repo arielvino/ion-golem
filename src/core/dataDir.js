@@ -30,12 +30,9 @@ function resolveDataBase() {
   return path.join(dataHome, 'iongolem')
 }
 
-// The files that hold what a bot knows about one world. Before per-world dirs they sat
-// in the bot dir itself; adoptLegacy() moves them into the first world's dir.
-const WORLD_FILES = [
-  'blocks.db', 'blocks.db-wal', 'blocks.db-shm', 'journal.json', 'agenda.json', 'eye-throws.json',
-  'block-memory.json', 'block-memory.json.bak', 'placed-blocks.json', 'placed-blocks.json.bak',
-]
+// What a bot knew about its one world before per-world dirs, kept in the bot dir itself.
+// No longer read: a bot starts each world fresh, and these are left where they are.
+const OLD_WORLD_FILES = ['blocks.db', 'journal.json', 'agenda.json', 'eye-throws.json', 'block-memory.json', 'placed-blocks.json']
 
 // The hashed seed from a login/respawn packet (protodef's i64: [hi, lo] or a BigInt) as
 // 16 hex digits, or null when the server sent none.
@@ -62,45 +59,22 @@ function worldKey({ host, port, hashedSeed }) {
 const worldsDir = (botDir) => path.join(botDir, 'worlds')
 const worldDirOf = (botDir, key) => path.join(worldsDir(botDir), key)
 
-// Bot-dir files left from the old per-bot layout.
-const legacyFiles = (botDir) => WORLD_FILES.filter(f => fs.existsSync(path.join(botDir, f)))
-
-// Old-layout data in the bot dir is adopted by the first world the bot joins with
-// per-world dirs — until then it was the only world this bot's memory knew. Files are
-// moved, never copied over or deleted, and only into a world dir that doesn't exist
-// yet. Once any world dir exists, which world old files belong to is a guess, so they
-// are left where they are and reported.
-function adoptLegacy(botDir, key) {
-  const files = legacyFiles(botDir)
-  if (!files.length) return null
-  const dir = worldDirOf(botDir, key)
-  let worlds = []
-  try { worlds = fs.readdirSync(worldsDir(botDir)) } catch (e) {}
-  if (worlds.length > 0) {
-    console.warn(`  [DATA] old per-bot files left in ${botDir} (${files.join(', ')}) — not used: it is unclear which world they belong to. Move them into a worlds/<key>/ dir to use them.`)
-    return null
-  }
-  fs.mkdirSync(dir, { recursive: true })
-  for (const f of files) fs.renameSync(path.join(botDir, f), path.join(dir, f))
-  console.log(`  [DATA] adopted the old per-bot memory (${files.join(', ')}) as world ${key}`)
-  return files
-}
-
-// Enter world `key` of bot dir `botDir`: adopt old-layout data if this is the first
-// world, create the dir, and keep a world.json saying which server and seed it is.
+// Enter world `key` of bot dir `botDir`: create its dir and keep a world.json saying
+// which server and seed it is.
 function openWorldDir(botDir, { host, port, hashedSeed, version }) {
   const key = worldKey({ host, port, hashedSeed })
   const dir = worldDirOf(botDir, key)
-  const adopted = adoptLegacy(botDir, key)
   fs.mkdirSync(dir, { recursive: true })
   const metaFile = path.join(dir, 'world.json')
   let meta = {}
   try { meta = JSON.parse(fs.readFileSync(metaFile, 'utf8')) } catch (e) {}
   const now = new Date().toISOString()
   meta = { ...meta, key, host, port, hashedSeed: seedHex(hashedSeed), version, firstSeen: meta.firstSeen || now, lastSeen: now }
-  if (adopted) meta.adoptedLegacy = { from: botDir, files: adopted, at: now }
   try { fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2)) } catch (e) { console.warn('  [DATA] world.json write err:', e.message) }
   return { key, dir }
 }
 
-module.exports = { resolveDataBase, seedHex, worldKey, worldDirOf, openWorldDir, WORLD_FILES }
+// Old-layout world files in the bot dir, if any — reported once at startup.
+const oldLayoutFiles = (botDir) => OLD_WORLD_FILES.filter(f => fs.existsSync(path.join(botDir, f)))
+
+module.exports = { resolveDataBase, seedHex, worldKey, worldDirOf, openWorldDir, oldLayoutFiles }
