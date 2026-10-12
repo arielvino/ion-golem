@@ -224,7 +224,7 @@ function setupProjectileGuard() {
     if (dodge && (!threat || threat.id !== dodge.id || tick > dodge.until)) endDodge()
     if (!threat) {
       if (raised && now - lastShieldThreat > SHIELD_HOLD_MS) {
-        if (!bot.pvp?.target && !state.creeperReflex && !nearestArcher(bot, 24, true)) bot.deactivateItem()
+        if (!bot.melee?.target && !state.creeperReflex && !nearestArcher(bot, 24, true)) bot.deactivateItem()
         raised = false
       }
       return

@@ -14,7 +14,7 @@ module.exports = {
   DROWNING_DEBOUNCE: 8000,   // re-dispatch swimup at most this often
   ENV_DAMAGE_DEBOUNCE: 3000, // re-react to environmental damage at most this often
 
-  // A dispatched reflex attack takes a moment to reach pvp (prepend delay + equip).
+  // A dispatched reflex attack takes a moment to reach melee (prepend delay + equip).
   // Within this window, while its target lives, don't dispatch another one.
   AUTOFIGHT_LAUNCH_GRACE: 2000,
 

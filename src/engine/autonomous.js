@@ -77,13 +77,13 @@ function setupAutonomous(interruptFn) {
   })
 
   // --- AUTO-FIGHT: interrupt whatever runs and put an attack at the front ---
-  // No cooldown between fights: the next hostile is engaged as soon as pvp drops the
+  // No cooldown between fights: the next hostile is engaged as soon as melee drops the
   // last one. Only an attack still launching (target alive) holds off a second one.
   let pending = null, pendingAt = 0
   // True when it launched an attack.
   function autoFight(attacker, logLine, chatLine) {
     // Running from a swarm (the reflex or a flee action) beats turning to fight.
-    if (bot.pvp.target || state.retreating || state.currentTask === 'fleeing') return false
+    if (bot.melee.target || state.retreating || state.currentTask === 'fleeing') return false
     if (state.creeperReflex) return false   // a creeper is fusing: block or run first, fight after
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return false
     pending = attacker; pendingAt = Date.now()
@@ -107,7 +107,7 @@ function setupAutonomous(interruptFn) {
   const { scanHostiles } = require('./guard')
   let defendTicks = 0
   bot.on('physicsTick', () => {
-    if (++defendTicks % 5 || !defend.isOn() || bot.pvp.target) return
+    if (++defendTicks % 5 || !defend.isOn() || bot.melee.target) return
     const hostile = scanHostiles(defend.DEFEND_RANGE)
     if (!hostile) return
     autoFight(hostile, `defend: ${hostile.name} at ${hostile.position.distanceTo(bot.entity.position).toFixed(1)}m`,
