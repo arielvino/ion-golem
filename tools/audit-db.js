@@ -32,7 +32,7 @@ async function main() {
   state.bot = bot
   // The audited bot's memory of THIS world: the same server sends us the same seed.
   bot._client.once('login', (packet) => {
-    const key = worldKey({ host: HOST, port: PORT, hashedSeed: (packet.worldState || packet).hashedSeed })
+    const key = worldKey({ host: HOST, hashedSeed: (packet.worldState || packet).hashedSeed })
     DB_PATH = path.join(worldDirOf(path.join(resolveDataBase(), BOT), key), 'blocks.db')
   })
   await new Promise((res, rej) => {

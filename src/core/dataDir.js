@@ -46,16 +46,16 @@ function seedHex(hashedSeed) {
   return BigInt.asUintN(64, v).toString(16).padStart(16, '0')
 }
 
-// A world is the server's address plus the hashed seed it sends on login: one address
-// hosts different worlds over time (a regenerated local world, an Aternos server that
-// switches worlds) and the seed tells them apart. IONGOLEM_WORLD names the world
-// outright instead, for a server whose address changes (an open-to-LAN world picks a new
-// port each time). Readable and filesystem-safe: localhost_25565_1a2b3c4d5e6f7a8b.
+// A world is the server's host plus the hashed seed it sends on login: one host serves
+// different worlds over time (an Aternos server that switches worlds) and the seed tells
+// them apart. The port is left out: an open-to-LAN world picks a new one every session,
+// and two servers on one host with the same seed are unlikely. (A world regenerated with
+// the same seed keeps its key; delete its dir by hand.) world.json still records the
+// port. Readable and filesystem-safe: localhost_1a2b3c4d5e6f7a8b.
 const safe = (s) => String(s).toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^[.-]+|-+$/g, '') || 'unknown'
-function worldKey({ host, port, hashedSeed }) {
-  if (process.env.IONGOLEM_WORLD) return safe(process.env.IONGOLEM_WORLD)
+function worldKey({ host, hashedSeed }) {
   const h = ['127.0.0.1', '::1', 'localhost'].includes(String(host).toLowerCase()) ? 'localhost' : safe(host)
-  return `${h}_${port}_${seedHex(hashedSeed) || 'noseed'}`
+  return `${h}_${seedHex(hashedSeed) || 'noseed'}`
 }
 
 const worldsDir = (botDir) => path.join(botDir, 'worlds')
@@ -64,7 +64,7 @@ const worldDirOf = (botDir, key) => path.join(worldsDir(botDir), key)
 // Enter world `key` of bot dir `botDir`: create its dir and keep a world.json saying
 // which server and seed it is.
 function openWorldDir(botDir, { host, port, hashedSeed, version }) {
-  const key = worldKey({ host, port, hashedSeed })
+  const key = worldKey({ host, hashedSeed })
   const dir = worldDirOf(botDir, key)
   fs.mkdirSync(dir, { recursive: true })
   const metaFile = path.join(dir, 'world.json')

@@ -17,32 +17,29 @@ test('seedHex: protodef i64 [hi, lo], BigInt and a missing seed', () => {
   assert.strictEqual(seedHex(undefined), null)
 })
 
-test('worldKey: address + seed, readable and filesystem-safe', () => {
+test('worldKey: host + seed, readable and filesystem-safe', () => {
   const seed = [0x1a2b3c4d, 0x5e6f7a8b]
-  assert.strictEqual(worldKey({ host: 'localhost', port: 25565, hashedSeed: seed }), 'localhost_25565_1a2b3c4d5e6f7a8b')
-  assert.strictEqual(worldKey({ host: '127.0.0.1', port: 25565, hashedSeed: seed }), 'localhost_25565_1a2b3c4d5e6f7a8b')
-  assert.strictEqual(worldKey({ host: 'Biny.Aternos.me', port: 61234, hashedSeed: seed }), 'biny.aternos.me_61234_1a2b3c4d5e6f7a8b')
-  assert.strictEqual(worldKey({ host: '../x/y', port: 1, hashedSeed: undefined }), 'x-y_1_noseed')
-  // Same address, another seed (a regenerated world) — another world.
+  assert.strictEqual(worldKey({ host: 'localhost', port: 25565, hashedSeed: seed }), 'localhost_1a2b3c4d5e6f7a8b')
+  assert.strictEqual(worldKey({ host: '127.0.0.1', port: 25565, hashedSeed: seed }), 'localhost_1a2b3c4d5e6f7a8b')
+  assert.strictEqual(worldKey({ host: '::1', port: 25565, hashedSeed: seed }), 'localhost_1a2b3c4d5e6f7a8b')
+  assert.strictEqual(worldKey({ host: 'Biny.Aternos.me', port: 61234, hashedSeed: seed }), 'biny.aternos.me_1a2b3c4d5e6f7a8b')
+  assert.strictEqual(worldKey({ host: '../x/y', port: 1, hashedSeed: undefined }), 'x-y_noseed')
+  // Another port on the same host, same seed (an open-to-LAN world reopened) — the same world.
+  assert.strictEqual(worldKey({ host: 'localhost', port: 40123, hashedSeed: seed }), worldKey({ host: 'localhost', port: 25565, hashedSeed: seed }))
+  // Same host, another seed — another world.
   assert.notStrictEqual(worldKey({ host: 'localhost', port: 25565, hashedSeed: [0, 1] }), worldKey({ host: 'localhost', port: 25565, hashedSeed: seed }))
-  // Same seed, another port — another server, another world.
-  assert.notStrictEqual(worldKey({ host: 'localhost', port: 25566, hashedSeed: seed }), worldKey({ host: 'localhost', port: 25565, hashedSeed: seed }))
-})
-
-test('worldKey: IONGOLEM_WORLD names the world outright', () => {
-  process.env.IONGOLEM_WORLD = 'Our LAN World'
-  try {
-    assert.strictEqual(worldKey({ host: 'localhost', port: 40123, hashedSeed: [0, 1] }), 'our-lan-world')
-  } finally { delete process.env.IONGOLEM_WORLD }
+  // Another host, same seed — another world.
+  assert.notStrictEqual(worldKey({ host: 'example.net', port: 25565, hashedSeed: seed }), worldKey({ host: 'localhost', port: 25565, hashedSeed: seed }))
 })
 
 test('openWorldDir: a fresh bot gets a new world dir with world.json', () => {
   const bot = tmpBot()
   const { key, dir } = quiet(() => openWorldDir(bot, { host: 'localhost', port: 25565, hashedSeed: [0, 7], version: '26.3' }))
-  assert.strictEqual(key, 'localhost_25565_0000000000000007')
+  assert.strictEqual(key, 'localhost_0000000000000007')
   assert.strictEqual(dir, worldDirOf(bot, key))
   const meta = JSON.parse(fs.readFileSync(path.join(dir, 'world.json'), 'utf8'))
   assert.strictEqual(meta.hashedSeed, '0000000000000007')
+  assert.strictEqual(meta.port, 25565)
 })
 
 test('openWorldDir: old per-bot files are reported but never moved or used', () => {

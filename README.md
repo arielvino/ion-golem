@@ -73,7 +73,6 @@ offline server with the CLI AI backend, so a fresh clone runs with zero edits.
 | `MC_USERNAME` | `Bro` / `BroDev`    | In-game username (`--debug` defaults to `BroDev`).           |
 | `MC_AUTH`     | *(offline)*         | `offline` for cracked/LAN servers, `microsoft` for online-mode. |
 | `IONGOLEM_DATA_DIR` | *(OS data dir)* | Base dir for per-bot state. Defaults to your OS user-data dir (see below). |
-| `IONGOLEM_WORLD` | *(address + seed)* | Name the world's memory dir yourself instead (e.g. an open-to-LAN world, whose port changes). |
 
 If `MC_HOST` is remote and an `http_proxy`/`https_proxy` env var is set, the Minecraft
 connection is tunneled through it via HTTP CONNECT. Local hosts always connect directly.
@@ -101,10 +100,12 @@ iongolem/<username>/worlds/<world>/   blocks.db, journal.json, agenda.json, eye-
                                       behaviour modes (*-mode.json), world.json
 ```
 
-`<world>` is the server address plus the hashed world seed the server sends on login, e.g.
-`localhost_25565_1a2b3c4d5e6f7a8b` — so a regenerated world on the same address gets a fresh
-memory. It is opened on login and printed (`[DATA] world dir: …`); `world.json` records which
-server and seed it is. Set `IONGOLEM_WORLD=<name>` to choose the name yourself.
+`<world>` is the server host plus the hashed world seed the server sends on login, e.g.
+`localhost_1a2b3c4d5e6f7a8b` — so another world on the same host gets a fresh memory. The port
+is left out, so an open-to-LAN world keeps its memory although its port changes; a world
+regenerated with the same seed keeps its key too, so delete its dir to start over. It is
+opened on login and printed (`[DATA] world dir: …`); `world.json` records which server
+(host, port) and seed it is.
 
 Data from before per-world dirs (`blocks.db` etc. directly in `iongolem/<username>/`) is no
 longer used: each world starts with a fresh memory. The old files are left untouched (the

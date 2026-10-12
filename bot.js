@@ -152,7 +152,7 @@ let reconnectAttempts = 0
 const MAX_RECONNECT_ATTEMPTS = 5
 
 // --- World memory ---
-// Which world this is is known only from the server's login packet (address + hashed
+// Which world this is is known only from the server's login packet (host + hashed
 // seed, see core/dataDir.js), so world memory opens there — before the spawn that
 // loads the agenda and journal, and with nothing world-bound open until then, so
 // nothing is written to another world's memory. A later login or respawn into a
