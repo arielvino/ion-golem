@@ -10,7 +10,7 @@ const bp = require('../src/engine/breakPermission')
 
 const said = []
 function reset(mode = 'ask') {
-  state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-'))
+  state.WORLD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-'))
   state.bot = { username: 'Bro', chat: (m) => said.push(m) }
   state.breakMode = null   // force a fresh load
   state.backgroundTask = null
@@ -80,7 +80,7 @@ test('!nobreak on/off switches the mode, persists it, and is not passed to the A
   reset('free')
   assert.equal(bp.onPlayerChat('Sargon564', '!nobreak on'), true)
   assert.equal(state.breakMode, 'ask')
-  const saved = JSON.parse(fs.readFileSync(path.join(state.BOT_DATA_DIR, 'break-mode.json'), 'utf8'))
+  const saved = JSON.parse(fs.readFileSync(path.join(state.WORLD_DATA_DIR, 'break-mode.json'), 'utf8'))
   assert.equal(saved.mode, 'ask')
   state.breakMode = null   // simulate a restart: reload from disk
   running('mine:stone')

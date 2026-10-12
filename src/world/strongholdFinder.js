@@ -8,7 +8,7 @@
 // One ray alone is narrowed by where strongholds can be: default worldgen puts them
 // in rings around 0,0 (RINGS), so the ray is only worth walking where it is in one.
 //
-// Throws are kept per bot in eye-throws.json (overworld only: eyes don't fly in the
+// Throws are kept per world in eye-throws.json (overworld only: eyes don't fly in the
 // Nether or the End).
 const fs = require('fs')
 const path = require('path')
@@ -23,7 +23,7 @@ const RINGS = [[1280, 2816], [4352, 5888], [7424, 8960], [10496, 12032], [13568,
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']   // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
-function storeFile() { return state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'eye-throws.json') : null }
+function storeFile() { return state.WORLD_DATA_DIR ? path.join(state.WORLD_DATA_DIR, 'eye-throws.json') : null }
 
 function load() {
   if (state.eyeThrows === undefined) {

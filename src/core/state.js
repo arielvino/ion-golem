@@ -46,7 +46,9 @@ module.exports = {
   claudeChild: null,
   // Config (set by bot.js)
   BOT_NAME: null,
-  BOT_DATA_DIR: null,
+  BOT_DATA_DIR: null,    // per-bot state (logs, pid, modes) — known at startup
+  WORLD_DATA_DIR: null,  // per-world memory (blocks.db, journal, agenda) — set on login (bot.js)
+  worldKey: null,        // which world WORLD_DATA_DIR belongs to (core/dataDir.js)
   // Personality (set by ai.js, switchable at runtime)
   personality: null,
   // Navigation flags

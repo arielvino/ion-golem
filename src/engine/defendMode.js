@@ -3,14 +3,14 @@
 // On by default: the autonomous layer attacks any hostile that comes within
 // DEFEND_RANGE in line of sight, with no model turn in between. A player can switch it
 // off (`!defend off`); off, the bot only fights back once it takes damage. Persisted
-// per bot like the break mode.
+// per world like the break mode.
 const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
 
 const DEFEND_RANGE = 8
 
-function modeFile() { return state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'defend-mode.json') : null }
+function modeFile() { return state.WORLD_DATA_DIR ? path.join(state.WORLD_DATA_DIR, 'defend-mode.json') : null }
 
 function isOn() {
   if (state.defendMode === undefined) {

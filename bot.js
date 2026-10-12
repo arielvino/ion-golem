@@ -5,12 +5,12 @@ const pvp = require('mineflayer-pvp').plugin
 const toolPlugin = require('mineflayer-tool').plugin
 const http = require('http')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 
 const state = require('./src/core/state')
 const { c, color } = require('./src/lib/colors')
 const { initDB } = require('./src/world/memory')
+const { resolveDataBase, worldKey, openWorldDir, oldLayoutFiles } = require('./src/core/dataDir')
 const { loadAgenda, agendaTitles } = require('./src/engine/tasks')
 const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
 const { initChatLogs, initAI } = require('./src/ai/ai')
@@ -67,32 +67,17 @@ if (!isLocalHost && PROXY_URL) {
 }
 state.BOT_NAME = BOT_NAME
 
-// --- Runtime data directory (all per-bot generated state lives here) ---
-// Resolution order:
-//   1. IONGOLEM_DATA_DIR env override — used verbatim as the base (absolute or relative).
-//   2. OS-standard per-user data dir: XDG_DATA_HOME/~/.local/share (Linux), Application
-//      Support (macOS), LOCALAPPDATA (Windows), under an `iongolem/` folder.
-// A per-bot subdirectory (BOT_NAME) is created under the resolved base, so multiple bots
-// keep separate state. Data lives outside the repo by default, so it survives reclones and
-// works from a read-only/global install; set IONGOLEM_DATA_DIR=./runtime to keep it local.
-function resolveDataBase() {
-  const override = process.env.IONGOLEM_DATA_DIR
-  if (override) return path.resolve(override)
-  const home = os.homedir()
-  if (process.platform === 'win32') {
-    return path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'iongolem')
-  }
-  if (process.platform === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', 'iongolem')
-  }
-  const xdg = process.env.XDG_DATA_HOME
-  const dataHome = xdg && path.isAbsolute(xdg) ? xdg : path.join(home, '.local', 'share')
-  return path.join(dataHome, 'iongolem')
-}
+// --- Runtime data directory ---
+// <base>/<BotName>/ holds what belongs to the bot whatever world it is in (pid, logs,
+// modes); its memory of a world goes in worlds/<worldKey>/ under it, opened on login
+// (enterWorld). The base is IONGOLEM_DATA_DIR or the OS per-user data dir — see
+// core/dataDir.js.
 const RUNTIME_DIR = path.join(resolveDataBase(), BOT_NAME)
 state.BOT_DATA_DIR = RUNTIME_DIR
 fs.mkdirSync(RUNTIME_DIR, { recursive: true })
 console.log(`  [DATA] runtime dir: ${RUNTIME_DIR}`)
+const oldFiles = oldLayoutFiles(RUNTIME_DIR)
+if (oldFiles.length) console.log(`  [DATA] old per-bot world data in ${RUNTIME_DIR} (${oldFiles.join(', ')}) is no longer used; each world now has its own dir under worlds/`)
 
 // --- Rotating log files ---
 const LOG_DIR = path.join(RUNTIME_DIR, 'logs')
@@ -156,8 +141,7 @@ try {
 } catch (e) {}
 fs.writeFileSync(PID_FILE, String(process.pid))
 
-// Init database + chat logs + pre-spawn claude
-initDB()
+// Init chat logs + pre-spawn claude. World memory (the DB) opens on login: enterWorld.
 initChatLogs()
 initAI()
 
@@ -167,6 +151,53 @@ let reconnectTimer = null
 let reconnectAttempts = 0
 const MAX_RECONNECT_ATTEMPTS = 5
 
+// --- World memory ---
+// Which world this is is known only from the server's login packet (host + hashed
+// seed, see core/dataDir.js), so world memory opens there — before the spawn that
+// loads the agenda and journal, and with nothing world-bound open until then, so
+// nothing is written to another world's memory. A later login or respawn into a
+// different world (a reconnect to a regenerated server, a proxy moving the bot to
+// another backend) closes this world's memory and opens that one's.
+function enterWorld(bot, info) {
+  const where = { host: BOT_HOST, port: BOT_PORT, hashedSeed: info?.hashedSeed, version: bot.version }
+  const key = worldKey(where)
+  if (key === state.worldKey) return
+  const switching = !!state.worldKey
+  let dir
+  try { ({ dir } = openWorldDir(RUNTIME_DIR, where)) } catch (e) {
+    console.error(color(c.red, `FATAL: can't open world data for ${key}: ${e.message}`))
+    shutdown('world-data')
+    return
+  }
+  if (switching) {
+    console.log(`  [DATA] world changed: ${state.worldKey} → ${key}`)
+    // Everything in hand refers to the old world's coordinates.
+    stopAll()
+    state.currentTask = null
+    state.actionQueue = []
+    state.backgroundTask = null
+    state.portableCraftingTable = null
+    state.skipBlocks.clear()
+    state.prevSnapshot = null
+    state.dim = null
+    try { state.db?.close() } catch (e) {}
+    state.db = null
+    state.stmts = null
+  }
+  state.worldKey = key
+  state.WORLD_DATA_DIR = dir
+  // The modes load lazily from the world dir; forget any read before it (or from the last world).
+  state.defendMode = state.leadMode = state.floatMode = undefined
+  state.breakMode = null
+  console.log(`  [DATA] world dir: ${dir}`)
+  initDB()
+  if (switching) {
+    loadAgenda()
+    require('./src/world/journalStore').loadJournal()
+    state.eyeThrows = undefined
+  }
+}
+
 // --- Bot setup ---
 function createBot() {
   const bot = mineflayer.createBot(BOT_OPTIONS)
@@ -174,6 +205,8 @@ function createBot() {
   bot.loadPlugin(pvp)
   bot.loadPlugin(toolPlugin)
   state.bot = bot
+  bot._client.on('login', (packet) => enterWorld(bot, packet.worldState || packet))
+  bot._client.on('respawn', (packet) => enterWorld(bot, packet.worldState || packet))
 
   bot.once('inject_allowed', () => {
     // Locator Bar (MC 1.21.6+): the server pushes tracked_waypoint for other

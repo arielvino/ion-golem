@@ -9,7 +9,7 @@ const state = require('../src/core/state')
 const memory = require('../src/world/memory')
 const { measureFall, neighbourFall, damageOf } = require('../src/navigation/fall')
 
-state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'descend-'))
+state.WORLD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'descend-'))
 memory.initDB()
 const put = (x, y, z, name) => state.stmts.upsertBlock.run(x, y, z, name, 0, null)
 const column = (x, z, fromY, toY, name) => { for (let y = fromY; y <= toY; y++) put(x, y, z, name) }

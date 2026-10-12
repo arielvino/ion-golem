@@ -21,7 +21,7 @@ const DENY_RE = /^\s*(no|n|nope|deny|denied|don'?t|לא|אל|אסור)(\s|[.!,]|
 // Action strings compare case- and whitespace-insensitively.
 const norm = (a) => String(a || '').toLowerCase().replace(/\s+/g, '')
 
-function modeFile() { return state.BOT_DATA_DIR ? path.join(state.BOT_DATA_DIR, 'break-mode.json') : null }
+function modeFile() { return state.WORLD_DATA_DIR ? path.join(state.WORLD_DATA_DIR, 'break-mode.json') : null }
 
 function ensure() {
   if (state.breakMode) return

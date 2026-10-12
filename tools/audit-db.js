@@ -13,7 +13,6 @@
 // Usage: node tools/audit-db.js [sampleSize]
 const path = require('path')
 const fs = require('fs')
-const os = require('os')
 const { Vec3 } = require('vec3')
 const mineflayer = require('mineflayer')
 const state = require('../src/core/state')
@@ -24,19 +23,24 @@ const PORT = parseInt(process.env.MC_PORT || '25565', 10)
 const VERSION = process.env.MC_VERSION || '26.1'
 const BOT = process.env.AUDIT_BOT || 'BroDev'
 
-const DB_PATH = path.join(os.homedir(), '.local', 'share', 'iongolem', BOT, 'blocks.db')
-if (!fs.existsSync(DB_PATH)) { console.error(`no db at ${DB_PATH}`); process.exit(1) }
-
 const Database = require('better-sqlite3')
-const db = new Database(DB_PATH, { readonly: true })
+const { resolveDataBase, worldKey, worldDirOf } = require('../src/core/dataDir')
+let DB_PATH, db
 
 async function main() {
   const bot = mineflayer.createBot({ host: HOST, port: PORT, username: 'AuditBot', version: VERSION })
   state.bot = bot
+  // The audited bot's memory of THIS world: the same server sends us the same seed.
+  bot._client.once('login', (packet) => {
+    const key = worldKey({ host: HOST, hashedSeed: (packet.worldState || packet).hashedSeed })
+    DB_PATH = path.join(worldDirOf(path.join(resolveDataBase(), BOT), key), 'blocks.db')
+  })
   await new Promise((res, rej) => {
     bot.once('spawn', res); bot.once('error', rej)
     setTimeout(() => rej(new Error('spawn timeout')), 60000)
   })
+  if (!fs.existsSync(DB_PATH)) { console.error(`no db at ${DB_PATH}`); bot.quit(); process.exit(1) }
+  db = new Database(DB_PATH, { readonly: true })
   let cols = 0
   for (let i = 0; i < 30; i++) {
     await new Promise(r => setTimeout(r, 1000))

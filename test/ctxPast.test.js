@@ -10,7 +10,7 @@ const memory = require('../src/world/memory')
 const { Journal } = require('../src/world/journal')
 const { PROVIDERS, renderPending } = require('../src/ai/ctxProviders')
 
-state.BOT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ctxpast-'))
+state.WORLD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ctxpast-'))
 memory.initDB()
 state.bot = { entity: { position: { x: 10.5, y: 64, z: 10.5 } }, time: { age: 30000, day: 1 } }
 
