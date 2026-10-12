@@ -53,17 +53,31 @@ async function lockConsole() {
     }
   }
 }
+// The server log survives being rotated at midnight: missing for a moment, then
+// short again. logSize() is 0 while it's missing; logSince(from) reads from the start
+// of a log shorter than `from` (a new one).
+function logSize() {
+  try { return fs.statSync(LOG).size } catch (e) { if (e.code === 'ENOENT') return 0; throw e }
+}
+function logSince(from) {
+  let fd
+  try { fd = fs.openSync(LOG, 'r') } catch (e) { if (e.code === 'ENOENT') return ''; throw e }
+  try {
+    const size = fs.fstatSync(fd).size
+    if (size < from) from = 0
+    const buf = Buffer.alloc(size - from)
+    fs.readSync(fd, buf, 0, buf.length, from)
+    return buf.toString()
+  } finally { fs.closeSync(fd) }
+}
+
 async function ask(line, pattern, ms = 3000) {
   await lockConsole()
   try {
-    const from = fs.statSync(LOG).size
+    const from = logSize()
     await cmd(line)
     for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(50)) {
-      const fd = fs.openSync(LOG, 'r')
-      const buf = Buffer.alloc(fs.fstatSync(fd).size - from)
-      fs.readSync(fd, buf, 0, buf.length, from)
-      fs.closeSync(fd)
-      const m = buf.toString().match(pattern)
+      const m = logSince(from).match(pattern)
       if (m) return m[0]
     }
     return null
@@ -184,4 +198,4 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
   return { ready, build, saveCopy, prepare, sweep, corner, box, cx, cz, VIEW, BENCH }
 }
 
-module.exports = { ...makeArena(), makeArena, cmd, ask, Y, R }
+module.exports = { ...makeArena(), makeArena, cmd, ask, logSize, logSince, Y, R }

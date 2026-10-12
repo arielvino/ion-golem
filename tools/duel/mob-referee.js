@@ -8,7 +8,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { makeArena, cmd, ask } = require('./arena')
+const { makeArena, cmd, ask, logSize, logSince } = require('./arena')
 
 const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filter(Boolean)
   .map(a => a.trim().split(/\s+/)))
@@ -44,19 +44,9 @@ const TAG = `mobduel_${BOT}`   // per bot: referees can run side by side
 const DATA = process.env.IONGOLEM_DATA_DIR ||
   path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'), 'iongolem')
 const RESULTS = path.join(DATA, 'duel', 'mob-results.jsonl')
-const SERVER_LOG = path.join(path.dirname(process.env.MC_CONSOLE ||
-  path.resolve(__dirname, '../../../server/server.stdin')), 'logs', 'latest.log')
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 const DEATH_RE = new RegExp(`System chat: ${BOT} (was|died|drowned|fell|hit the|burned|went up|tried|walked|experienced|blew|withered|starved|suffocated|froze)`)
-const logSize = () => fs.statSync(SERVER_LOG).size
-function logSince(from) {
-  const fd = fs.openSync(SERVER_LOG, 'r')
-  const buf = Buffer.alloc(Math.max(0, fs.fstatSync(fd).size - from))
-  fs.readSync(fd, buf, 0, buf.length, from)
-  fs.closeSync(fd)
-  return buf.toString()
-}
 
 const health = async (sel) => {
   const r = await ask(`data get entity ${sel} Health`, /has the following entity data: [\d.]+f|No entity was found|Found no elements/)
