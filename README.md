@@ -73,6 +73,7 @@ offline server with the CLI AI backend, so a fresh clone runs with zero edits.
 | `MC_USERNAME` | `Bro` / `BroDev`    | In-game username (`--debug` defaults to `BroDev`).           |
 | `MC_AUTH`     | *(offline)*         | `offline` for cracked/LAN servers, `microsoft` for online-mode. |
 | `IONGOLEM_DATA_DIR` | *(OS data dir)* | Base dir for per-bot state. Defaults to your OS user-data dir (see below). |
+| `IONGOLEM_WORLD` | *(address + seed)* | Name the world's memory dir yourself instead (e.g. an open-to-LAN world, whose port changes). |
 
 If `MC_HOST` is remote and an `http_proxy`/`https_proxy` env var is set, the Minecraft
 connection is tunneled through it via HTTP CONNECT. Local hosts always connect directly.
@@ -90,6 +91,23 @@ memory) lives **outside the repo** by default, in your OS user-data directory un
 So it survives re-cloning or upgrading, and works from a read-only/global install. The
 resolved path is printed at startup (`[DATA] runtime dir: …`). To keep state next to the
 code instead (convenient for hacking or a quick reset), set `IONGOLEM_DATA_DIR=./runtime`.
+
+What the bot knows about a world is kept **per world** under its dir, so one bot can play
+several worlds without mixing them up:
+
+```
+iongolem/<username>/                  pid, logs/, chat-logs/, behaviour modes (*-mode.json)
+iongolem/<username>/worlds/<world>/   blocks.db, journal.json, agenda.json, eye-throws.json, world.json
+```
+
+`<world>` is the server address plus the hashed world seed the server sends on login, e.g.
+`localhost_25565_1a2b3c4d5e6f7a8b` — so a regenerated world on the same address gets a fresh
+memory. It is opened on login and printed (`[DATA] world dir: …`); `world.json` records which
+server and seed it is. Set `IONGOLEM_WORLD=<name>` to choose the name yourself.
+
+Data from before per-world dirs (`blocks.db` etc. directly in `iongolem/<username>/`) is
+moved into the first world the bot joins. Once any world dir exists, old files left there
+are not touched; move them into the right `worlds/<world>/` yourself.
 
 ## Project layout
 
