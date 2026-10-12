@@ -98,13 +98,17 @@ const COLORS = {
 
 // A command may touch at most this many blocks (fill, clone, execute if blocks).
 const MAX_BLOCKS = 32768
+// The smallest arena with cover walls.
+const MIN_COVER_R = 8
 
 // dark: no lights, and tinted-glass sides as well as roof, so no daylight gets in
 // either: the floor is at light 0 and monsters spawn on it.
 function makeArena({ cx = 0, cz = 0, r = R, dark = false } = {}) {
-  // x0..x1, z0..z1: the shell's footprint.
-  const x0 = cx - r - 1, x1 = cx + r + 1, z0 = cz - r - 1, z1 = cz + r + 1
-  const box = `x=${x0},y=${Y},z=${z0},dx=${2 * r + 2},dy=${TOP - Y},dz=${2 * r + 2}`
+  // x0..x1, z0..z1: the shell's footprint. The walls stand one block inside it, so
+  // a fighter that digs through a wall (the pathfinder does, chasing a target
+  // outside) meets the shell.
+  const x0 = cx - r - 2, x1 = cx + r + 2, z0 = cz - r - 2, z1 = cz + r + 2
+  const box = `x=${x0},y=${Y},z=${z0},dx=${2 * r + 4},dy=${TOP - Y},dz=${2 * r + 4}`
   // A big arena's box goes through commands in horizontal slices of `step` layers.
   const step = Math.max(1, Math.floor(MAX_BLOCKS / ((x1 - x0 + 1) * (z1 - z0 + 1))))
   const slices = (lo, hi) => {
@@ -135,7 +139,8 @@ function makeArena({ cx = 0, cz = 0, r = R, dark = false } = {}) {
     /passed/.test(await ask(`execute if block ${x} ${y} ${z} ${block}`, /Test (passed|failed)/) || '')
   const copyExists = async () =>
     await isBlock(x0, COPY_TOP, z0, 'tinted_glass') && await isBlock(x0, COPY_Y, z0, 'barrier') &&
-    await isBlock(cx, COPY_Y + Y - BOTTOM, cz, 'stone_bricks')
+    await isBlock(cx, COPY_Y + Y - BOTTOM, cz, 'stone_bricks') &&
+    await isBlock(x0, copyOf(Y + 1), z0, dark ? 'tinted_glass' : 'barrier')
 
   // The arena as built: left alone if it matches its copy, restored from the copy
   // if it doesn't, and built from scratch (and copied) only when there's no copy.
@@ -164,22 +169,26 @@ function makeArena({ cx = 0, cz = 0, r = R, dark = false } = {}) {
     // A tinted-glass roof: see-through, but it stops daylight, which barriers let in
     // (undead burned under them). The light blocks below keep the arena lit.
     await cmd(`fill ${x0} ${TOP} ${z0} ${x1} ${TOP} ${z1} tinted_glass`)
-    await cmd(`fill ${x0} ${Y} ${z0} ${x1} ${Y} ${z1} stone_bricks`)
+    const w0 = x0 + 1, w1 = x1 - 1, v0 = z0 + 1, v1 = z1 - 1
+    await cmd(`fill ${w0} ${Y} ${v0} ${w1} ${Y} ${v1} stone_bricks`)
     // The four walls one at a time: a `hollow` box would also roof the floor over.
-    await cmd(`fill ${x0} ${Y + 1} ${z0} ${x1} ${Y + 3} ${z0} stone_bricks`)
-    await cmd(`fill ${x0} ${Y + 1} ${z1} ${x1} ${Y + 3} ${z1} stone_bricks`)
-    await cmd(`fill ${x0} ${Y + 1} ${z0} ${x0} ${Y + 3} ${z1} stone_bricks`)
-    await cmd(`fill ${x1} ${Y + 1} ${z0} ${x1} ${Y + 3} ${z1} stone_bricks`)
+    await cmd(`fill ${w0} ${Y + 1} ${v0} ${w1} ${Y + 3} ${v0} stone_bricks`)
+    await cmd(`fill ${w0} ${Y + 1} ${v1} ${w1} ${Y + 3} ${v1} stone_bricks`)
+    await cmd(`fill ${w0} ${Y + 1} ${v0} ${w0} ${Y + 3} ${v1} stone_bricks`)
+    await cmd(`fill ${w1} ${Y + 1} ${v0} ${w1} ${Y + 3} ${v1} stone_bricks`)
     // Lit from the floor and, invisibly, from under the ceiling.
     if (!dark) for (const x of LIGHTS) for (const z of LIGHTS) {
       await cmd(`setblock ${cx + x} ${Y} ${cz + z} glowstone`)
       await cmd(`setblock ${cx + x} ${TOP - 1} ${cz + z} light[level=15]`)
     }
-    // Cover: four 3-wide, 3-high walls in a broken ring around the centre.
-    await cmd(`fill ${cx - c} ${Y + 1} ${cz - 1} ${cx - c} ${Y + 3} ${cz + 1} cobblestone`)
-    await cmd(`fill ${cx + c} ${Y + 1} ${cz - 1} ${cx + c} ${Y + 3} ${cz + 1} cobblestone`)
-    await cmd(`fill ${cx - 1} ${Y + 1} ${cz - c} ${cx + 1} ${Y + 3} ${cz - c} cobblestone`)
-    await cmd(`fill ${cx - 1} ${Y + 1} ${cz + c} ${cx + 1} ${Y + 3} ${cz + c} cobblestone`)
+    // Cover: four 3-wide, 3-high walls in a broken ring around the centre. A small
+    // room (a spawner room's size) has none: they'd fill it.
+    if (r >= MIN_COVER_R) {
+      await cmd(`fill ${cx - c} ${Y + 1} ${cz - 1} ${cx - c} ${Y + 3} ${cz + 1} cobblestone`)
+      await cmd(`fill ${cx + c} ${Y + 1} ${cz - 1} ${cx + c} ${Y + 3} ${cz + 1} cobblestone`)
+      await cmd(`fill ${cx - 1} ${Y + 1} ${cz - c} ${cx + 1} ${Y + 3} ${cz - c} cobblestone`)
+      await cmd(`fill ${cx - 1} ${Y + 1} ${cz + c} ${cx + 1} ${Y + 3} ${cz + c} cobblestone`)
+    }
     await cmd(`kill @e[type=!player,${box}]`)
     for (const [side, c] of Object.entries(COLORS)) {
       await cmd(`team add duel_${side}`)
