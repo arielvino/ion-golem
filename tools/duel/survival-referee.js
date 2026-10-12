@@ -5,7 +5,12 @@
 // were around and what the bot did, is appended to
 // <data dir>/duel/survival-results.jsonl.
 //
-//   node tools/duel/survival-referee.js [--bot BroDev] [--minutes 5] [--rounds 3] [--at 0,200] [--r 30] [--kit shield|noshield|none] [--feed no]
+// The bot under test should be a --no-ai --no-chat test bot (node bot.js BotX --debug
+// --no-ai --no-chat): the reflexes and defend do the fighting, and an AI bot takes a
+// model turn for every death and chat line on the server. Use an AI bot only when
+// its choices are what's being measured, and ask the user first.
+//
+//   node tools/duel/survival-referee.js [--bot BotTest] [--minutes 5] [--rounds 3] [--at 0,200] [--r 30] [--kit shield|noshield|none] [--feed no]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -13,7 +18,7 @@ const { makeArena, cmd, ask, logSize, logSince } = require('./arena')
 
 const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filter(Boolean)
   .map(a => a.trim().split(/\s+/)))
-const BOT = args.bot || 'BroDev'
+const BOT = args.bot || 'BotTest'
 const MINUTES = parseFloat(args.minutes || '5')
 const ROUNDS = parseInt(args.rounds || '3', 10)
 const [CX, CZ] = (args.at || '0,200').split(',').map(Number)

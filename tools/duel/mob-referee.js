@@ -4,7 +4,12 @@
 // and console replies for who dies. Each round, with what the bot did (from its own
 // log), is appended to <data dir>/duel/mob-results.jsonl.
 //
-//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none] [--feed no]
+// The bot under test should be a --no-ai --no-chat test bot (node bot.js BotX --debug
+// --no-ai --no-chat): the reflexes and defend do the fighting, and an AI bot takes a
+// model turn for every death and chat line on the server. Use an AI bot only when
+// its choices are what's being measured, and ask the user first.
+//
+//   node tools/duel/mob-referee.js [--bot BotTest] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none] [--feed no]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -12,7 +17,7 @@ const { makeArena, cmd, ask, logSize, logSince } = require('./arena')
 
 const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filter(Boolean)
   .map(a => a.trim().split(/\s+/)))
-const BOT = args.bot || 'BroDev'
+const BOT = args.bot || 'BotTest'
 const MOB = args.mob || 'skeleton'
 const ROUNDS = parseInt(args.rounds || '30', 10)
 const TIME_MS = parseInt(args.time || '90', 10) * 1000
