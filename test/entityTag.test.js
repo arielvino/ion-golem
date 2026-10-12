@@ -23,3 +23,14 @@ test('a tagged spec finds that exact entity; untagged specs are not tags', () =>
   assert.strictEqual(findTagged('cow#dead'), null)
   assert.strictEqual(tagOf('cow'), null)
 })
+
+test('a tag shared by two kinds of entity finds the one the spec names', () => {
+  // Seen live: attack:blaze#28c2 chased skeleton#28c2 104 m away, out of the arena.
+  const self = { id: 1 }
+  const skeleton = { id: 20, name: 'skeleton', uuid: '28c2aaaa-0000-4000-8000-000000000005' }
+  const blaze = { id: 21, name: 'blaze', uuid: '28c2bbbb-0000-4000-8000-000000000006' }
+  state.bot = { entity: self, entities: { 1: self, 20: skeleton, 21: blaze } }
+  assert.strictEqual(findTagged('blaze#28c2'), blaze)
+  assert.strictEqual(findTagged('skeleton#28c2'), skeleton)
+  assert.strictEqual(findTagged('zombie#28c2'), null)
+})
