@@ -35,7 +35,7 @@ let dir, PROVIDERS
 
 test.before(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctxslice-'))
-  state.BOT_DATA_DIR = dir
+  state.WORLD_DATA_DIR = dir
 
   const Database = require('better-sqlite3')
   const db = new Database(path.join(dir, 'blocks.db'))

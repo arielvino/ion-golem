@@ -26,7 +26,7 @@ const VERSION = process.env.MC_VERSION || '26.1'
 
 const DATA_DIR = process.env.BENCH_DATA_DIR || path.join(__dirname, '..', '..', '.bench-runtime')
 fs.mkdirSync(DATA_DIR, { recursive: true })
-state.BOT_DATA_DIR = DATA_DIR
+state.WORLD_DATA_DIR = DATA_DIR
 require('../src/world/memory').initDB()
 
 const { TRANSPARENT, PASSABLE } = require('../src/config/blocks')
