@@ -34,12 +34,16 @@ function tagOf(spec) {
   return m ? m[1].toLowerCase() : null
 }
 
-// The live entity a tagged spec names ('cow#a3f9', or just '#a3f9'), or null.
+// The live entity a tagged spec names ('cow#a3f9', or just '#a3f9'), or null. Four
+// hex digits do collide across the entities in view, so a spec that names a kind
+// only matches that kind.
 function findTagged(spec) {
   const id = tagOf(spec)
   if (!id) return null
+  const kind = String(spec).replace(/#[0-9a-z]+\s*$/i, '').trim().toLowerCase()
   const bot = state.bot
-  return Object.values(bot.entities).find(e => e !== bot.entity && !e.username && shortId(e) === id) || null
+  return Object.values(bot.entities).find(e => e !== bot.entity && !e.username && shortId(e) === id &&
+    (!kind || baseName(e).toLowerCase() === kind)) || null
 }
 
 module.exports = { entityTag, baseName, shortId, tagOf, findTagged }

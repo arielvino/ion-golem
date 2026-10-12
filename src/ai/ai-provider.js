@@ -201,7 +201,9 @@ function createClaudeCodeProvider(opts = {}) {
   return {
     init(sysPrompt) {
       systemPrompt = sysPrompt
-      spawnProc()
+      // A bot started with the AI off (--no-ai) gets no CLI process until its
+      // first request: send() spawns one.
+      if (!state.aiPaused) spawnProc()
     },
 
     async send(prompt, onDelta, onToolCall) {
