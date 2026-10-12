@@ -6,6 +6,7 @@ const { HEALTH_AUTOEAT, FOOD_FULL, OXYGEN_DROWNING, OXYGEN_FALL_SAFE } = require
 const { WATER_BLOCKS, FIRE_BLOCKS } = require('../config/blocks')
 const T = require('../config/timings')
 const { entityTag } = require('../perception/entityTag')
+const { damageCause, hasAttacker } = require('../perception/damageCause')
 
 function setupAutonomous(interruptFn) {
   const bot = state.bot
@@ -116,7 +117,8 @@ function setupAutonomous(interruptFn) {
 
   // --- DAMAGE RESPONSE ---
   let lastEnvDamage = 0
-  bot.on('entityHurt', (entity, source) => {
+  let lastEnvCause = null, lastEnvJournal = 0
+  bot.on('entityHurt', (entity, source, damageType) => {
     if (entity !== bot.entity) return
 
     // A projectile: the guard knows what it was, where it came from and who shot it,
@@ -149,19 +151,29 @@ function setupAutonomous(interruptFn) {
     // No source (older versions send none): guess a nearby hostile attacker.
     // An archer hits from range: one in sight counts too.
     // A neutral mob (enderman) standing by is the attacker only if nothing else is.
+    // A fall, lava or suffocation has no attacker: don't pin it on a mob standing by.
     const { isNeutral } = require('../perception/entityClass')
     const near = (e) => (e.type === 'hostile' || e.type === 'mob') && e.position.distanceTo(bot.entity.position) < 6
-    const attacker = bot.nearestEntity(e => near(e) && !isNeutral(e)) ||
-      ranged.nearestArcher(bot) || bot.nearestEntity(near)
+    const attacker = hasAttacker(damageType) && (bot.nearestEntity(e => near(e) && !isNeutral(e)) ||
+      ranged.nearestArcher(bot) || bot.nearestEntity(near))
 
     if (attacker) {
       autoFight(attacker, `attacked by ${attacker.name || attacker.displayName}!`, `Under attack by ${attacker.name || 'something'}!`)
       return
     }
 
-    // Environmental damage: no hostile nearby
-    if (Date.now() - lastEnvDamage < T.ENV_DAMAGE_DEBOUNCE) return
-    lastEnvDamage = Date.now()
+    // Environmental damage. The model hears what it was (or that nothing named it), so
+    // it doesn't blame whatever is near; once per cause per debounce window, since
+    // suffocating or burning hurts every half second.
+    const cause = damageCause(damageType)
+    const now = Date.now()
+    if (cause !== lastEnvCause || now - lastEnvJournal >= T.ENV_DAMAGE_DEBOUNCE) {
+      require('../core/utils').logEvent(`hurt by ${cause}`)
+      lastEnvCause = cause
+      lastEnvJournal = now
+    }
+    if (now - lastEnvDamage < T.ENV_DAMAGE_DEBOUNCE) return
+    lastEnvDamage = now
 
     const pos = bot.entity.position
     const feetBlock = bot.blockAt(pos.offset(0, 0, 0))
@@ -172,7 +184,8 @@ function setupAutonomous(interruptFn) {
     const onMagma = belowBlock && belowBlock.name === 'magma_block'
     const vel = bot.entity.velocity
     const burning = (bot.entity.metadata?.[0] & 1) === 1   // shared flags: on fire
-    const wasFall = vel && vel.y > -0.1 && !inFire && !inLava && !onCactus && !onMagma && !burning && bot.oxygenLevel > OXYGEN_FALL_SAFE
+    const wasFall = damageType ? damageType === 'fall'
+      : vel && vel.y > -0.1 && !inFire && !inLava && !onCactus && !onMagma && !burning && bot.oxygenLevel > OXYGEN_FALL_SAFE
 
     if (inLava) {
       console.log(`  [AUTO] LAVA DAMAGE! HP=${Math.round(bot.health)}, fleeing`)
@@ -213,7 +226,7 @@ function setupAutonomous(interruptFn) {
     } else if (wasFall) {
       console.log(`  [AUTO] fall damage, HP=${Math.round(bot.health)}`)
     } else {
-      console.log(`  [AUTO] environmental damage, HP=${Math.round(bot.health)}, block=${feetBlock?.name}`)
+      console.log(`  [AUTO] environmental damage: ${cause}, HP=${Math.round(bot.health)}, block=${feetBlock?.name}`)
     }
   })
 
