@@ -4,7 +4,7 @@
 // and console replies for who dies. Each round, with what the bot did (from its own
 // log), is appended to <data dir>/duel/mob-results.jsonl.
 //
-//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none]
+//   node tools/duel/mob-referee.js [--bot BroDev] [--mob skeleton] [--rounds 30] [--time 90] [--at 40,0] [--r 12] [--kit shield|noshield|none] [--feed no]
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -17,6 +17,9 @@ const MOB = args.mob || 'skeleton'
 const ROUNDS = parseInt(args.rounds || '30', 10)
 const TIME_MS = parseInt(args.time || '90', 10) * 1000
 const [CX, CZ] = (args.at || '40,0').split(',').map(Number)
+// --feed no: no saturation top-up each round, so regeneration runs at what the bot's
+// own food allows (a fed bot out-heals Wither I).
+const FEED = args.feed !== 'no'
 const arena = makeArena({ cx: CX, cz: CZ, r: parseInt(args.r || '12', 10) })
 
 // Iron armour (from prepare), a sword (and shield) in hand, a bow and food in the bag;
@@ -82,7 +85,7 @@ function botActions(t0, t1) {
 async function playRound(n) {
   await arena.sweep()
   await arena.prepare(BOT, 'blue', KIT, 0)
-  await cmd(`effect give ${BOT} saturation 1 10 true`)
+  if (FEED) await cmd(`effect give ${BOT} saturation 1 10 true`)
   const m = arena.corner(1)
   await cmd(`summon ${MOB} ${m.x} ${m.y} ${m.z} {${MOB_GEAR[MOB] || ''}Tags:["${TAG}"],PersistenceRequired:1b}`)
   await sleep(500)
@@ -116,7 +119,7 @@ async function playRound(n) {
     if (!diedAfter) settled = await health(BOT)
   }
   const result = {
-    t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', arena: `${CX},${CZ}`, winner,
+    t: new Date().toISOString(), round: n, bot: BOT, mob: MOB, kit: args.kit || 'shield', fed: FEED, arena: `${CX},${CZ}`, winner,
     seconds: +((t1 - t0) / 1000).toFixed(1),
     botHp, settledHp: settled, diedAfter, effectSeconds, effectDamage: +effectDamage.toFixed(1),
     mobHp: winner === BOT ? 0 : await health(`@e[type=${MOB},tag=${TAG},${arena.box},limit=1]`),
