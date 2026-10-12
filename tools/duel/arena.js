@@ -96,10 +96,23 @@ const COLORS = {
   blue: { trim: 'lapis', team: 'blue' }
 }
 
-function makeArena({ cx = 0, cz = 0, r = R } = {}) {
-  // x0..x1, z0..z1: the barrier shell's footprint.
+// A command may touch at most this many blocks (fill, clone, execute if blocks).
+const MAX_BLOCKS = 32768
+
+// dark: no lights, and tinted-glass sides as well as roof, so no daylight gets in
+// either: the floor is at light 0 and monsters spawn on it.
+function makeArena({ cx = 0, cz = 0, r = R, dark = false } = {}) {
+  // x0..x1, z0..z1: the shell's footprint.
   const x0 = cx - r - 1, x1 = cx + r + 1, z0 = cz - r - 1, z1 = cz + r + 1
   const box = `x=${x0},y=${Y},z=${z0},dx=${2 * r + 2},dy=${TOP - Y},dz=${2 * r + 2}`
+  // A big arena's box goes through commands in horizontal slices of `step` layers.
+  const step = Math.max(1, Math.floor(MAX_BLOCKS / ((x1 - x0 + 1) * (z1 - z0 + 1))))
+  const slices = (lo, hi) => {
+    const out = []
+    for (let y = lo; y <= hi; y += step) out.push([y, Math.min(hi, y + step - 1)])
+    return out
+  }
+  const copyOf = (y) => COPY_Y + y - BOTTOM
   // Cover walls stand halfway out; lights every 6 blocks.
   const c = Math.round(r / 2)
   const LIGHTS = [-9, -3, 3, 9].filter(o => Math.abs(o) < r)
@@ -108,8 +121,12 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
   // The dead respawn here, on the roof: out of the fight, watching it.
   const BENCH = { x: cx, y: TOP + 1, z: cz }
 
-  const matchesCopy = async () =>
-    /passed/.test(await ask(`execute if blocks ${x0} ${BOTTOM} ${z0} ${x1} ${TOP} ${z1} ${x0} ${COPY_Y} ${z0} all`, /Test (passed|failed)/) || '')
+  async function matchesCopy() {
+    for (const [a, b] of slices(BOTTOM, TOP)) {
+      if (!/passed/.test(await ask(`execute if blocks ${x0} ${a} ${z0} ${x1} ${b} ${z1} ${x0} ${copyOf(a)} ${z0} all`, /Test (passed|failed)/) || '')) return false
+    }
+    return true
+  }
 
   // Whether the copy is there at all: its tinted-glass roof, barrier bottom and its
   // stone-brick floor. Without it, restoring from the copy would clone raw
@@ -128,17 +145,22 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
     // bottom) is rebuilt too.
     if (!await copyExists()) { await build(); await saveCopy(); return 'built' }
     if (await matchesCopy()) return 'intact'
-    await cmd(`clone ${x0} ${COPY_Y} ${z0} ${x1} ${COPY_TOP} ${z1} ${x0} ${BOTTOM} ${z0}`)
+    for (const [a, b] of slices(BOTTOM, TOP)) await cmd(`clone ${x0} ${copyOf(a)} ${z0} ${x1} ${copyOf(b)} ${z1} ${x0} ${a} ${z0}`)
     if (await matchesCopy()) return 'repaired'
     await build()
     await saveCopy()
     return 'built'
   }
 
-  const saveCopy = () => cmd(`clone ${x0} ${BOTTOM} ${z0} ${x1} ${TOP} ${z1} ${x0} ${COPY_Y} ${z0}`)
+  async function saveCopy() {
+    for (const [a, b] of slices(BOTTOM, TOP)) await cmd(`clone ${x0} ${a} ${z0} ${x1} ${b} ${z1} ${x0} ${copyOf(a)} ${z0}`)
+  }
 
   async function build() {
-    await cmd(`fill ${x0} ${BOTTOM} ${z0} ${x1} ${TOP} ${z1} barrier hollow`)
+    // The shell, then the air inside it (a `hollow` fill can't be sliced).
+    for (const [a, b] of slices(BOTTOM, TOP)) await cmd(`fill ${x0} ${a} ${z0} ${x1} ${b} ${z1} ${dark ? 'tinted_glass' : 'barrier'}`)
+    for (const [a, b] of slices(BOTTOM + 1, TOP - 1)) await cmd(`fill ${x0 + 1} ${a} ${z0 + 1} ${x1 - 1} ${b} ${z1 - 1} air`)
+    await cmd(`fill ${x0} ${BOTTOM} ${z0} ${x1} ${BOTTOM} ${z1} barrier`)
     // A tinted-glass roof: see-through, but it stops daylight, which barriers let in
     // (undead burned under them). The light blocks below keep the arena lit.
     await cmd(`fill ${x0} ${TOP} ${z0} ${x1} ${TOP} ${z1} tinted_glass`)
@@ -149,7 +171,7 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
     await cmd(`fill ${x0} ${Y + 1} ${z0} ${x0} ${Y + 3} ${z1} stone_bricks`)
     await cmd(`fill ${x1} ${Y + 1} ${z0} ${x1} ${Y + 3} ${z1} stone_bricks`)
     // Lit from the floor and, invisibly, from under the ceiling.
-    for (const x of LIGHTS) for (const z of LIGHTS) {
+    if (!dark) for (const x of LIGHTS) for (const z of LIGHTS) {
       await cmd(`setblock ${cx + x} ${Y} ${cz + z} glowstone`)
       await cmd(`setblock ${cx + x} ${TOP - 1} ${cz + z} light[level=15]`)
     }
@@ -195,7 +217,7 @@ function makeArena({ cx = 0, cz = 0, r = R } = {}) {
     await cmd(`kill @e[type=!player,${box}]`)
   }
 
-  return { ready, build, saveCopy, prepare, sweep, corner, box, cx, cz, VIEW, BENCH }
+  return { ready, build, saveCopy, prepare, sweep, corner, box, cx, cz, r, VIEW, BENCH }
 }
 
 module.exports = { ...makeArena(), makeArena, cmd, ask, logSize, logSince, Y, R }
