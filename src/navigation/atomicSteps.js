@@ -247,8 +247,32 @@ function dbCanDown(cx, cy, cz, dx, dz, drop, mode) {
   return true
 }
 
+// Look at the cells a step to (cx+dx, cz+dz) depends on, before deciding it: each one
+// in line of sight from the eye is read from the world and saved to memory, as vision
+// would; hidden ones keep what memory has. Without this a step waited on the next
+// vision survey (every 3 s) for the floor of a cell it had just dug open: a tunnel's
+// steps retried "blocked" until it gave up.
+// The cells: the next column from the deepest landing floor (drop 3) to head height
+// over a step up, and the jump clearance above the bot.
+function lookAtStep(bot, cx, cy, cz, dx, dz) {
+  if (!state.stmts?.upsertBlock) return
+  const { blockVisible } = require('../perception/visibility')
+  const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0)
+  const nx = cx + dx, nz = cz + dz
+  const cells = [[cx, cy + 2, cz]]
+  for (let y = cy - 4; y <= cy + 2; y++) cells.push([nx, y, nz])
+  const tick = bot.time?.age || 0
+  for (const [x, y, z] of cells) {
+    if (!blockVisible(eye, x, y, z)) continue
+    const b = bot.blockAt(new Vec3(x, y, z))
+    if (!b) continue
+    try { state.stmts.upsertBlock.run(x, y, z, b.name, tick, b.stateId) } catch (e) {}
+  }
+}
+
 // Core atomic movement: move exactly 1 block in cardinal direction.
-// Checks clearance against DB queries, executes physics, verifies arrival.
+// Looks at the cells the step needs (lookAtStep), then checks clearance against DB
+// queries — what it sees now, else what it remembers — executes physics, verifies arrival.
 //
 // opts.mode: 'safe' (default) | 'water' | 'hazard'
 // Returns: { ok: boolean, type: 'flat'|'up'|'down'|'blocked', dy: number }
@@ -259,6 +283,7 @@ async function liveStep(bot, dx, dz, opts = {}) {
   const nx = cx + dx, nz = cz + dz
   const doors = require('./doors')
   await doors.restoreBehind(bot, nx, nz)
+  lookAtStep(bot, cx, cy, cz, dx, dz)
 
   // Determine move type from DB checks: try flat, then up, then down
   let moveType = null, targetY = cy, drop = 0
