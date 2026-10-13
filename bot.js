@@ -477,14 +477,22 @@ function createBot() {
     if (!isGameEvent) return
     const eventPlayer = msg.match(/^(\w+)/)?.[1]
     const isBotEvent = msg.startsWith(bot.username + ' ')
+    const wake = (message) => {
+      if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
+      state.messageQueue.push({ username: 'event', message })
+    }
     // Always log bot's own events to chat_log DB. Most aren't queued as AI messages (noise),
-    // but the bot's own DEATH is a first-class event: queue it so the model wakes to react to
-    // dying + respawning — otherwise (esp. with idle skip) it could respawn and sit silent.
+    // but the bot's own DEATH and ADVANCEMENTS are first-class events: queue them so the model
+    // wakes to react — otherwise (esp. with idle skip) it could sit silent through them.
     if (isBotEvent) {
       logChatDB('event', bot.username, msg)
       // Own advancement: a journal record, so the model sees the milestone in NEW=.
       const adv = msg.match(/has (?:made the advancement|completed the challenge|reached the goal) \[(.+)\]/)
-      if (adv) require('./src/core/utils').logEvent(`advancement: ${adv[1]}`)
+      if (adv) {
+        require('./src/core/utils').logEvent(`advancement: ${adv[1]}`)
+        wake(`[GAME EVENT] You (${bot.username}) ${msg.slice(bot.username.length + 1).replace(/^has /, '')}`)
+        return
+      }
       // Log bot death as game event with cause
       if (/was |died|drowned|burned|fell|hit the ground|went up in flames|walked into|tried to swim|suffocated|starved|was blown|was killed|was slain|was shot/.test(msg)) {
         const pos = bot.entity?.position
@@ -492,21 +500,13 @@ function createBot() {
         logGameEvent('death', cause, 1, pos ? Math.floor(pos.x) : null, pos ? Math.floor(pos.y) : null, pos ? Math.floor(pos.z) : null, { message: msg })
         require('./src/core/utils').logEvent(`death: ${cause}${pos ? ` at ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}` : ''}`)
         state.diedAt = Date.now()
-        if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
-        state.messageQueue.push({
-          username: 'event',
-          message: `[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`
-        })
+        wake(`[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`)
       }
       return
     }
     console.log(color(c.yellow, `\n  [EVENT] ${msg}`))
     logChatDB('event', eventPlayer || null, msg)
-    if (!state.msgPending) softInterrupt()  // like chat: react now, not next tick
-    state.messageQueue.push({
-      username: 'event',
-      message: `[GAME EVENT] ${msg}`
-    })
+    wake(`[GAME EVENT] ${msg}`)
   })
 
   bot.on('kicked', r => {
