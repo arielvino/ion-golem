@@ -40,7 +40,29 @@ test('compaction replaces a run in place and inherits every citation', () => {
   assert.deepStrictEqual(note.cites, ['r2', 'r3', 'r4'])
   assert.deepStrictEqual(j.notes.map(n => n.id), ['n1', 'n5', 'n4'])
   assert.throws(() => j.compact('n40-n41', 'x'), /no notes/)
-  assert.throws(() => j.compact('3-9', 'x'), /bad range/)
+  assert.throws(() => j.compact('3-9', 'x'), /bad note id/)
+})
+
+test('compaction takes a list of scattered ids; one id is an update', () => {
+  const j = new Journal()
+  j.record('r'); j.record('s')
+  j.note('a [r1]'); j.note('b'); j.note('c [r2]'); j.note('d')
+  const { note, replaced } = j.compact('n1,n3', 'a and c')
+  assert.deepStrictEqual(replaced, ['n1', 'n3'])
+  assert.deepStrictEqual(note.cites, ['r1', 'r2'])
+  assert.deepStrictEqual(j.notes.map(n => n.id), ['n5', 'n2', 'n4'])
+  j.compact('n2', 'b, updated')
+  assert.deepStrictEqual(j.notes.map(n => [n.id, n.text]), [['n5', 'a and c'], ['n6', 'b, updated'], ['n4', 'd']])
+})
+
+test('drop deletes notes and frees their citations', () => {
+  const j = new Journal()
+  j.record('r')
+  j.note('a [r1]'); j.note('b'); j.note('c'); j.note('d')
+  assert.deepStrictEqual(j.drop('n1,n3-n4'), ['n1', 'n3', 'n4'])
+  assert.deepStrictEqual(j.notes.map(n => n.id), ['n2'])
+  assert.throws(() => j.drop('n9'), /no notes/)
+  assert.throws(() => j.drop('all'), /bad note id/)
 })
 
 test('renderNotes shows ids, nodes, citations and a size hint', () => {
@@ -48,7 +70,7 @@ test('renderNotes shows ids, nodes, citations and a size hint', () => {
   j.record('x')
   j.note('south floods [r1]', 's6')
   assert.strictEqual(j.renderNotes(20, j.notes[0].ts + 7 * 60000), 'NOTES (1):\nn1 @s6 (7m ago) south floods [r1]')
-  assert.match(j.renderNotes(1), /← long: consider \[NOTE:compact/)
+  assert.match(j.renderNotes(1), /← long: drop or merge/)
   assert.strictEqual(new Journal().renderNotes(), '')
 })
 
@@ -155,6 +177,19 @@ test('a leading @node in a note is the attachment, not text', () => {
   assert.deepStrictEqual([c.node, c.text], ['s3', 'plain'])
   assert.deepStrictEqual([d.node, d.text], ['s3', 'unknown node'])
   assert.match(state.journal.renderNotes(), /^n1 @g1 \(0s ago\) third attempt \[r1\]$/m)
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
+})
+
+test('[NOTE:replace:...] and [NOTE:drop:...] tags', () => {
+  const state = require('../src/core/state')
+  const { applyNoteTags } = require('../src/world/journalStore')
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.WORLD_DATA_DIR }
+  state.WORLD_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jops-'))
+  state.journal = new Journal()
+  state.agenda = null
+  applyNoteTags('[NOTE:HP 12, digging] [NOTE:Sargon: speak Hebrew] [NOTE:stone at 1,2,3]')
+  assert.deepStrictEqual(applyNoteTags('[NOTE:replace:n1:fortress not in the east half] [NOTE:drop:n3]'), ['n4 ← n1', 'dropped n3'])
+  assert.deepStrictEqual(state.journal.notes.map(n => [n.id, n.text]), [['n4', 'fortress not in the east half'], ['n2', 'Sargon: speak Hebrew']])
   Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
 })
 
