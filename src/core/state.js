@@ -21,6 +21,7 @@ module.exports = {
   noActionRounds: 0,
   aiPaused: false,       // debug `!ai off`: engine makes no model calls
   chatMuted: false,      // --no-chat: lines the bot would say go to the console only
+  hold: null,            // { by, at } while a player has the bot hold (engine/holdMode.js)
 
   messageQueue: [],
   // Tasks — agenda is the source of truth; taskStack is its derived view (engine/tasks.js)

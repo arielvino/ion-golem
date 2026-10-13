@@ -63,6 +63,12 @@ async function executeAction(actionStr, username, opts = {}) {
         engine.interrupt()
         break
       }
+      case 'hold': {
+        require('../engine/holdMode').hold(username)
+        require('../engine/engine').interrupt()
+        break
+      }
+      case 'resume': require('../engine/holdMode').release(`resume from ${username}`); break
       case 'come': result = await doCome(target, { skipTool }); break
       case 'attack': result = await doAttack(target); break
       case 'shoot': result = await doShoot(target); break
