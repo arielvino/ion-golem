@@ -1168,6 +1168,23 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
       bot.pathfinder.setGoal(null)
     }
   }, 250)
+  // The walk's own rules (it may bridge where the terraform gate allows), and a record
+  // of every block it places: logged, and kept from being dug as a path block.
+  const walkMovements = bot.movementsFor?.walk
+  if (walkMovements) bot.pathfinder.setMovements(walkMovements)
+  const heldBefore = bot.heldItem?.name
+  let bridged = 0
+  const placeBlock = bot.placeBlock
+  bot.placeBlock = async function (ref, face) {
+    const r = await placeBlock.call(this, ref, face)
+    const p = ref.position.plus(face)
+    const name = bot.blockAt(p)?.name
+    bridged++
+    trackPathBlock(p.x, p.y, p.z, 'bridge')
+    logGameEvent('place', name, 1, p.x, p.y, p.z, { reason: 'bridge' })
+    console.log(`  pathfinder: bridged with ${name} at ${p.x},${p.y},${p.z}`)
+    return r
+  }
   try {
     await raceAbort(bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, range)), timeout)
   } catch (e) {
@@ -1181,6 +1198,13 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   } finally {
     clearInterval(guard)
     bot.pathfinder.setGoal(null)
+    bot.placeBlock = placeBlock
+    if (bot.movementsFor) bot.pathfinder.setMovements(bot.movementsFor.chase)
+  }
+  // Bridging put a block in hand: give back what it held (a weapon, a tool).
+  if (bridged && heldBefore && bot.heldItem?.name !== heldBefore) {
+    const item = bot.inventory.items().find(i => i.name === heldBefore)
+    if (item) await bot.equip(item, 'hand').catch(() => {})
   }
   // goto also resolves when it gives up with an empty path, so judge arrival ourselves.
   if (goal.isDone()) {

@@ -9,7 +9,8 @@
 //   gap       — a skeleton on another platform 12 off and 3 down, open air between;
 //   bridge    — the same, with a bridge across (in reach: melee, as before).
 // The bot gets iron armour, a sword and shield, plus the --kit: bow (and arrows),
-// trident (Loyalty), trident-plain (no Loyalty), or none. Each round reads from the
+// bow-blocks (and cobblestone a walk could bridge with), trident (Loyalty),
+// trident-plain (no Loyalty), or none. Each round reads from the
 // bot's log what the reflex chose and how the round went.
 //
 // The bot under test is a quiet one with its output in --out:
@@ -43,6 +44,7 @@ const SCENES = {
 const S = SCENES[SCENE]
 const KITS = {
   bow: [['bow', 1], ['arrow', 64]],
+  'bow-blocks': [['bow', 1], ['arrow', 64], ['cobblestone', 32]],
   trident: [['trident[enchantments={loyalty:3}]', 1]],
   'trident-plain': [['trident', 1]],
   none: []
