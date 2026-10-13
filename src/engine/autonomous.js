@@ -80,16 +80,35 @@ function setupAutonomous(interruptFn) {
   // --- AUTO-FIGHT: interrupt whatever runs and put an attack at the front ---
   // No cooldown between fights: the next hostile is engaged as soon as melee drops the
   // last one. Only an attack still launching (target alive) holds off a second one.
+  // Melee if the bot can get within reach on foot, else a ranged weapon, else nothing
+  // (combat/engage.js); a mob it can't answer is not re-planned for DECLINE_MS.
   let pending = null, pendingAt = 0
-  // True when it launched an attack.
+  const declined = new Map()   // entity id → time it was declined
+  const DECLINE_MS = 3000
+  // True when it answered the mob: launched an attack, or logged why not.
   function autoFight(attacker, logLine, chatLine) {
     // Running from a swarm (the reflex or a flee action) beats turning to fight.
     if (bot.melee.target || state.retreating || state.currentTask === 'fleeing') return false
     if (state.creeperReflex) return false   // a creeper is fusing: block or run first, fight after
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return false
+    const tag = entityTag(attacker)
+    if (state.shooting && state.currentTask === `shooting ${tag}`) return false   // already on it
+    if (Date.now() - (declined.get(attacker.id) || 0) < DECLINE_MS) return false
+    const { action, why } = require('../combat/engage').chooseEngagement(bot, attacker)
+    if (!action) {
+      // Said once per mob (defend mode asks again every few ticks); after that the
+      // caller logs a hit as a plain hit.
+      const first = !declined.has(attacker.id)
+      if (declined.size > 200) declined.clear()
+      declined.set(attacker.id, Date.now())
+      if (!first) return false
+      console.log(`  [AUTO] ${logLine}; not fighting back: ${why}`)
+      require('../core/utils').logEvent(`reflex: ${logLine} → not fighting back: ${tag} is ${why}`)
+      return true
+    }
     pending = attacker; pendingAt = Date.now()
-    console.log(`  [AUTO] ${logLine}`)
-    require('../core/utils').logEvent(`reflex: ${logLine} → attack:${entityTag(attacker)}`)
+    console.log(`  [AUTO] ${logLine} → ${action} (${why})`)
+    require('../core/utils').logEvent(`reflex: ${logLine} → ${action}`)
     sendChat(chatLine)
     // keepResponse: a reflex kills the running task, never the model's turn. A stream of
     // mobs (a spawner) used to abort every turn, so the model never got to answer it.
@@ -97,7 +116,7 @@ function setupAutonomous(interruptFn) {
     // Prepend attack to front of queue instead of replacing, and launch it now — left
     // to the engine it would wait for the next tick, up to 5s of free hits.
     setTimeout(() => {
-      state.actionQueue.unshift({ actionStr: `attack:${entityTag(attacker)}`, username: 'auto' })
+      state.actionQueue.unshift({ actionStr: action, username: 'auto' })
       require('./engine').processActionQueue()
     }, T.QUEUE_PREPEND_DELAY)
     return true
