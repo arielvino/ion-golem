@@ -228,11 +228,17 @@ async function handleMessages(batch) {
       const engine = require('../engine/engine')
       state.actionOpCount++
       if (!queueReplaced) { state.lastFailures = []; state.actionQueue = []; queueReplaced = true }
-      if (actionStr.split(':')[0] === 'stop') {
-        console.log(color(c.yellow, `\n  -> stop: preempting current work`))
+      const verb = actionStr.split(':')[0]
+      const holdMode = require('../engine/holdMode')
+      if (verb === 'stop' || verb === 'hold') {
+        console.log(color(c.yellow, `\n  -> ${verb}: preempting current work`))
         engine.interrupt({ keepResponse: true })  // clears queue + sets abortSignal
+        if (verb === 'hold') holdMode.hold(username)
         return
       }
+      // Acting is no longer waiting: any other action ends a hold.
+      holdMode.release(`[ACTION:${actionStr}]`)
+      if (verb === 'resume') return
       state.actionQueue.push({ actionStr, username })
       console.log(color(c.green, `\n  -> action: ${actionStr}`))
       engine.processActionQueue()

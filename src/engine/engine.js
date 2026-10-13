@@ -75,9 +75,10 @@ function processActionQueue() {
   // queue, but if one arrives via another path, preempt it here too. interrupt() leaves
   // the bg task truthfully 'running', so the gate below returns and the remainder
   // dispatches on a later tick once the killed task settles — no re-arm race.
-  const stopIdx = state.actionQueue.findIndex(a => a.actionStr.split(':')[0] === 'stop')
+  const stopIdx = state.actionQueue.findIndex(a => ['stop', 'hold'].includes(a.actionStr.split(':')[0]))
   if (stopIdx !== -1) {
     const after = state.actionQueue.slice(stopIdx + 1)
+    if (state.actionQueue[stopIdx].actionStr.split(':')[0] === 'hold') require('./holdMode').hold(state.actionQueue[stopIdx].username)
     interrupt()
     state.actionQueue = after
   }
@@ -136,6 +137,14 @@ function idleWakeReason(bgResult) {
 // MONITOR while actions run, SELF-CHECK on the focused goal, and when fully idle
 // only if idleWakeReason finds a real signal. null = nothing of our own to raise.
 function autonomousLine(bgResult) {
+  // Held: nothing of its own to work on or report, only the real signals. A task that
+  // ends (the one the hold stopped, or a reflex fight) isn't one.
+  if (require('./holdMode').isHeld()) {
+    const wake = idleWakeReason(null)
+    if (!wake) return null
+    console.log(color(c.cyan, `  [LOOP] held, woken: ${wake}`))
+    return { kind: 'held', line: '[SELF-CHECK] held' }
+  }
   const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
   if (actionsRunning) {
     const { getBackgroundSummary } = require('./backgroundTask')
@@ -246,4 +255,4 @@ function stopEngine() {
   state.engineRunning = false
 }
 
-module.exports = { startEngine, stopEngine, interrupt, softInterrupt, processActionQueue }
+module.exports = { startEngine, stopEngine, interrupt, softInterrupt, processActionQueue, autonomousLine }
