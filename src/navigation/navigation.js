@@ -1200,6 +1200,17 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
     console.log(`  pathfinder: bridged with ${name} at ${p.x},${p.y},${p.z}`)
     return r
   }
+  // What the planner said: how long each plan took, and how it ended.
+  let planFrom = Date.now(), lastStatus = null
+  const onPlan = (r) => {
+    if (r.status === 'partial' && lastStatus === 'partial') return
+    console.log(`  pathfinder: plan ${r.status} after ${Date.now() - planFrom}ms, ${r.visitedNodes} nodes, ${r.path.length} steps`)
+    if (r.status !== 'partial') planFrom = Date.now()
+    lastStatus = r.status
+  }
+  const onReset = () => { planFrom = Date.now(); lastStatus = null }
+  bot.on('path_update', onPlan)
+  bot.on('path_reset', onReset)
   try {
     await raceAbort(bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, range)), timeout)
   } catch (e) {
@@ -1213,6 +1224,8 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   } finally {
     clearInterval(guard)
     bot.pathfinder.setGoal(null)
+    bot.removeListener('path_update', onPlan)
+    bot.removeListener('path_reset', onReset)
     bot.placeBlock = placeBlock
     bot.dig = dig
     if (bot.movementsFor) bot.pathfinder.setMovements(bot.movementsFor.chase)
