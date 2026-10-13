@@ -9,7 +9,8 @@
 //   what they rest on ("south floods at y52 [r41,r43,slice]"): record ids are
 //   citations — checked and kept alive — and anything else (a tool, a context
 //   field, another note) is kept verbatim as a source. Notes are shown every
-//   turn, and can be merged with [NOTE:compact:n3-n9:...]. A compacted note
+//   turn, and can be merged or updated with [NOTE:compact:n3-n9:...] (or
+//   [NOTE:replace:n5:...]) and deleted with [NOTE:drop:n3,n7]. A compacted note
 //   inherits every citation of the notes it replaces, so the story can shrink
 //   without losing its grounding. An uncited note is visibly an inference.
 //
@@ -72,13 +73,15 @@ class Journal {
     return n
   }
 
-  // Replace a contiguous run of notes (by id range, "n3-n9", or one id) with a
-  // single note. Citations of the replaced notes carry over automatically.
-  compact(range, text, node) {
-    const [from, to] = parseRange(range)
-    const i = this.notes.findIndex(n => num(n.id) >= from)
-    const run = this.notes.filter(n => num(n.id) >= from && num(n.id) <= to)
-    if (run.length === 0) throw new JournalError(`no notes in ${range}`)
+  // Replace notes (by id: "n5", a range "n3-n9", or a list "n3,n7,n10-n12") with
+  // a single note, placed where the first of them stood. Citations of the
+  // replaced notes carry over automatically. One id is a plain update: the old
+  // version goes, the new one takes its place under a new id.
+  compact(spec, text, node) {
+    const ids = parseIds(spec)
+    const i = this.notes.findIndex(n => ids.has(num(n.id)))
+    const run = this.notes.filter(n => ids.has(num(n.id)))
+    if (run.length === 0) throw new JournalError(`no notes in ${spec}`)
     const { body, cites, sources } = this._parseCites(text)
     if (!body) throw new JournalError('empty compacted note')
     const inherited = run.flatMap(n => n.cites)
@@ -89,6 +92,16 @@ class Journal {
     const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, sources: this._liveSources(allSources), node: node || null }
     this.notes.splice(i, 0, n)
     return { note: n, replaced: run.map(x => x.id) }
+  }
+
+  // Delete notes outright (same id forms as compact). Their citations go with
+  // them, so the records they protected may be evicted again.
+  drop(spec) {
+    const ids = parseIds(spec)
+    const gone = this.notes.filter(n => ids.has(num(n.id)))
+    if (gone.length === 0) throw new JournalError(`no notes in ${spec}`)
+    this.notes = this.notes.filter(n => !gone.includes(n))
+    return gone.map(n => n.id)
   }
 
   // Records by id, for the read_records tool: "r23-r25,r34". Ids no longer kept
@@ -130,7 +143,7 @@ class Journal {
   // nodeLabel turns a note's node id into its shown form (e.g. 'g2(done 1m ago)').
   renderNotes(compactHint = 20, now = Date.now(), nodeLabel = id => id) {
     if (this.notes.length === 0) return ''
-    const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: consider [NOTE:compact:...]' : ''}:`]
+    const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: drop or merge what future turns no longer need' : ''}:`]
     for (const n of this.notes) {
       const at = n.node ? ` @${nodeLabel(n.node)}` : ''
       // The full basis stays stored (cited records stay protected); the view
@@ -217,11 +230,17 @@ class Journal {
 
 function num(id) { return Number(String(id).slice(1)) }
 
-function parseRange(range) {
-  const m = /^n(\d+)(?:-n?(\d+))?$/.exec(String(range).trim())
-  if (!m) throw new JournalError(`bad range "${range}" — use n3-n9 or n5`)
-  const a = Number(m[1]), b = m[2] ? Number(m[2]) : a
-  return a <= b ? [a, b] : [b, a]
+// "n5", "n3-n9", "n3,n7,n10-n12" → the set of note numbers.
+function parseIds(spec) {
+  const ids = new Set()
+  for (const tok of String(spec).split(',').map(s => s.trim()).filter(Boolean)) {
+    const m = /^n(\d+)(?:-n?(\d+))?$/.exec(tok)
+    if (!m) throw new JournalError(`bad note id "${tok}" — use n5, n3-n9 or n3,n7`)
+    const a = Number(m[1]), b = m[2] ? Number(m[2]) : a
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) ids.add(i)
+  }
+  if (ids.size === 0) throw new JournalError(`bad note ids "${spec}" — use n5, n3-n9 or n3,n7`)
+  return ids
 }
 
 module.exports = { Journal, JournalError, MAX_RECORDS, ago }

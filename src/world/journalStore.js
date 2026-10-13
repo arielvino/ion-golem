@@ -78,7 +78,8 @@ function splitNode(text, fallback = null) {
   return { body, node: node || currentNode() || fallback }
 }
 
-// `[NOTE:text [r1,r2]]` and `[NOTE:compact:n3-n9:text [r4]]`. The body may itself
+// `[NOTE:text [r1,r2]]`, `[NOTE:compact:n3-n9:text [r4]]` (`replace:` is the same
+// op, named for updating one note) and `[NOTE:drop:n3,n7]`. The body may itself
 // contain one level of [...] (the citations), so a plain [^\]]+ would cut it short.
 const NOTE_TAG = /\[NOTE:((?:[^[\]]|\[[^[\]]*\])*)\]/g
 
@@ -92,8 +93,11 @@ function applyNoteTags(rawReply, nodeBefore = null) {
   for (const m of rawReply.matchAll(NOTE_TAG)) {
     const body = m[1].trim()
     try {
-      const cm = /^compact:([^:]+):([\s\S]*)$/.exec(body)
-      if (cm) {
+      const dm = /^drop:([^:]+)$/.exec(body)
+      const cm = /^(?:compact|replace):([^:]+):([\s\S]*)$/.exec(body)
+      if (dm) {
+        applied.push(`dropped ${state.journal.drop(dm[1]).join(',')}`)
+      } else if (cm) {
         const t = splitNode(cm[2], nodeBefore)
         const { note, replaced } = state.journal.compact(cm[1], t.body, t.node)
         applied.push(`${note.id} ← ${replaced.join(',')}`)
