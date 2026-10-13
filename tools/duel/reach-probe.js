@@ -62,8 +62,12 @@ async function platform(x, y, z, r) {
   await cmd(`fill ${x - r - 1} ${y - 1} ${z - r - 1} ${x + r + 1} ${y - 1} ${z + r + 1} barrier`)
   await cmd(`fill ${x - r - 1} ${y} ${z - r - 1} ${x + r + 1} ${y} ${z + r + 1} stone`)
   await cmd(`fill ${x - r - 1} ${y + 1} ${z - r - 1} ${x + r + 1} ${y + 10} ${z + r + 1} air`)
-  await cmd(`fill ${x - r - 1} ${y + 1} ${z - r - 1} ${x + r + 1} ${y + 1} ${z + r + 1} barrier hollow`)
-  await cmd(`fill ${x - r} ${y + 1} ${z - r} ${x + r} ${y + 1} ${z + r} air`)
+  // The rim as its four sides: `fill … hollow` on a 1-high box fills all of it, and
+  // the floor flashed with barrier until the next fill cleared it.
+  const a = r + 1
+  for (const [x1, z1, x2, z2] of [[-a, -a, a, -a], [-a, a, a, a], [-a, -a, -a, a], [a, -a, a, a]]) {
+    await cmd(`fill ${x + x1} ${y + 1} ${z + z1} ${x + x2} ${y + 1} ${z + z2} barrier`)
+  }
 }
 
 async function stage() {
