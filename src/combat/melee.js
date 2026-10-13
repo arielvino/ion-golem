@@ -1,10 +1,26 @@
 // melee.js — chase a target and swing at it until it dies or the fight is stopped.
 //
-// Ported from mineflayer-pvp (MIT, © 2020 TheDudeFromCI) as our fork pinned it: the
-// stop names its target, the shield it raised comes down when the fight ends, the
-// chase is re-aimed when it stalls out of reach, and swings are timed as crits.
-// Unlike the plugin it never replaces the pathfinder's movements: the chase moves
-// under the bot's own rules (no digging, no scaffolding), set in bot.js.
+// Ported from mineflayer-pvp (MIT, © 2020 TheDudeFromCI), with our fork's changes:
+// swings timed as crits, keepDistance spacing and knockback hits, and the fixes
+// below. Unlike the plugin it never replaces the pathfinder's movements: the chase
+// moves under the bot's own rules (no digging, no scaffolding), set in bot.js.
+//
+// Bugs in upstream mineflayer-pvp that we fixed here (and in our fork, PR numbers on
+// arielvino/mineflayer-pvp), to contribute to PrismarineJS/mineflayer-pvp:
+//   1. attack() installs pvp's own default Movements on the shared pathfinder, and
+//      they stay after the fight: the chase, and every move after it, may dig through
+//      walls, tower and scaffold with the bot's blocks. Fix: leave the bot's
+//      movements alone (#8, closed unmerged).
+//   2. stop() with no path_stop within 5 s calls removeAllListeners('path_stop'),
+//      dropping other plugins' listeners too; fix: remove only its own (#1).
+//   3. stoppedAttacking names no target, so a caller can't tell a stale stop of the
+//      previous attack from the end of its own; fix: emit it with the target (#1).
+//   4. The shield pvp raises around swings stays up after the fight ends, and the bot
+//      walks on blocking (slowed); fix: lower it on stop (#2).
+//   5. GoalFollow keeps the target's block until the target moves more than
+//      followRange from it and counts as reached within followRange of that block:
+//      the chase can stop ~4 blocks away, past attackRange, and never swing; fix:
+//      re-aim the goal while out of reach with the pathfinder idle (#3).
 //
 // One Melee per bot, as bot.melee. It emits on the bot:
 //   startedAttacking, stoppedAttacking(target), attackedTarget.
@@ -45,6 +61,18 @@ class Melee {
     this.viewDistance = 128    // a target farther than this is given up
     this.attackRange = 3.0     // how close the target must be to swing
     this.criticalHits = true   // time swings as crits (x1.5 damage)
+    // Spacing for melee: keep the target between near and far blocks away (centre to
+    // centre). Closer than near while the next swing isn't ready, back off; the chase
+    // closes in no nearer than the band's middle. A player reaches ~3 blocks, a
+    // zombie-like mob only ~1.4, so a band like [2.2, 2.9] hits without being hit.
+    // Undefined: off.
+    this.keepDistance = undefined
+    // Sprint-hit every swing for the extra knockback: a fresh start-sprint just before
+    // it. A melee mob knocked 2-3 blocks back has to walk in again and meets the next
+    // swing at the edge of our reach, before it's close enough to hit. A sprinting hit
+    // can't crit, so this turns criticalHits off.
+    this.knockbackHits = false
+    this.spacing = false       // backing off inside keepDistance's near edge
     this.raisedShield = false  // the shield is up because we raised it
     bot.on('physicsTick', () => this.update())
     bot.on('entityGone', e => { if (e === this.target) this.stop() })
@@ -57,7 +85,7 @@ class Melee {
     this.target = target
     this.timeToNextAttack = 0
     if (!this.target) return
-    this.bot.pathfinder.setGoal(new goals.GoalFollow(this.target, this.followRange), true)
+    this.bot.pathfinder.setGoal(this.followGoal(this.target), true)
     this.bot.emit('startedAttacking')
   }
 
@@ -101,8 +129,11 @@ class Melee {
       this.bot.setControlState('jump', false)
       this.critJumpTicks = -1
     }
+    // Stopped while backing off: don't leave the back key down.
+    if (!this.target && this.spacing) this.endSpacing()
     if (!this.target || this.blockingExplosion) return
     this.critTick()
+    this.spacingTick()
     this.timeToNextAttack--
     if (this.timeToNextAttack === -1) this.attemptAttack()
   }
@@ -127,13 +158,13 @@ class Melee {
     // pathfinder idle, aim the goal at where the target is now (at most every 10 ticks).
     if (!inRange && !this.bot.pathfinder.isMoving() && --this.refollowTicks <= 0) {
       this.refollowTicks = 10
-      this.bot.pathfinder.setGoal(new goals.GoalFollow(this.target, this.followRange), true)
+      this.bot.pathfinder.setGoal(this.followGoal(this.target), true)
     }
   }
 
   canCritJump() {
     const e = this.bot.entity
-    return this.criticalHits && this.critJumpTicks < 0 && e.onGround && !e.isInWater && !e.isInLava
+    return this.criticalHits && !this.knockbackHits && this.critJumpTicks < 0 && e.onGround && !e.isInWater && !e.isInLava
   }
 
   startCritJump() {
@@ -159,12 +190,47 @@ class Melee {
       this.startCritJump()
     }
     if (this.timeToNextAttack !== 0) return
-    if (this.criticalHits && !e.onGround && e.velocity.y > -0.1 && this.critHoldTicks < CRIT_MAX_HOLD) {
+    if (this.criticalHits && !this.knockbackHits && !e.onGround && e.velocity.y > -0.1 && this.critHoldTicks < CRIT_MAX_HOLD) {
       this.timeToNextAttack = 1
       this.critHoldTicks++
     } else {
       this.critHoldTicks = 0
     }
+  }
+
+  /** How close the chase brings the bot: the middle of keepDistance when set. */
+  followGoal(target) {
+    const range = this.keepDistance ? (this.keepDistance[0] + this.keepDistance[1]) / 2 : this.followRange
+    return new goals.GoalFollow(target, range)
+  }
+
+  // Back off while the target is inside keepDistance's near edge and the next swing
+  // isn't due, with the pathfinder's goal paused so it doesn't walk us back in.
+  spacingTick() {
+    const target = this.target
+    if (!this.keepDistance || !target) {
+      if (this.spacing) this.endSpacing()
+      return
+    }
+    const d = target.position.distanceTo(this.bot.entity.position)
+    if (d < this.keepDistance[0] && this.timeToNextAttack > 1) {
+      if (!this.spacing) {
+        this.spacing = true
+        this.bot.pathfinder.setGoal(null)
+      }
+      this.bot.lookAt(target.position.offset(0, target.height * 0.85, 0), true)
+      this.bot.setControlState('forward', false)
+      this.bot.setControlState('sprint', false)
+      this.bot.setControlState('back', true)
+    } else if (this.spacing) {
+      this.endSpacing()
+    }
+  }
+
+  endSpacing() {
+    this.spacing = false
+    this.bot.setControlState('back', false)
+    if (this.target) this.bot.pathfinder.setGoal(this.followGoal(this.target), true)
   }
 
   // A creeper target lighting its fuse: stop, face it and block for 2 s.
@@ -197,6 +263,11 @@ class Melee {
       if (target !== this.target) return
       await this.bot.lookAt(target.position.offset(0, target.height, 0), true)
       if (target !== this.target) return
+      if (this.knockbackHits) {
+        // Off and on again: a control already on sends no new start-sprint.
+        this.bot.setControlState('sprint', false)
+        this.bot.setControlState('sprint', true)
+      }
       this.bot.attack(target)
       this.bot.emit('attackedTarget')
       if (shield) {
