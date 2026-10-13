@@ -250,9 +250,10 @@ function createBot() {
     const mcData = require('minecraft-data')(bot.version)
     // Two sets of pathfinder rules. `chase` (the default, for combat chases and the
     // reflexes' reach check) never places a block: a fight doesn't build toward a mob.
-    // `walk` (navigation's walks) may bridge a gap with junk blocks where the terraform
-    // gate allows. Neither digs, nor towers: pillaring is an explicit action.
-    const movements = (bridge) => {
+    // `walk` (navigation's walks) may bridge a gap with junk blocks and dig through what
+    // is in its way, where the terraform gate allows. Neither towers: pillaring is an
+    // explicit action.
+    const movements = (walk) => {
       const mv = new Movements(bot, mcData)
       mv.allowSprinting = true
       mv.canOpenDoors = true
@@ -261,11 +262,18 @@ function createBot() {
       mv.allowParkour = true
       mv.maxDropDown = 4
       mv.scafoldingBlocks = []
-      if (bridge) {
+      if (walk) {
         const gate = require('./src/navigation/terraformGate')
         mv.scafoldingBlocks = gate.SCAFFOLD_ITEMS.map(n => mcData.itemsByName[n]?.id).filter(id => id !== undefined)
         mv.placeCost = gate.PLACE_COST
         mv.exclusionAreasPlace.push(gate.placeExclusion)
+        // XRAY(planning): the pathfinder plans over the live world. Its dig safety
+        // (dontCreateFlow, dontMineUnderFallingBlock: no dig next to a liquid or under
+        // sand/gravel) can react to blocks the bot never saw. Allowed: it only drops
+        // steps from the plan; nothing it reads reaches memory or the model.
+        mv.canDig = true
+        mv.digCost = gate.DIG_COST
+        mv.exclusionAreasBreak.push(gate.breakExclusion)
       }
       return mv
     }

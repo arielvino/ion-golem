@@ -1155,7 +1155,8 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   let anchor = bot.entity.position.clone(), anchorAt = Date.now()
   const guard = setInterval(() => {
     const p = bot.entity.position
-    if (p.distanceTo(anchor) >= NO_MOVE_DIST) { anchor = p.clone(); anchorAt = Date.now() }
+    // Digging or placing a block on the way stands still, and isn't stuck.
+    if (p.distanceTo(anchor) >= NO_MOVE_DIST || bot.pathfinder.isMining() || bot.pathfinder.isBuilding()) { anchor = p.clone(); anchorAt = Date.now() }
     else if (Date.now() - anchorAt > NO_MOVE_MS && !goal.isDone()) {
       reason = 'no movement'
       bot.pathfinder.setGoal(null)
@@ -1168,12 +1169,26 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
       bot.pathfinder.setGoal(null)
     }
   }, 250)
-  // The walk's own rules (it may bridge where the terraform gate allows), and a record
-  // of every block it places: logged, and kept from being dug as a path block.
+  // The walk's own rules (it may bridge and dig where the terraform gate allows), and a
+  // record of every block it changes: logged; a placed one is kept from being dug as a
+  // path block, a dug one goes through the no-unpermitted-breaking check first.
   const walkMovements = bot.movementsFor?.walk
   if (walkMovements) bot.pathfinder.setMovements(walkMovements)
   const heldBefore = bot.heldItem?.name
-  let bridged = 0
+  let bridged = 0, dug = 0
+  const dig = bot.dig
+  bot.dig = async function (block, ...rest) {
+    // XRAY(planning): the name comes from the planner's live-world block; by now the bot
+    // stands at it, facing it, so it is in sight.
+    const { name, position: p } = block
+    if (!require('../engine/breakPermission').mayBreak(name, p, 'walk')) throw new Error('breaking not permitted')
+    const r = await dig.call(this, block, ...rest)
+    dug++
+    removeBlock(p.x, p.y, p.z)
+    logGameEvent('mine', name, 1, p.x, p.y, p.z, { tool: bot.heldItem?.name || 'hand', reason: 'walk' })
+    console.log(`  pathfinder: dug ${name} at ${p.x},${p.y},${p.z}`)
+    return r
+  }
   const placeBlock = bot.placeBlock
   bot.placeBlock = async function (ref, face) {
     const r = await placeBlock.call(this, ref, face)
@@ -1199,10 +1214,11 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
     clearInterval(guard)
     bot.pathfinder.setGoal(null)
     bot.placeBlock = placeBlock
+    bot.dig = dig
     if (bot.movementsFor) bot.pathfinder.setMovements(bot.movementsFor.chase)
   }
-  // Bridging put a block in hand: give back what it held (a weapon, a tool).
-  if (bridged && heldBefore && bot.heldItem?.name !== heldBefore) {
+  // Bridging or digging put a block or tool in hand: give back what it held (a weapon…).
+  if ((bridged || dug) && heldBefore && bot.heldItem?.name !== heldBefore) {
     const item = bot.inventory.items().find(i => i.name === heldBefore)
     if (item) await bot.equip(item, 'hand').catch(() => {})
   }

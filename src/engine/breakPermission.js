@@ -7,8 +7,9 @@
 // An approval covers that exact action string for GRANT_MS, so retrying the same approved
 // action needs no second yes, but any other action does.
 //
-// Enforcement lives at the only two places a block is ever broken: digBlock (everything
-// digs through it) and swim-up's head clearance. mineflayer-pathfinder has canDig=false.
+// Enforcement lives where a block is broken: digBlock (everything digs through it),
+// swim-up's head clearance, and a pathfinder walk's digs (navigation.js pathfinderWalk;
+// its planner asks permitted() through terraformGate).
 const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
@@ -54,6 +55,14 @@ function activeGrants() {
   const now = Date.now()
   state.breakGrants = state.breakGrants.filter(g => g.until > now)
   return state.breakGrants
+}
+
+// Would mayBreak say yes right now? Without a word: for planners asking about many blocks.
+function permitted() {
+  ensure()
+  if (state.breakMode !== 'ask') return true
+  const cur = currentAction()
+  return !!cur && activeGrants().some(g => g.action === norm(cur.alt) || g.action === norm(cur.full))
 }
 
 // Called right before a block would be broken. true = go ahead.
@@ -133,4 +142,4 @@ function contextLine() {
   return ` BREAK=[${parts.join(' | ')}]`
 }
 
-module.exports = { mayBreak, requestBreak, onPlayerChat, contextLine, setMode, APPROVE_RE, DENY_RE }
+module.exports = { mayBreak, permitted, requestBreak, onPlayerChat, contextLine, setMode, APPROVE_RE, DENY_RE }

@@ -1,17 +1,25 @@
-// Bridge probe: does a walk bridge a gap it can't walk around, and only then? Builds
-// two sky platforms 5 blocks apart through the console FIFO, puts the bot on one and
-// sends it `!act goto` to the other, round after round. Scenes:
-//   gap       — open air between them, cobblestone in the bot's inventory;
-//   noblocks  — the same with nothing to bridge with;
-//   off       — the same with `!bridge off`;
+// Terraform probe: does a walk bridge a gap, or dig through a wall, when it can't go
+// around, and only then? Builds two sky platforms 5 blocks apart through the console
+// FIFO, puts the bot on one and sends it `!act goto` to the other, round after round.
+// Bridge scenes (open air between the platforms):
+//   gap       — cobblestone in the bot's inventory;
+//   noblocks  — nothing to bridge with;
+//   off       — the same as gap, with `!bridge off`;
 //   detour    — a walkway around the gap (about 6 blocks longer than straight across).
+// Dig scenes (the gap filled in, and a stone wall 3 high across it; no blocks to bridge
+// around its ends, an iron pickaxe):
+//   wall       — dig through;
+//   wall-off   — the same with `!dig off`;
+//   wall-ask   — the same with `!nobreak on` (no-unpermitted-breaking mode);
+//   wall-door  — a doorway at one end of the wall;
+//   obsidian   — the wall is obsidian, which the iron pickaxe can't harvest.
 // A barrier net 6 below catches a fall. Each round reads from the bot's log how the goto
-// ended and how many blocks the walk placed.
+// ended and how many blocks the walk placed and dug.
 //
 // The bot under test is a quiet one with its output in --out:
 //   node bot.js BotGhast --debug --no-ai --no-chat > /tmp/botghast.out 2>&1
 //
-//   node tools/bridge-probe.js [--scene gap] [--rounds 5] [--bot BotGhast] [--out /tmp/botghast.out]
+//   node tools/terraform-probe.js [--scene gap] [--rounds 5] [--bot BotGhast] [--out /tmp/botghast.out]
 const fs = require('fs')
 const { cmd } = require('./duel/arena')
 
@@ -23,6 +31,8 @@ const SCENE = args.scene || 'gap'
 const ROUNDS = parseInt(args.rounds || '5', 10)
 const TIME_MS = 60000
 const X = 30000, Y = 200, Z = 30100
+const WALL = /^(wall|obsidian)/.test(SCENE)
+const SWITCH = { off: ['!bridge off', '!bridge on'], 'wall-off': ['!dig off', '!dig on'], 'wall-ask': ['!nobreak on', '!nobreak off'] }[SCENE]
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const say = (text) => cmd(`tellraw ${BOT} {"text":"<Sargon564> ${text}"}`)
 
@@ -35,11 +45,18 @@ async function stage() {
   await cmd(`fill ${X - 6} ${Y - 6} ${Z - 14} ${X + 6} ${Y - 6} ${Z + 4} barrier`)
   await cmd(`fill ${X - 3} ${Y} ${Z - 12} ${X + 3} ${Y} ${Z - 8} stone`)
   if (SCENE === 'detour') await cmd(`fill ${X + 3} ${Y} ${Z - 7} ${X + 3} ${Y} ${Z - 3} stone`)
-  for (const t of ['item']) await cmd(`kill @e[type=${t},x=${X},y=${Y},z=${Z},distance=..30]`)
+  if (WALL) {
+    await cmd(`fill ${X - 3} ${Y} ${Z - 7} ${X + 3} ${Y} ${Z - 3} stone`)
+    await cmd(`fill ${X - 3} ${Y + 1} ${Z - 5} ${X + 3} ${Y + 3} ${Z - 5} ${SCENE === 'obsidian' ? 'obsidian' : 'stone'}`)
+    if (SCENE === 'wall-door') await cmd(`fill ${X + 3} ${Y + 1} ${Z - 5} ${X + 3} ${Y + 2} ${Z - 5} air`)
+  }
+  // Light over the platforms, or at night spiders spawn on them and stop the walk.
+  for (const z of [Z, Z - 5, Z - 10]) await cmd(`fill ${X - 3} ${Y + 5} ${z} ${X + 3} ${Y + 5} ${z} light[level=15]`)
+  await cmd(`kill @e[type=!player,x=${X},y=${Y},z=${Z},distance=..30]`)
   await cmd(`clear ${BOT}`)
   await cmd(`tp ${BOT} ${X + 0.5} ${Y + 1} ${Z + 0.5} 180 0`)
   await cmd(`item replace entity ${BOT} weapon.mainhand with iron_pickaxe`)
-  if (SCENE !== 'noblocks') await cmd(`give ${BOT} cobblestone 16`)
+  if (!WALL && SCENE !== 'noblocks') await cmd(`give ${BOT} cobblestone 16`)
   await cmd(`effect give ${BOT} instant_health 1 10 true`)
   await sleep(2500)   // the bot sees both platforms before it plans
 }
@@ -62,20 +79,21 @@ async function playRound(n) {
   const r = {
     n, status: end ? end[1] : 'timeout', seconds: +((Date.now() - t0) / 1000).toFixed(1),
     bridged: lines.filter(l => /pathfinder: bridged with/.test(l)).length,
+    dug: lines.filter(l => /pathfinder: dug /.test(l)).length,
     why: (lines.map(l => l.match(/nav: (.*)/)).filter(Boolean).pop() || [])[1] || ''
   }
-  console.log(`#${n}: ${r.status} after ${r.seconds}s, bridged ${r.bridged}${r.why ? ` (${r.why})` : ''}`)
+  console.log(`#${n}: ${r.status} after ${r.seconds}s, bridged ${r.bridged}, dug ${r.dug}${r.why ? ` (${r.why})` : ''}`)
   return r
 }
 
 async function main() {
-  if (SCENE === 'off') { await say('!bridge off'); await sleep(500) }
+  if (SWITCH) { await say(SWITCH[0]); await sleep(500) }
   const results = []
   for (let n = 1; n <= ROUNDS; n++) results.push(await playRound(n))
-  if (SCENE === 'off') await say('!bridge on')
+  if (SWITCH) await say(SWITCH[1])
   const ok = results.filter(r => r.status === 'done')
   const avg = (rs, k) => rs.length ? (rs.reduce((a, r) => a + r[k], 0) / rs.length).toFixed(1) : '-'
-  console.log(`\n== ${SCENE}: arrived ${ok.length}/${ROUNDS} (avg ${avg(ok, 'seconds')}s); bridged ${avg(results, 'bridged')} blocks per round ==`)
+  console.log(`\n== ${SCENE}: arrived ${ok.length}/${ROUNDS} (avg ${avg(ok, 'seconds')}s); per round bridged ${avg(results, 'bridged')}, dug ${avg(results, 'dug')} ==`)
 }
 
 main().catch(e => { console.error(e); process.exit(1) })
