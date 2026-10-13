@@ -267,6 +267,10 @@ function createBot() {
         mv.scafoldingBlocks = gate.SCAFFOLD_ITEMS.map(n => mcData.itemsByName[n]?.id).filter(id => id !== undefined)
         mv.placeCost = gate.PLACE_COST
         mv.exclusionAreasPlace.push(gate.placeExclusion)
+        // XRAY(planning): the pathfinder plans over the live world. Its dig safety
+        // (dontCreateFlow, dontMineUnderFallingBlock: no dig next to a liquid or under
+        // sand/gravel) can react to blocks the bot never saw. Allowed: it only drops
+        // steps from the plan; nothing it reads reaches memory or the model.
         mv.canDig = true
         mv.digCost = gate.DIG_COST
         mv.exclusionAreasBreak.push(gate.breakExclusion)

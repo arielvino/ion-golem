@@ -1178,6 +1178,8 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   let bridged = 0, dug = 0
   const dig = bot.dig
   bot.dig = async function (block, ...rest) {
+    // XRAY(planning): the name comes from the planner's live-world block; by now the bot
+    // stands at it, facing it, so it is in sight.
     const { name, position: p } = block
     if (!require('../engine/breakPermission').mayBreak(name, p, 'walk')) throw new Error('breaking not permitted')
     const r = await dig.call(this, block, ...rest)

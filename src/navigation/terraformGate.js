@@ -61,6 +61,7 @@ function mayBreak(block) {
   const { isPathBlock } = require('../world/memory')
   if (isPathBlock(x, y, z)) return false
   // A block that drops nothing without a tool we don't have: digBlock refuses it too.
+  // XRAY(planning): `block` is the planner's, from the live world, maybe one never seen.
   if (block.harvestTools && !state.bot.inventory.items().some(i => block.harvestTools[i.type])) return false
   return true
 }
