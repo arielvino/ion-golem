@@ -248,17 +248,29 @@ function createBot() {
     require('./src/world/memory').checkStateVersion(bot.version)
 
     const mcData = require('minecraft-data')(bot.version)
-    const mv = new Movements(bot, mcData)
-    mv.allowSprinting = true
-    mv.canOpenDoors = true
-    mv.canDig = false
-    // No scaffolding: pathfinder never picks its pillar/bridge blocks back up, so it
-    // left stray dirt and cobble all over. Pillaring and bridging are explicit actions.
-    mv.allow1by1towers = false
-    mv.allowParkour = true
-    mv.maxDropDown = 4
-    mv.scafoldingBlocks = []
-    bot.pathfinder.setMovements(mv)
+    // Two sets of pathfinder rules. `chase` (the default, for combat chases and the
+    // reflexes' reach check) never places a block: a fight doesn't build toward a mob.
+    // `walk` (navigation's walks) may bridge a gap with junk blocks where the terraform
+    // gate allows. Neither digs, nor towers: pillaring is an explicit action.
+    const movements = (bridge) => {
+      const mv = new Movements(bot, mcData)
+      mv.allowSprinting = true
+      mv.canOpenDoors = true
+      mv.canDig = false
+      mv.allow1by1towers = false
+      mv.allowParkour = true
+      mv.maxDropDown = 4
+      mv.scafoldingBlocks = []
+      if (bridge) {
+        const gate = require('./src/navigation/terraformGate')
+        mv.scafoldingBlocks = gate.SCAFFOLD_ITEMS.map(n => mcData.itemsByName[n]?.id).filter(id => id !== undefined)
+        mv.placeCost = gate.PLACE_COST
+        mv.exclusionAreasPlace.push(gate.placeExclusion)
+      }
+      return mv
+    }
+    bot.movementsFor = { chase: movements(false), walk: movements(true) }
+    bot.pathfinder.setMovements(bot.movementsFor.chase)
     if (process.argv.includes('--cardinal')) console.log(color(c.yellow, '[NAV] walk/pathfind use cardinalWalk (--cardinal)'))
 
     loadAgenda()
@@ -437,6 +449,7 @@ function createBot() {
     if (require('./src/engine/defendMode').onPlayerChat(username, message)) return
     if (require('./src/engine/floatMode').onPlayerChat(username, message)) return
     if (require('./src/engine/leadMode').onPlayerChat(username, message)) return
+    if (require('./src/navigation/terraformGate').onPlayerChat(username, message)) return
     // Debug-only repro hooks: `!act <action>` runs an action with no model in the loop,
     // `!ai off|on` pauses/resumes model calls so the AI can't steer a staged scenario.
     // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.

@@ -30,7 +30,9 @@ function meleeReachable(bot, mob) {
   if (bot.entity.position.distanceTo(mob.position) <= CLOSE) return true
   const goal = bot.melee ? bot.melee.followGoal(mob) : new goals.GoalFollow(mob, 2)
   // Its own search, not getPathTo: that replaces the search a running chase continues.
-  const search = bot.pathfinder.getPathFromTo(bot.pathfinder.movements, bot.entity.position, goal, { timeout: PLAN_MS })
+  // The chase's own movements, even mid-walk: a walk's may bridge, a chase's don't.
+  const movements = bot.movementsFor?.chase || bot.pathfinder.movements
+  const search = bot.pathfinder.getPathFromTo(movements, bot.entity.position, goal, { timeout: PLAN_MS })
   let result
   for (const step of search) result = step.result
   return result?.status === 'success'
