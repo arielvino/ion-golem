@@ -8,7 +8,7 @@
 const path = require('path')
 const mineflayer = require('mineflayer')
 const { pathfinder } = require('mineflayer-pathfinder')
-const pvp = require('mineflayer-pvp').plugin
+const { Melee } = require('../../src/combat/melee')
 const state = require('../../src/core/state')
 
 const [username, strategyName] = process.argv.slice(2)
@@ -21,7 +21,7 @@ const bot = mineflayer.createBot({
   username
 })
 bot.loadPlugin(pathfinder)
-bot.loadPlugin(pvp)
+bot.melee = new Melee(bot)
 state.bot = bot
 state.chatMuted = true
 
@@ -33,8 +33,11 @@ const PROBE = !!process.env.DUEL_PROBE
 bot.on('path_update', (r) => { if (PROBE) console.log('PATH', username, r.status, 'len', r.path.length, 'visited', r.visitedNodes) })
 bot.once('spawn', () => {
   // The arena's cover is part of the fight: don't let the pathfinder dig through it.
-  bot.pvp.movements.canDig = false
-  bot.pvp.movements.allow1by1towers = false
+  const { Movements } = require('mineflayer-pathfinder')
+  const mv = new Movements(bot)
+  mv.canDig = false
+  mv.allow1by1towers = false
+  bot.pathfinder.setMovements(mv)
   // The bot's physicsTick reflexes against archers and incoming projectiles.
   require('../../src/engine/rangedDefense').setupRangedDefense()
   require('../../src/engine/projectileGuard').setupProjectileGuard()
@@ -73,7 +76,7 @@ function halt() {
   round.controller.abort()
   round = null
   state.abortSignal = true
-  try { bot.pvp.forceStop() } catch (e) {}
+  try { bot.melee.forceStop() } catch (e) {}
   try { bot.pathfinder.stop() } catch (e) {}
   bot.clearControlStates()
   try { bot.deactivateItem() } catch (e) {}
@@ -83,7 +86,7 @@ setInterval(() => {
   if (!round || !PROBE) return
   const e = require('./strategies/common').nearestOpponent(bot, round.opponents)
   console.log('PROBE', username, bot.entity.position.toString(), 'hp', bot.health, 'opp', e ? e.position.toString() : 'none',
-    'pvpTarget', !!bot.pvp.target, 'moving', bot.pathfinder.isMoving(),
+    'meleeTarget', !!bot.melee.target, 'moving', bot.pathfinder.isMoving(),
     'dist', e ? e.position.distanceTo(bot.entity.position).toFixed(2) : '-')
 }, 1000)
 
