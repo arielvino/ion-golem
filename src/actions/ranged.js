@@ -719,4 +719,4 @@ async function doPearl(arg) {
   }
 }
 
-module.exports = { doShoot, doPearl, solvePitches, heightAt }
+module.exports = { doShoot, doPearl, solvePitches, heightAt, enchantLevel, ammoCount }
