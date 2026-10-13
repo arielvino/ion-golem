@@ -26,7 +26,12 @@ const HARMLESS = new Set(['fishing_bobber', 'ender_pearl', 'experience_bottle', 
 
 const HORIZON = 30        // ticks of flight looked ahead
 const MARGIN = 0.3        // blocks of slack around the bot's hitbox
-const REACH = 3.0         // melee reach, eye to projectile
+// Swing at a returnable projectile from this far, eye to its predicted centre. The
+// server takes the hit out to about 6; at 3 there was one swing, in the last tick or
+// two, and a third of ghast fireballs got through. At 4.5 the first swing lands ~3
+// ticks out with time for another (tools/duel/ghast-probe.js: 13/20
+// deflected at 3, 133/133 at 4.5 from 10-40m, idle, fighting or eating).
+const REACH = 4.5
 const SHIELD_LEAD = 12    // raise the shield this many ticks before impact (warm-up is 5)
 const DODGE_LEAD = 20     // start sidestepping this many ticks before impact
 const DODGE_MAX = 20      // never strafe longer than this for one projectile
