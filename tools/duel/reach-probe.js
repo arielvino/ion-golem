@@ -79,10 +79,11 @@ async function stage() {
   const [dx, dy, dz] = S.at
   if (S.ledge) {
     await platform(X + dx, Y + dy, Z + dz, 2)
-    // Open the rims where the bridge meets them, and lay it: steps down from the
+    // Open the bot's rim toward the ledge, which is lower: the rim hid the skeleton.
+    await cmd(`setblock ${X} ${Y + 1} ${Z - 5} air`)
+    // Open the ledge's rim where the bridge meets it, and lay it: steps down from the
     // bot's platform to the ledge.
     if (S.bridge) {
-      await cmd(`setblock ${X} ${Y + 1} ${Z - 5} air`)
       await cmd(`setblock ${X} ${Y + dy + 1} ${Z + dz + 3} air`)
       for (let k = 0; k < 4; k++) await cmd(`setblock ${X} ${Y - k} ${Z - 6 - k} stone`)
     }
@@ -100,7 +101,9 @@ async function stage() {
   await cmd(`effect give ${BOT} instant_health 1 10 true`)
   await cmd(`effect give ${BOT} saturation 1 10 true`)
   await sleep(1500)
-  const gear = S.mob === 'skeleton' ? 'equipment:{mainhand:{id:"minecraft:bow",count:1}},' : ''
+  // A helmet, or the skeleton burns to death in daylight and the round counts it killed.
+  const gear = S.mob === 'skeleton'
+    ? 'equipment:{mainhand:{id:"minecraft:bow",count:1},head:{id:"minecraft:leather_helmet",count:1}},' : ''
   await cmd(`summon ${S.mob} ${X + 0.5 + dx} ${Y + 1 + dy} ${Z + 0.5 + dz} {NoAI:1b,PersistenceRequired:1b,${gear}Tags:["${TAG}"]}`)
   await sleep(1000)   // in the bot's view before the first hit
 }
