@@ -19,7 +19,7 @@ const { sendChat, debugChat } = require('../core/utils')
 // Extracted planner/query/goal/reachability modules (see REFACTORING.md §1)
 const { _pHazard, _pSurface, _pKnownSolid, _pKnownClear } = require('./blockquery')
 const { dbAstar, planFromHere, _pNeighbors } = require('./pathplanner')
-const { reachGoal, headingGoal, until, arrived } = require('./goals')
+const { reachGoal, levelGoal, headingGoal, until, arrived } = require('./goals')
 const { navMode, clearNavState } = require('./navmode')
 const { blockNeedsMissingTool, toolSpeedAdvice, equipForDig } = require('../world/tooling')
 
@@ -1267,8 +1267,11 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
   // block. Anything that breaks or places blocks (tunnel, staircase, pillar), and
   // A* over remembered terrain (pathfind), runs only when the model names it.
   const strategy = opts.strategy || 'walk'
-  // Coordinate target → a 'reach' goal; the driver is done when within range.
-  const goal = reachGoal(tx, ty, tz, range)
+  // Coordinate target → a 'reach' goal; the driver is done when within range. Pillar
+  // and staircase only change height, so they are done at the target Y.
+  const goal = strategy === 'pillar' ? levelGoal(tx, ty, tz, { atLeast: true })
+    : strategy === 'staircase' ? levelGoal(tx, ty, tz)
+    : reachGoal(tx, ty, tz, range)
   const EXPLICIT = {
     walk:      ['cardinalWalk', (ctx) => cardinalWalk(tx, ty, tz, 15, range)],
     pathfind:  ['dbPathfind',   (ctx) => execDbPathfind(tx, ty, tz, range, ctx)],

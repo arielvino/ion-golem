@@ -35,6 +35,21 @@ function reachGoal(tx, ty, tz, range = 2) {
   }
 }
 
+// The vertical strategies only change height: pillar climbs in place and a staircase
+// stops cutting once at the target Y. They are done at that Y, not within range of
+// the point: GoalNear's range 2, with the head block counted too, called a bot 3
+// blocks below its pillar target already there, so the pillar reported done unbuilt.
+function levelGoal(tx, ty, tz, { atLeast = false } = {}) {
+  const target = new Vec3(tx, ty, tz)
+  const y = () => Math.round(state.bot.entity.position.y)
+  return {
+    kind: 'level', target,
+    isDone: () => atLeast ? y() >= ty : y() === ty,
+    progress: () => -Math.abs(state.bot.entity.position.y - ty),
+    desc: `reach y=${ty}${atLeast ? ' or above' : ''}`,
+  }
+}
+
 function headingGoal(dir, opts = {}) {
   const pattern = opts.pattern || 'flat'   // 'up' | 'down' | 'flat'
   const shape = opts.shape || 'straight'   // 'straight' | 'spiral' (spiral = future)
@@ -63,4 +78,4 @@ const until = {
   },
 }
 
-module.exports = { nearBlock, arrived, reachGoal, headingGoal, until, _dirName }
+module.exports = { nearBlock, arrived, reachGoal, levelGoal, headingGoal, until, _dirName }
