@@ -1137,7 +1137,10 @@ async function digHeading(stratName, dir, goalOpts = {}, opts = {}) {
 // The pathfinder plans from chunk data (bot.blockAt), not the vision-fed DB, so
 // this mode knowingly breaks the no-x-ray rule.
 const PATHFINDER_NAV = !process.argv.includes('--cardinal')
-const NO_MOVE_MS = 2000      // pathfinder walk with no movement this long → cardinalWalk instead
+// A pathfinder walk with no movement this long ends, as a failure to debug: there is
+// no fallback walker (the old one, cardinalWalk, took over mid-bridge and walked off a
+// cliff). Long enough for planning, bridging and digging, which all stand still a while.
+const NO_MOVE_MS = 15000
 const NO_MOVE_DIST = 0.3
 
 async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
@@ -1150,15 +1153,14 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   // critical HP is the reaction to it (to shore, away from a mob); stopping it at
   // step 0 pinned the bot in place — it drowned 3 blocks off a beach at HP 3.
   const startedHurt = bot.health <= HEALTH_CRITICAL
-  // No movement at all for NO_MOVE_MS (pinned at a wall, or thinking without a step):
-  // give up so navigateTo can fall back to cardinalWalk.
+  // No movement at all for NO_MOVE_MS (pinned at a wall, or thinking without a step): give up.
   let anchor = bot.entity.position.clone(), anchorAt = Date.now()
   const guard = setInterval(() => {
     const p = bot.entity.position
     // Digging or placing a block on the way stands still, and isn't stuck.
     if (p.distanceTo(anchor) >= NO_MOVE_DIST || bot.pathfinder.isMining() || bot.pathfinder.isBuilding()) { anchor = p.clone(); anchorAt = Date.now() }
     else if (Date.now() - anchorAt > NO_MOVE_MS && !goal.isDone()) {
-      reason = 'no movement'
+      reason = `pathfinder stuck: no movement for ${NO_MOVE_MS / 1000}s`
       bot.pathfinder.setGoal(null)
       return
     }
@@ -1200,6 +1202,17 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
     console.log(`  pathfinder: bridged with ${name} at ${p.x},${p.y},${p.z}`)
     return r
   }
+  // What the planner said: how long each plan took, and how it ended.
+  let planFrom = Date.now(), lastStatus = null
+  const onPlan = (r) => {
+    if (r.status === 'partial' && lastStatus === 'partial') return
+    console.log(`  pathfinder: plan ${r.status} after ${Date.now() - planFrom}ms, ${r.visitedNodes} nodes, ${r.path.length} steps`)
+    if (r.status !== 'partial') planFrom = Date.now()
+    lastStatus = r.status
+  }
+  const onReset = () => { planFrom = Date.now(); lastStatus = null }
+  bot.on('path_update', onPlan)
+  bot.on('path_reset', onReset)
   try {
     await raceAbort(bot.pathfinder.goto(new goals.GoalNear(tx, ty, tz, range)), timeout)
   } catch (e) {
@@ -1213,6 +1226,8 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   } finally {
     clearInterval(guard)
     bot.pathfinder.setGoal(null)
+    bot.removeListener('path_update', onPlan)
+    bot.removeListener('path_reset', onReset)
     bot.placeBlock = placeBlock
     bot.dig = dig
     if (bot.movementsFor) bot.pathfinder.setMovements(bot.movementsFor.chase)
@@ -1268,17 +1283,9 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
     return false
   }
   const [name, stepFn] = entry
-  const startedAt = Date.now()
-  let res = PATHFINDER_NAV && (strategy === 'walk' || strategy === 'pathfind')
+  const res = PATHFINDER_NAV && (strategy === 'walk' || strategy === 'pathfind')
     ? await pathfinderWalk(tx, ty, tz, range, timeout, goal)
     : await runStrategy(name, stepFn, goal, { timeout, stuckLimit: strategy === 'walk' ? 3 : 5 })
-  // The pathfinder didn't move the bot at all: try our own walker for the time left.
-  if (res.reason === 'no movement' && !state.abortSignal) {
-    const left = Math.max(timeout - (Date.now() - startedAt), 3000)
-    console.log(color(c.yellow, `  nav: pathfinder made no movement in ${NO_MOVE_MS / 1000}s, falling back to cardinalWalk (${Math.round(left / 1000)}s)`))
-    res = await runStrategy('cardinalWalk', () => cardinalWalk(tx, ty, tz, 15, range), goal, { timeout: left, stuckLimit: 3 })
-    if (!res.ok) res = { ...res, reason: `${res.reason} (cardinalWalk, after the pathfinder made no movement)` }
-  }
   if (!res.ok) {
     const p = bot.entity.position
     const toolInfo = getToolSummary(bot)
