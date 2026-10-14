@@ -99,4 +99,9 @@ function getBackgroundSummary() {
   return `${t.action}:${t.target} ${t.status}${t.error ? ': ' + t.error : ''} (${sec}s)`
 }
 
-module.exports = { launchBackground, isBackgroundRunning, consumeBackgroundResult, getBackgroundSummary }
+// The actions waiting behind the running one, in order: "a→b", or "empty".
+function queueSummary() {
+  return state.actionQueue.length > 0 ? state.actionQueue.map(a => a.actionStr).join('→') : 'empty'
+}
+
+module.exports = { launchBackground, isBackgroundRunning, consumeBackgroundResult, getBackgroundSummary, queueSummary }

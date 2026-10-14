@@ -12,7 +12,7 @@ const { currentDim, getStructures, getNearbyContainers, getContainerState, count
 const { renderAgenda } = require('../engine/tasks')
 const { renderNew, renderNotesBlock } = require('../world/journalStore')
 const { ago } = require('../world/journal')
-const { getBackgroundSummary } = require('../engine/backgroundTask')
+const { getBackgroundSummary, queueSummary } = require('../engine/backgroundTask')
 const { getInvMap, countMat } = require('../world/recipes')
 const { providerNames, renderPending, around } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
@@ -80,8 +80,7 @@ function getBotContext() {
   const bgInfo = getBackgroundSummary()
   const task = bgInfo ? `bg:${bgInfo}` : (state.currentTask || 'idle')
   let navInfo = state.navigationStatus ? ` nav=${state.navigationStatus}` : ''
-  const queueList = state.actionQueue.map(a => a.actionStr)
-  const queueStr = queueList.length > 0 ? queueList.join('→') : 'empty'
+  const queueStr = queueSummary()
 
   const mcData = require('minecraft-data')(bot.version)
 
