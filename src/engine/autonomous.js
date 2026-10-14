@@ -16,6 +16,7 @@ function setupAutonomous(interruptFn) {
   require('./creeperDefense').setupCreeperDefense()
   require('./projectileGuard').setupProjectileGuard()
   require('./gazeGuard').setupGazeGuard()
+  require('./breathGuard').setupBreathGuard()
 
   // --- AUTO-EAT on low health ---
   bot.on('health', () => {
@@ -91,6 +92,7 @@ function setupAutonomous(interruptFn) {
     // Running from a swarm (the reflex or a flee action) beats turning to fight.
     if (bot.melee.target || state.retreating || state.currentTask === 'fleeing') return false
     if (state.creeperReflex) return false   // a creeper is fusing: block or run first, fight after
+    if (state.breathReflex) return false    // in dragon's breath: get out first
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return false
     const tag = entityTag(attacker)
     if (state.shooting && state.currentTask === `shooting ${tag}`) return false   // already on it

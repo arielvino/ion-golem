@@ -202,7 +202,7 @@ function setupRetreat(interruptFn) {
       }
     }
 
-    if (state.creeperReflex) return         // creeper reflex is steering
+    if (state.creeperReflex || state.breathReflex) return   // creeper or breath reflex is steering
     // Something caught up: turn and strike it (knockback buys distance), then run on.
     const pos = bot.entity.position
     const close = hs.filter(e => e.position.distanceTo(pos) < SWING_RANGE)
