@@ -2,14 +2,20 @@
 //
 // An enderman within 64 blocks turns on a player whose look passes within
 // acos(1 - 0.025/dist) of the line from the player's eyes to its own (vanilla's
-// EnderMan.isBeingStaredBy). Far off that cone is only a degree or two wide, but an
+// Enderman.isBeingStaredBy). Far off that cone is only a degree or two wide, but an
 // enderman's head on level ground sits a degree or two off the horizon, so walking
 // with the head level (the pathfinder's look(yaw, 0)) stares down every enderman
-// ahead. Every look goes through bot.look (lookAt and the pathfinder call it), so
-// the guard wraps it: the yaw is kept, it steers the walk, and the pitch is bent the
-// least it takes to clear every calm enderman's cone. An enderman already angry is
-// left out: there's nothing to provoke, and melee has to aim at it.
-// Between looks an enderman can walk into the gaze, so each tick re-checks it.
+// ahead.
+//
+// The guard works on what the server sees, the rotation in each outgoing packet,
+// not on bot.look: mineflayer turns the sent head at most ~8.6° a tick, so in a
+// turn the server's head sweeps through every yaw between the old look and the
+// new one, and a look that is safe where it ends can still stare on the way. Each
+// packet keeps its yaw, which steers the walk, and gets the pitch nearest its own
+// that is clear of every calm enderman's cone. An enderman already angry is left
+// out: there's nothing to provoke, and melee has to aim at it. A head held still
+// sends nothing, so each tick also checks the last rotation sent against endermen
+// that walked into it, and turns the head if one did.
 const state = require('../core/state')
 
 const RANGE = 64
@@ -18,14 +24,15 @@ const ENDER_EYE = 2.55         // an enderman's
 const MARGIN = 2 * Math.PI / 180
 const STEP = Math.PI / 180
 const LOG_MS = 5000
+const toRad = Math.PI / 180
 
 function setupGazeGuard() {
   const bot = state.bot
   if (bot._gazeGuard) return
   bot._gazeGuard = true
   const creepy = bot.registry.entitiesByName.enderman?.metadataKeys?.indexOf('creepy')
-  const look = bot.look.bind(bot)
   const logged = new Map()     // enderman id → ms last logged
+  let sent = null              // last rotation sent, mineflayer radians
 
   // The calm endermen in range: unit vector from the bot's eyes to each one's, and
   // the half-angle of its stare cone with the margin.
@@ -57,7 +64,7 @@ function setupGazeGuard() {
           const now = Date.now()
           if (now - (logged.get(hit.e.id) || 0) > LOG_MS) {
             logged.set(hit.e.id, now)
-            console.log(`  [GAZE] enderman#${hit.e.id} at ${hit.d.toFixed(0)}m → pitch ${(pitch * 180 / Math.PI).toFixed(0)}° to ${(p * 180 / Math.PI).toFixed(0)}°`)
+            console.log(`  [GAZE] enderman#${hit.e.id} at ${hit.d.toFixed(0)}m → pitch ${(pitch / toRad).toFixed(0)}° to ${(p / toRad).toFixed(0)}°`)
           }
           return p
         }
@@ -66,11 +73,23 @@ function setupGazeGuard() {
     return pitch
   }
 
-  bot.look = (yaw, pitch, force) => look(yaw, safePitch(yaw, pitch), force)
+  // Packets carry vanilla degrees: yaw 0 = south, pitch positive = down.
+  const write = bot._client.write.bind(bot._client)
+  bot._client.write = (name, params) => {
+    if ((name === 'look' || name === 'position_look') && params) {
+      const yaw = Math.PI - params.yaw * toRad
+      const pitch = safePitch(yaw, -params.pitch * toRad)
+      sent = { yaw, pitch }
+      // A copy: mineflayer keeps `params` as its record of what it last sent.
+      if (pitch !== -params.pitch * toRad) return write(name, { ...params, pitch: Math.fround(-pitch / toRad) })
+    }
+    return write(name, params)
+  }
+
   bot.on('physicsTick', () => {
-    const { yaw, pitch } = bot.entity
-    const p = safePitch(yaw, pitch)
-    if (p !== pitch) look(yaw, p, true).catch(() => {})
+    if (!sent) return
+    const p = safePitch(sent.yaw, sent.pitch)
+    if (p !== sent.pitch) bot.look(bot.entity.yaw, p, true).catch(() => {})
   })
 }
 
