@@ -21,7 +21,10 @@ const state = require('../core/state')
 const RANGE = 64
 const EYE = 1.62               // the bot's eye height
 const ENDER_EYE = 2.55         // an enderman's
-const MARGIN = 2 * Math.PI / 180
+// The server judges with positions a tick or two newer than ours: a margin of 4°,
+// plus half a block of where the enderman may be by then.
+const MARGIN = 4 * Math.PI / 180
+const SLACK = 0.5
 const STEP = Math.PI / 180
 const LOG_MS = 5000
 const toRad = Math.PI / 180
@@ -44,7 +47,7 @@ function setupGazeGuard() {
       const to = e.position.offset(0, ENDER_EYE, 0).minus(eye)
       const d = to.norm()
       if (d > RANGE || d < 1e-3) continue
-      out.push({ e, d, u: to.scaled(1 / d), half: Math.acos(1 - 0.025 / d) + MARGIN })
+      out.push({ e, d, u: to.scaled(1 / d), half: Math.acos(1 - 0.025 / d) + MARGIN + Math.atan(SLACK / d) })
     }
     return out
   }
