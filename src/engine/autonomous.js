@@ -38,14 +38,22 @@ function setupAutonomous(interruptFn) {
   // --- FLOAT: never sink ---
   // Hold jump while the eyes are under water, so the bot rises and bobs at the surface
   // instead of sinking whenever nothing steers it (idle, after a stop, a dig, a swimup).
-  // The pathfinder steers its own swimming, so it is left alone while it moves.
+  // The pathfinder steers its own swimming, so the reflex stands down while it has a path, and
+  // for a grace second after: with a goal it is pathless for a few ticks on every replan and
+  // stuck reset, and a jump held then fights its steering. A goal it sits in without a path
+  // for longer (a melee follow in range, no path found) steers nothing, so the reflex returns.
   // A player can switch it off (`!float off`, floatMode.js).
   const float = require('./floatMode')
-  let floating = false
+  const PATHLESS_GRACE_TICKS = 20
+  let floating = false, pathless = 0
+  const release = () => { if (floating) { bot.setControlState('jump', false); floating = false } }
   bot.on('physicsTick', () => {
     const e = bot.entity
-    if (!float.isOn()) { if (floating) { bot.setControlState('jump', false); floating = false } return }
-    if (!e || bot.health <= 0 || bot.pathfinder?.isMoving()) { floating = false; return }
+    if (!float.isOn()) return release()
+    const pf = bot.pathfinder
+    pathless = pf?.isMoving() || !pf?.goal ? 0 : pathless + 1
+    const steered = pf?.isMoving() || (pf?.goal && pathless <= PATHLESS_GRACE_TICKS)
+    if (!e || bot.health <= 0 || steered) return release()
     const eye = bot.blockAt(e.position.offset(0, 1.62, 0))
     if (e.isInWater && eye && (WATER_BLOCKS.has(eye.name) || eye.name === 'bubble_column')) {
       if (!bot.controlState.jump) bot.setControlState('jump', true)
