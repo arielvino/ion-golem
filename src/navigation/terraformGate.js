@@ -46,33 +46,41 @@ function setOn(kind, on, by) {
   console.log(`  [${kind.toUpperCase()}] ${on ? 'on' : 'off'} (set by ${by})`)
 }
 
-// May the pathfinder place a block at `block` (the cell it would fill)?
-function mayPlace(block) {
-  return isOn('bridge')
+// What the gate decides from. Live: this world's switches and the bot's memory. A plan
+// replayed offline (tools/plan-replay.js) passes the ones recorded when it timed out.
+const liveFacts = {
+  bridgeOn: () => isOn('bridge'),
+  digOn: () => isOn('dig'),
+  permitted: () => require('../engine/breakPermission').permitted(),
+  // Never dig a block the bot built (blueprint or path).
+  isProtected: (x, y, z) => !!state.stmts?.isPlaced?.get(x, y, z) || require('../world/memory').isPathBlock(x, y, z),
+  items: () => state.bot.inventory.items()
 }
 
-// May the pathfinder break `block`? Asked while planning, so it decides without a
-// word; the dig itself still goes through breakPermission.mayBreak, which reports.
-function mayBreak(block) {
-  if (!isOn('dig')) return false
-  if (!require('../engine/breakPermission').permitted()) return false
-  const { x, y, z } = block.position
-  if (state.stmts?.isPlaced?.get(x, y, z)) return false
-  const { isPathBlock } = require('../world/memory')
-  if (isPathBlock(x, y, z)) return false
-  // A block that drops nothing without a tool we don't have: digBlock refuses it too.
-  // XRAY(planning): `block` is the planner's, from the live world, maybe one never seen.
-  if (block.harvestTools && !state.bot.inventory.items().some(i => block.harvestTools[i.type])) return false
-  return true
+function gateFor(facts) {
+  // May the pathfinder place a block at `block` (the cell it would fill)?
+  const mayPlace = (block) => facts.bridgeOn()
+  // May the pathfinder break `block`? Asked while planning, so it decides without a
+  // word; the dig itself still goes through breakPermission.mayBreak, which reports.
+  const mayBreak = (block) => {
+    if (!facts.digOn()) return false
+    if (!facts.permitted()) return false
+    const { x, y, z } = block.position
+    if (facts.isProtected(x, y, z)) return false
+    // A block that drops nothing without a tool we don't have: digBlock refuses it too.
+    // XRAY(planning): `block` is the planner's, from the live world, maybe one never seen.
+    if (block.harvestTools && !facts.items().some(i => block.harvestTools[i.type])) return false
+    return true
+  }
+  // Hooked into Movements.exclusionAreasPlace / exclusionAreasBreak: a cost, 100 = never.
+  return {
+    mayPlace,
+    mayBreak,
+    placeExclusion: (block) => mayPlace(block) ? 0 : 100,
+    breakExclusion: (block) => mayBreak(block) ? 0 : 100
+  }
 }
-
-// Hooked into Movements.exclusionAreasPlace / exclusionAreasBreak: a cost, 100 = never.
-function placeExclusion(block) {
-  return mayPlace(block) ? 0 : 100
-}
-function breakExclusion(block) {
-  return mayBreak(block) ? 0 : 100
-}
+const { mayPlace, mayBreak, placeExclusion, breakExclusion } = gateFor(liveFacts)
 
 // Every player chat line. Returns true when the line was a !bridge or !dig command (not for the AI).
 function onPlayerChat(username, message) {
@@ -91,4 +99,4 @@ function contextLine() {
   return (isOn('bridge') ? '' : ' BRIDGE=off') + (isOn('dig') ? '' : ' DIG=off')
 }
 
-module.exports = { SCAFFOLD_ITEMS, PLACE_COST, DIG_COST, isOn, mayPlace, mayBreak, placeExclusion, breakExclusion, onPlayerChat, contextLine }
+module.exports = { SCAFFOLD_ITEMS, PLACE_COST, DIG_COST, isOn, gateFor, mayPlace, mayBreak, placeExclusion, breakExclusion, onPlayerChat, contextLine }
