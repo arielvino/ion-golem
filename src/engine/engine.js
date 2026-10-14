@@ -147,11 +147,11 @@ function autonomousLine(bgResult) {
   }
   const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
   if (actionsRunning) {
-    const { getBackgroundSummary } = require('./backgroundTask')
+    const { getBackgroundSummary, queueSummary } = require('./backgroundTask')
     const summary = getBackgroundSummary() || 'running'
-    const queueLen = state.actionQueue.length
-    console.log(color(c.white, `\n  [MONITOR] actions active: ${summary}, queue: ${queueLen}`))
-    return { kind: 'monitor', line: `[MONITOR] task=${summary} queue=${queueLen}` }
+    const queue = queueSummary()
+    console.log(color(c.white, `\n  [MONITOR] actions active: ${summary}, queue: ${queue}`))
+    return { kind: 'monitor', line: `[MONITOR] task=${summary} queue=${queue}` }
   }
   if (stackTopTitle()) {
     const top = stackTop()
