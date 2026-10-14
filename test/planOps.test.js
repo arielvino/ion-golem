@@ -95,3 +95,33 @@ test('apply: "new" with nothing created this reply is reported, not guessed', ()
   run(a, 'push:dig a hole')
   assert.throws(() => run(a, 'strat:new:shovel it'), /"new" means a goal created earlier in this same reply — there is none/)
 })
+
+// Bro, 2026-10-14 20:04: after the only subgoal finished, the model reopened the
+// root and gave it a new route, but the next turn still saw the finished route
+// as active and the new one dormant, with its subgoal hidden.
+test('apply: a route added to a reopened goal takes over from the finished one', () => {
+  const a = new Agenda()
+  run(a, 'push:kill the ender dragon')                         // g1
+  run(a, 'strat:g1:gear up chain', 'self')                     // s2 active
+  run(a, 'sub:s2:wood tools and crafting table', 'self')       // g3
+  run(a, 'done:g3', 'self')                                    // s2 done, g1 verify
+  const reply = {}                                             // one reply, as the model sent it
+  for (const body of ['reopen:g1', 'strat:g1:full chain from wood tier', 'sub:new:stone_pickaxe and cobblestone']) {
+    apply(a, parse(body), 'self', reply)                       // s4, then g5
+  }
+  const t = a.tree
+  assert.strictEqual(t.nodes.get('s4').status, 'active')
+  assert.deepStrictEqual(t.activePath('g1').map(n => n.id), ['g1', 's4', 'g5'])
+  assert.match(t.render('g1'), /g5 GOAL stone_pickaxe and cobblestone \[open\]/)
+})
+
+test('apply: reopening a goal whose route finished asks for a route, not the dead one', () => {
+  const a = new Agenda()
+  run(a, 'push:kill the ender dragon')
+  run(a, 'strat:g1:gear up chain', 'self')
+  run(a, 'sub:s2:wood tools', 'self')
+  run(a, 'done:g3', 'self')
+  run(a, 'reopen:g1', 'self')
+  assert.deepStrictEqual(a.tree.activePath('g1').map(n => n.id), ['g1'])
+  assert.match(a.tree.render('g1'), /g1 GOAL kill the ender dragon \[open\].*← choose strategy/)
+})
