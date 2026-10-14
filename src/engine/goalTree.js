@@ -89,6 +89,9 @@ class GoalTree {
     if (status === 'failed') return this._failGoal(goal)
     goal.status = status
     if (status === 'done') this._subgoalDone(goal)
+    // Reopened after its route finished: that route is spent, so the goal has
+    // none until the model adds or picks one (a new strategy then activates).
+    if (status === 'open' && goal.active && this.nodes.get(goal.active).status === 'done') goal.active = null
     return goal
   }
 
