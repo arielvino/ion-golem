@@ -44,15 +44,17 @@ test('apply: a full build-out, one level per turn, to a finished goal', () => {
   assert.match(a.render(), /g4 GOAL 3 iron_ingot \[verify\] ← confirm done\?/)
   run(a, 'done:g4', 'self')
   run(a, 'done:g5', 'self')
+  assert.match(a.render(), /s2 STRAT craft \[active\] ← steps done: add the next, or done:s2/)
+  run(a, 'done:s2', 'self')
   assert.match(a.render(), /g1 GOAL iron_pickaxe for Sargon \[verify\]/)
   run(a, 'done:g1', 'self')
   assert.strictEqual(a.entries.length, 0) // pruned
 })
 
-test('apply: done on a non-leaf strategy is refused', () => {
+test('apply: done on a strategy with unfinished subgoals is refused', () => {
   const a = new Agenda()
   run(a, 'push:x'); run(a, 'strat:g1:y'); run(a, 'sub:s2:z')
-  assert.throws(() => run(a, 'done:s2'), /has subgoals/)
+  assert.throws(() => run(a, 'done:s2'), /s2 still has subgoals to finish: g3/)
 })
 
 test('apply: a self turn cannot cancel a player goal, the player can', () => {
@@ -104,7 +106,8 @@ test('apply: a route added to a reopened goal takes over from the finished one',
   run(a, 'push:kill the ender dragon')                         // g1
   run(a, 'strat:g1:gear up chain', 'self')                     // s2 active
   run(a, 'sub:s2:wood tools and crafting table', 'self')       // g3
-  run(a, 'done:g3', 'self')                                    // s2 done, g1 verify
+  run(a, 'done:g3', 'self')
+  run(a, 'done:s2', 'self')                                    // s2 done, g1 verify
   const reply = {}                                             // one reply, as the model sent it
   for (const body of ['reopen:g1', 'strat:g1:full chain from wood tier', 'sub:new:stone_pickaxe and cobblestone']) {
     apply(a, parse(body), 'self', reply)                       // s4, then g5
@@ -121,6 +124,7 @@ test('apply: reopening a goal whose route finished asks for a route, not the dea
   run(a, 'strat:g1:gear up chain', 'self')
   run(a, 'sub:s2:wood tools', 'self')
   run(a, 'done:g3', 'self')
+  run(a, 'done:s2', 'self')
   run(a, 'reopen:g1', 'self')
   assert.deepStrictEqual(a.tree.activePath('g1').map(n => n.id), ['g1'])
   assert.match(a.tree.render('g1'), /g1 GOAL kill the ender dragon \[open\].*← choose strategy/)

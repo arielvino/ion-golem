@@ -11,9 +11,12 @@
 // This is decomposition only. The tree holds any number of roots, unordered;
 // which root is worked on, and in what order, is the Agenda's job (agenda.js).
 //
-// Completion is judged by the model, at every level. When a goal's strategy
-// finishes, the goal goes to `verify` and waits for the model to confirm it
-// (done) or reopen it. Handing specific checks over to code is a later step.
+// Completion is judged by the model, at every level. A strategy is finished
+// only when the model says so, even once all its subgoals are done: routes are
+// decomposed one level at a time, so the done subgoals may be just the first
+// steps. When a goal's strategy finishes, the goal goes to `verify` and waits
+// for the model to confirm it (done) or reopen it. Handing specific checks
+// over to code is a later step.
 //
 // Pure data + operations; no bot or fs access. The caller handles persistence
 // via toJSON/fromJSON.
@@ -88,17 +91,17 @@ class GoalTree {
     if (!GOAL_STATUS.includes(status)) throw new GoalTreeError(`bad goal status "${status}"`)
     if (status === 'failed') return this._failGoal(goal)
     goal.status = status
-    if (status === 'done') this._subgoalDone(goal)
     // Reopened after its route finished: that route is spent, so the goal has
     // none until the model adds or picks one (a new strategy then activates).
     if (status === 'open' && goal.active && this.nodes.get(goal.active).status === 'done') goal.active = null
     return goal
   }
 
-  // Mark a leaf strategy finished. For a non-leaf this happens automatically
-  // when all its subgoals are done.
+  // Mark a strategy finished: a leaf, or one whose subgoals are all done.
   completeStrategy(strategyId) {
     const strat = this._get(strategyId, 'strategy')
+    const left = strat.goals.filter(id => this.nodes.get(id).status !== 'done')
+    if (left.length) throw new GoalTreeError(`${strat.id} still has subgoals to finish: ${left.join(', ')}`)
     strat.status = 'done'
     const goal = this.nodes.get(strat.parent)
     if (goal.status !== 'open') return strat
@@ -198,7 +201,8 @@ class GoalTree {
           lines.push(`${pad}  ${s.id} ${s.status} ${s.text}${fmtEst(s.est)}`)
         }
       } else {
-        const leaf = n.goals.length === 0 ? ' ← act' : ''
+        const leaf = n.goals.length === 0 ? ' ← act'
+          : n.goals.every(id => this.nodes.get(id).status === 'done') ? ` ← steps done: add the next, or done:${n.id}` : ''
         lines.push(`${pad}${n.id} STRAT ${n.text} [${n.status}]${fmtEst(n.est)}${leaf}`)
         for (const gid of n.goals) {
           if (onPath.has(gid)) continue
@@ -238,14 +242,6 @@ class GoalTree {
     let d = 0
     for (let p = node.parent; p; p = this.nodes.get(p).parent) d++
     return d
-  }
-
-  // A subgoal finished: if it was the last one, its strategy is done.
-  _subgoalDone(goal) {
-    if (!goal.parent) return
-    const strat = this.nodes.get(goal.parent)
-    if (strat.status !== 'active') return
-    if (strat.goals.every(id => this.nodes.get(id).status === 'done')) this.completeStrategy(strat.id)
   }
 
   _failGoal(goal) {

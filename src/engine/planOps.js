@@ -8,7 +8,7 @@
 //   sub:<s#>:<text>       add a subgoal to a strategy               → g#
 //                         optional trailing " after=g4,g5" for order
 //   use:<s#>              switch the goal to this strategy
-//   done:<g#|s#>          goal achieved / leaf strategy finished
+//   done:<g#|s#>          goal achieved / strategy finished (its subgoals all done)
 //   fail:<g#|s#>          goal or strategy is dead
 //   reopen:<g#>           goal was not really done
 //
@@ -100,7 +100,6 @@ function apply(agenda, op, by, made = {}) {
     case 'done': {
       const n = node(op.id)
       if (n.kind === 'goal') t.markGoal(n.id, 'done')
-      else if (n.goals.length > 0) throw new GoalTreeError(`${n.id} has subgoals — it finishes when they are done`)
       else t.completeStrategy(n.id)
       agenda.prune()
       return `done ${op.id}`

@@ -30,12 +30,15 @@ test('active path descends to the leaf strategy', () => {
   assert.deepStrictEqual(t.stackView('g1').map(e => e.t), ['give Sargon an iron_pickaxe', '3 iron_ingot', '3 raw_iron'])
 })
 
-test('model verdicts on subgoals roll up; the parent goal still waits for its own', () => {
+test('model verdicts on subgoals do not roll up; each level waits for its own', () => {
   const { t, ingots, sticks, smelt, craft, root } = pickaxeTree()
   t.markGoal(sticks.id, 'done')
-  assert.strictEqual(craft.status, 'active')
+  assert.throws(() => t.completeStrategy(craft.id), /still has subgoals to finish: g4/)
   t.markGoal(ingots.id, 'done')
-  // craft had both subgoals done → done; the root is not assumed done
+  // both subgoals done, but the route may have more steps: the model says when it is finished
+  assert.strictEqual(craft.status, 'active')
+  assert.strictEqual(root.status, 'open')
+  t.completeStrategy(craft.id)
   assert.strictEqual(craft.status, 'done')
   assert.strictEqual(root.status, 'verify')
   assert.strictEqual(smelt.status, 'active') // untouched: the model judged ingots done directly
@@ -156,4 +159,20 @@ test('a goal with no routes yet offers acting directly', () => {
   const t = new GoalTree()
   const g = t.addGoal(null, { text: 'come to Sargon564' })
   assert.match(t.render(g.id), /GOAL come to Sargon564 \[open\] ← act, or plan routes$/)
+})
+
+// Bro, 2026-10-14 20:04: the model planned "gear up chain: wood, stone, iron, …"
+// and, as told, decomposed one level: only the wood subgoal. Finishing it closed
+// the whole route and sent the dragon goal to verify.
+test('a route whose subgoals are all done waits for the next step, not done by itself', () => {
+  const t = new GoalTree()
+  const root = t.addGoal(null, { text: 'kill the ender dragon' })
+  const chain = t.addStrategy(root.id, { text: 'gear up chain: wood, stone, iron' })
+  const wood = t.addGoal(chain.id, { text: 'wood tools and crafting table' })
+  t.markGoal(wood.id, 'done')
+  assert.strictEqual(chain.status, 'active')
+  assert.strictEqual(root.status, 'open')
+  assert.match(t.render(root.id), /s2 STRAT gear up chain: wood, stone, iron \[active\] ← steps done: add the next, or done:s2/)
+  const stone = t.addGoal(chain.id, { text: 'stone_pickaxe' })
+  assert.deepStrictEqual(t.activePath(root.id).map(n => n.id), ['g1', 's2', stone.id])
 })
