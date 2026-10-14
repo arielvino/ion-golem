@@ -1207,6 +1207,13 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   const onPlan = (r) => {
     if (r.status === 'partial' && lastStatus === 'partial') return
     console.log(`  pathfinder: plan ${r.status} after ${Date.now() - planFrom}ms, ${r.visitedNodes} nodes, ${r.path.length} steps`)
+    // A plan out of time: keep what it was given, to replay with a bigger budget (#111).
+    if (r.status === 'timeout') {
+      try {
+        const file = require('./planSnapshot').capture(bot, r, { goal: { x: tx, y: ty, z: tz, range }, movements: bot.pathfinder.movements, planMs: Date.now() - planFrom })
+        if (file) console.log(`  pathfinder: plan inputs saved to ${file}`)
+      } catch (e) { console.log(`  pathfinder: plan snapshot failed: ${e.message}`) }
+    }
     if (r.status !== 'partial') planFrom = Date.now()
     lastStatus = r.status
   }
