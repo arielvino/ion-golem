@@ -41,14 +41,29 @@ test('apply: a full build-out, one level per turn, to a finished goal', () => {
   run(a, 'strat:g4:mine and smelt', 'self')         // s6 leaf
   assert.match(a.render(), /s6 STRAT mine and smelt \[active\] ← act/)
   run(a, 'done:s6', 'self')
-  assert.match(a.render(), /g4 GOAL 3 iron_ingot \[verify\] ← confirm done\?/)
+  assert.match(a.render(), /g4 GOAL 3 iron_ingot \[open\] ← route done: done:g4 if achieved, else another route/)
   run(a, 'done:g4', 'self')
   run(a, 'done:g5', 'self')
   assert.match(a.render(), /s2 STRAT craft \[active\] ← steps done: add the next, or done:s2/)
   run(a, 'done:s2', 'self')
-  assert.match(a.render(), /g1 GOAL iron_pickaxe for Sargon \[verify\]/)
+  assert.match(a.render(), /g1 GOAL iron_pickaxe for Sargon \[open\].* ← route done: done:g1/)
   run(a, 'done:g1', 'self')
   assert.strictEqual(a.entries.length, 0) // pruned
+})
+
+// The dragon run (2026-10-15): one reply replaced a subgoal whose target turned out
+// wrong. fail:g22 used to fail s2 and with it the root, so sub:s2 hung the new step on
+// a dead route and the dragon goal sat failed.
+test('apply: fail a subgoal then sub a replacement keeps the route and the root alive', () => {
+  const a = new Agenda()
+  run(a, 'push:kill the ender dragon'); run(a, 'strat:g1:gear up then go to the End', 'self')
+  run(a, 'sub:s2:iron gear: mine iron at -70,16,564', 'self')     // g3
+  run(a, 'fail:g3', 'self')
+  run(a, 'sub:s2:iron gear: mine deepslate iron at -41,-54,586', 'self')  // g4
+  assert.strictEqual(a.tree.nodes.get('g1').status, 'open')
+  assert.strictEqual(a.tree.nodes.get('s2').status, 'active')
+  assert.strictEqual(a.focus().id, 'g1')
+  assert.match(a.render(), /g4 GOAL iron gear: mine deepslate iron at -41,-54,586 \[open\] ← act, or plan routes/)
 })
 
 test('apply: done on a strategy with unfinished subgoals is refused', () => {

@@ -19,7 +19,7 @@
 
 const { GoalTree, GoalTreeError } = require('./goalTree')
 
-const LIVE = new Set(['open', 'verify'])
+const LIVE = new Set(['open'])
 const CLOSED_KEPT = 300
 
 class Agenda {
