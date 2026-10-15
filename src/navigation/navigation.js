@@ -73,6 +73,7 @@ function refusalText(r) {
     case 'need_tool': return `needs ${r.need}`
     case 'not_permitted': return 'breaking not permitted'
     case 'unbreakable': return `${r.block} is unbreakable`
+    case 'not_visible': return 'no face of it in view from here'
     default: return r.reason + (r.error ? `: ${r.error}` : '')
   }
 }
@@ -149,7 +150,19 @@ async function digBlock(pos, opts = {}) {
     // the whole nav coroutine — and since nav holds the single background-task
     // slot, every queued action (including 'stop') stalled behind it: the
     // "staircase deadlock". Bound it by timeout + abort, like mining.js does.
-    await raceAbort(bot.dig(b), 30000)
+    // 'raycast' aims at a face the eye can reach and refuses a block with none in view,
+    // like a player: aiming at the centre went through walls (a staircase dug the block
+    // ahead at head+1 through the one above its head). From inside the block (stuck in
+    // it) no face is in view, so that one is dug as before.
+    const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0).floored()
+    const inside = eye.x === pos.x && eye.y === pos.y && eye.z === pos.z
+    try {
+      await raceAbort(bot.dig(b, true, inside ? 'auto' : 'raycast'), 30000)
+    } catch (e) {
+      if (e.message !== 'Block not in view') throw e
+      console.log(`  digBlock: ${b.name} at ${pos.x},${pos.y},${pos.z} not in view, skipping`)
+      return { ok: false, reason: 'not_visible', block: b.name }
+    }
     // Verify the block actually broke — bedrock / a block the held item can't
     // break at all leaves it standing. This is the atomic's single source of
     // truth for "did it break", so callers (doMine) don't re-check.
@@ -411,11 +424,12 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
     await digBlock(new Vec3(cx + sx, ny, cz + sz))
     await digBlock(new Vec3(cx + sx, ny + 1, cz + sz))
   } else if (stepY < 0) {
-    // Going down: dig forward-and-down staircase
-    await digBlock(new Vec3(cx + sx, ny, cz + sz))
-    await digBlock(new Vec3(cx + sx, ny + 1, cz + sz))
-    // Also clear head space at current level
+    // Going down: dig forward-and-down staircase, top first: each block is in
+    // view only once the one above it is open.
+    // Head space at current level
     await digBlock(new Vec3(cx + sx, ny + 2, cz + sz))
+    await digBlock(new Vec3(cx + sx, ny + 1, cz + sz))
+    await digBlock(new Vec3(cx + sx, ny, cz + sz))
   } else {
     // Level: dig foot and head ahead
     await digBlock(new Vec3(cx + sx, cy, cz + sz))
@@ -591,12 +605,13 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       console.log(`  stairUp: placed step at ${cx + stepX},${curY},${cz + stepZ}`)
     }
 
+    // Dig above head at current pos for jump clearance. First: the block ahead at +2
+    // is only in view through it.
+    await dig(new Vec3(cx, curY + 2, cz))
     // Dig space for body at +1 level ahead (feet after stepping up)
     await dig(new Vec3(cx + stepX, curY + 1, cz + stepZ))
     // Dig space for head at +2 level ahead
     await dig(new Vec3(cx + stepX, curY + 2, cz + stepZ))
-    // Dig above head at current pos for jump clearance
-    await dig(new Vec3(cx, curY + 2, cz))
     if (state.abortSignal) return false
 
     // Reveal the step cells before the STRICT liveStep — an unsurveyed (unknown)
@@ -635,12 +650,13 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     //  ####         #[B]__    <- bot drops 1 block
     //  ####          ####
     //
-    // Dig forward-and-below (the new floor level)
-    await digBlock(new Vec3(cx + stepX, curY - 1, cz + stepZ))
-    // Dig forward at current level (body space to walk into)
-    await digBlock(new Vec3(cx + stepX, curY, cz + stepZ))
+    // Top first: each block is in view only once the one above it is open.
     // Dig forward-and-above for head clearance while walking in
     await digBlock(new Vec3(cx + stepX, curY + 1, cz + stepZ))
+    // Dig forward at current level (body space to walk into)
+    await digBlock(new Vec3(cx + stepX, curY, cz + stepZ))
+    // Dig forward-and-below (the new floor level)
+    await digBlock(new Vec3(cx + stepX, curY - 1, cz + stepZ))
 
     if (state.abortSignal) return false
 
