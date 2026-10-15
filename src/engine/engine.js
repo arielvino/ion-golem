@@ -163,8 +163,9 @@ function autonomousLine(bgResult) {
     }
     const unplanned = unplannedFocus()
     if (unplanned) {
-      console.log(color(c.white, `\n  [LOOP] planning: ${unplanned.id} "${unplanned.text}"`))
-      return { kind: 'plan', goal: unplanned.id, line: `[PLAN-FIRST] goal=${unplanned.id} "${unplanned.text}"` }
+      const { goal, why } = unplanned
+      console.log(color(c.white, `\n  [LOOP] planning: ${goal.id} "${goal.text}" (${why})`))
+      return { kind: 'plan', goal: goal.id, line: `[PLAN-FIRST] goal=${goal.id} "${goal.text}" why=${why}` }
     }
     console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
     return { kind: 'task', line: `[SELF-CHECK] task=${taskDesc}` }

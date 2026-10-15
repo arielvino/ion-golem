@@ -8,7 +8,7 @@ const run = (a, body, by = 'Sargon') => apply(a, parse(body), by)
 
 test('parse: free text is the last field and may contain colons', () => {
   assert.deepStrictEqual(parse('push:say hi: loudly'), { op: 'push', text: 'say hi: loudly' })
-  assert.deepStrictEqual(parse('strat:g1:craft it needs=x pack=none'), { op: 'strat', id: 'g1', text: 'craft it', needs: 'x', pack: 'none' })
+  assert.deepStrictEqual(parse('strat:g1:craft it needs=x pack=none lack=none'), { op: 'strat', id: 'g1', text: 'craft it', needs: 'x', pack: 'none', lack: 'none' })
 })
 
 test('parse: {reason} on push/queue, after= on sub', () => {
@@ -34,11 +34,11 @@ test('apply: the speaker owns what they push and gets a default reason', () => {
 test('apply: a full build-out, one level per turn, to a finished goal', () => {
   const a = new Agenda()
   run(a, 'push:iron_pickaxe for Sargon')            // g1
-  run(a, 'strat:g1:craft needs=x pack=none', 'self')                  // s2 active
-  run(a, 'strat:g1:loot a village chest needs=x pack=none', 'self')   // s3 dormant
+  run(a, 'strat:g1:craft needs=x pack=none lack=none', 'self')                  // s2 active
+  run(a, 'strat:g1:loot a village chest needs=x pack=none lack=none', 'self')   // s3 dormant
   run(a, 'sub:s2:3 iron_ingot', 'self')             // g4
   run(a, 'sub:s2:2 stick', 'self')                  // g5
-  run(a, 'strat:g4:mine and smelt needs=x pack=none', 'self')         // s6 leaf
+  run(a, 'strat:g4:mine and smelt needs=x pack=none lack=none', 'self')         // s6 leaf
   assert.match(a.render(), /s6 STRAT mine and smelt \[active\] ← act/)
   run(a, 'done:s6', 'self')
   assert.match(a.render(), /g4 GOAL 3 iron_ingot \[open\] ← route done: done:g4 if achieved, else another route/)
@@ -56,7 +56,7 @@ test('apply: a full build-out, one level per turn, to a finished goal', () => {
 // a dead route and the dragon goal sat failed.
 test('apply: fail a subgoal then sub a replacement keeps the route and the root alive', () => {
   const a = new Agenda()
-  run(a, 'push:kill the ender dragon'); run(a, 'strat:g1:gear up then go to the End needs=x pack=none', 'self')
+  run(a, 'push:kill the ender dragon'); run(a, 'strat:g1:gear up then go to the End needs=x pack=none lack=none', 'self')
   run(a, 'sub:s2:iron gear: mine iron at -70,16,564', 'self')     // g3
   run(a, 'fail:g3', 'self')
   run(a, 'sub:s2:iron gear: mine deepslate iron at -41,-54,586', 'self')  // g4
@@ -68,7 +68,7 @@ test('apply: fail a subgoal then sub a replacement keeps the route and the root 
 
 test('apply: done on a strategy with unfinished subgoals is refused', () => {
   const a = new Agenda()
-  run(a, 'push:x'); run(a, 'strat:g1:y needs=x pack=none'); run(a, 'sub:s2:z')
+  run(a, 'push:x'); run(a, 'strat:g1:y needs=x pack=none lack=none'); run(a, 'sub:s2:z')
   assert.throws(() => run(a, 'done:s2'), /s2 still has subgoals to finish: g3/)
 })
 
@@ -82,7 +82,7 @@ test('apply: a self turn cannot cancel a player goal, the player can', () => {
 
 test('apply: fail then use a dormant route', () => {
   const a = new Agenda()
-  run(a, 'push:x'); run(a, 'strat:g1:a needs=x pack=none'); run(a, 'strat:g1:b needs=x pack=none')
+  run(a, 'push:x'); run(a, 'strat:g1:a needs=x pack=none lack=none'); run(a, 'strat:g1:b needs=x pack=none lack=none')
   run(a, 'fail:s2', 'self')
   assert.match(a.render(), /← choose strategy/)
   run(a, 'use:s3', 'self')
@@ -91,7 +91,7 @@ test('apply: fail then use a dormant route', () => {
 
 test('apply: reopen only takes goals; unknown ids are reported', () => {
   const a = new Agenda()
-  run(a, 'push:x'); run(a, 'strat:g1:a needs=x pack=none')
+  run(a, 'push:x'); run(a, 'strat:g1:a needs=x pack=none lack=none')
   assert.throws(() => run(a, 'reopen:s2'), /reopen takes a goal/)
   assert.throws(() => run(a, 'done:g9'), /no node g9/)
 })
@@ -101,16 +101,16 @@ test('apply: "new" names what this reply created, so a goal and its route fit on
   const made = {}
   const reply = (body) => apply(a, parse(body), 'Sargon', made)
   reply('push:give Sargon a stone_pickaxe')
-  assert.match(reply('strat:new:craft it needs=x pack=none'), /^strat s2 .* for g1 \(active\)$/)
+  assert.match(reply('strat:new:craft it needs=x pack=none lack=none'), /^strat s2 .* for g1 \(active\)$/)
   assert.match(reply('sub:new:wooden_pickaxe'), /^sub g3 .* under s2$/)
-  assert.match(reply('strat:new:craft it from planks needs=x pack=none'), /for g3/)
+  assert.match(reply('strat:new:craft it from planks needs=x pack=none lack=none'), /for g3/)
   assert.strictEqual(reply('fail:new'), 'fail s4')
 })
 
 test('apply: "new" with nothing created this reply is reported, not guessed', () => {
   const a = new Agenda()
   run(a, 'push:dig a hole')
-  assert.throws(() => run(a, 'strat:new:shovel it needs=x pack=none'), /"new" means a goal created earlier in this same reply — there is none/)
+  assert.throws(() => run(a, 'strat:new:shovel it needs=x pack=none lack=none'), /"new" means a goal created earlier in this same reply — there is none/)
 })
 
 // Bro, 2026-10-14 20:04: after the only subgoal finished, the model reopened the
@@ -119,12 +119,12 @@ test('apply: "new" with nothing created this reply is reported, not guessed', ()
 test('apply: a route added to a reopened goal takes over from the finished one', () => {
   const a = new Agenda()
   run(a, 'push:kill the ender dragon')                         // g1
-  run(a, 'strat:g1:gear up chain needs=x pack=none', 'self')                     // s2 active
+  run(a, 'strat:g1:gear up chain needs=x pack=none lack=none', 'self')                     // s2 active
   run(a, 'sub:s2:wood tools and crafting table', 'self')       // g3
   run(a, 'done:g3', 'self')
   run(a, 'done:s2', 'self')                                    // s2 done, g1 verify
   const reply = {}                                             // one reply, as the model sent it
-  for (const body of ['reopen:g1', 'strat:g1:full chain from wood tier needs=x pack=none', 'sub:new:stone_pickaxe and cobblestone']) {
+  for (const body of ['reopen:g1', 'strat:g1:full chain from wood tier needs=x pack=none lack=none', 'sub:new:stone_pickaxe and cobblestone']) {
     apply(a, parse(body), 'self', reply)                       // s4, then g5
   }
   const t = a.tree
@@ -136,7 +136,7 @@ test('apply: a route added to a reopened goal takes over from the finished one',
 test('apply: reopening a goal whose route finished asks for a route, not the dead one', () => {
   const a = new Agenda()
   run(a, 'push:kill the ender dragon')
-  run(a, 'strat:g1:gear up chain needs=x pack=none', 'self')
+  run(a, 'strat:g1:gear up chain needs=x pack=none lack=none', 'self')
   run(a, 'sub:s2:wood tools', 'self')
   run(a, 'done:g3', 'self')
   run(a, 'done:s2', 'self')
@@ -145,23 +145,60 @@ test('apply: reopening a goal whose route finished asks for a route, not the dea
   assert.match(a.tree.render('g1'), /g1 GOAL kill the ender dragon \[open\].*← choose strategy/)
 })
 
-test('parse: strat needs a route walked through — needs= and pack= are required', () => {
+test('parse: strat needs a route walked through — needs=, pack= and lack= are required', () => {
   assert.throws(() => parse('strat:g1:craft it'), /strat needs the route walked through first/)
-  assert.throws(() => parse('strat:g1:craft it needs=3 iron_ingot'), /strat needs the route walked through first/)
-  assert.throws(() => parse('strat:g1:craft it needs= pack=none'), /strat needs the route walked through first/)
-  assert.deepStrictEqual(parse('strat:g1:staircase to y-54: strip mine needs=iron_pickaxe (have), torches (have 0) pack=16 torches, 10 bread'),
-    { op: 'strat', id: 'g1', text: 'staircase to y-54: strip mine', needs: 'iron_pickaxe (have), torches (have 0)', pack: '16 torches, 10 bread' })
+  assert.throws(() => parse('strat:g1:craft it needs=3 iron_ingot pack=none'), /strat needs the route walked through first/)
+  assert.throws(() => parse('strat:g1:craft it needs= pack=none lack=none'), /strat needs the route walked through first/)
+  assert.deepStrictEqual(parse('strat:g1:staircase to y-54: strip mine needs=iron_pickaxe (have), torches (have 0) pack=16 torches, 10 bread lack=torches, bread'),
+    { op: 'strat', id: 'g1', text: 'staircase to y-54: strip mine', needs: 'iron_pickaxe (have), torches (have 0)', pack: '16 torches, 10 bread', lack: 'torches, bread' })
 })
 
-test('apply: a strategy keeps its needs and pack, and the tree shows them on the active route', () => {
+test('apply: a strategy keeps its needs, pack and lack, and the tree shows them on the active route', () => {
   const a = new Agenda()
   run(a, 'push:diamonds')
-  run(a, 'strat:g1:staircase down and strip mine needs=iron_pickaxe (have) pack=16 torches, food', 'self')
-  run(a, 'strat:g1:loot a chest needs=nothing pack=none', 'self')
-  assert.strictEqual(a.tree.nodes.get('s2').pack, '16 torches, food')
+  run(a, 'strat:g1:staircase down and strip mine needs=iron_pickaxe (have) pack=16 torches, food lack=food', 'self')
+  run(a, 'strat:g1:loot a chest needs=nothing pack=none lack=none', 'self')
+  assert.strictEqual(a.tree.nodes.get('s2').lack, 'food')
   const view = a.tree.render('g1')
-  assert.match(view, /s2 STRAT staircase down and strip mine \[active\][^\n]*\n\s+needs: iron_pickaxe \(have\) \| pack: 16 torches, food/)
+  assert.match(view, /s2 STRAT staircase down and strip mine \[active\][^\n]*\n\s+needs: iron_pickaxe \(have\) \| pack: 16 torches, food \| lack: food/)
   assert.doesNotMatch(view, /needs: nothing/)   // dormant routes stay one-liners
+})
+
+test('render: a route that lacks something asks for a subgoal until it has one', () => {
+  const a = new Agenda()
+  run(a, 'push:diamonds')
+  run(a, 'strat:g1:strip mine needs=iron_pickaxe (have) pack=food lack=food', 'self')
+  assert.match(a.tree.render('g1'), /s2 STRAT strip mine \[active\] ← lack= has no subgoal/)
+  run(a, 'sub:s2:8 cooked food', 'self')
+  assert.doesNotMatch(a.tree.render('g1'), /lack= has no subgoal/)
+})
+
+test('sub: " first" puts the new step ahead of the open ones, so it takes the focus', () => {
+  const a = new Agenda()
+  run(a, 'push:iron gear')
+  run(a, 'strat:g1:mine and smelt needs=x pack=none lack=none', 'self')
+  run(a, 'sub:s2:11 iron_ingot', 'self')                           // g3
+  assert.deepStrictEqual(parse('sub:s2:stone_pickaxe first'), { op: 'sub', id: 's2', text: 'stone_pickaxe', first: true })
+  run(a, 'sub:s2:stone_pickaxe first', 'self')                     // g4
+  assert.deepStrictEqual(a.tree.nodes.get('s2').goals, ['g4', 'g3'])
+  assert.strictEqual(a.tree.activePath('g1').at(-1).id, 'g4')
+})
+
+test('stale: a route written before a death says so until it is kept or replaced', () => {
+  const a = new Agenda()
+  run(a, 'push:diamonds')
+  run(a, 'strat:g1:strip mine needs=iron_pickaxe (have) pack=none lack=none', 'self')
+  a.tree.markStale('you died')
+  assert.match(a.tree.planGap('g1'), /route s2 was written before you died/)
+  assert.match(a.tree.render('g1'), /s2 STRAT strip mine \[active\] ← written before you died/)
+  run(a, 'use:s2', 'self')                                          // keep it
+  assert.strictEqual(a.tree.planGap('g1'), null)
+  a.tree.markStale('you died')
+  const reply = {}                                                  // one reply: `new` is its strategy
+  apply(a, parse('strat:g1:wood, stone, iron again, then strip mine needs=x pack=none lack=none'), 'self', reply)
+  apply(a, parse('use:new'), 'self', reply)                         // replace it
+  assert.strictEqual(a.tree.planGap('g1'), null)
+  assert.strictEqual(a.tree.nodes.get('s3').status, 'active')
 })
 
 test('render: a goal with no route asks for one', () => {

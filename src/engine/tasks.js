@@ -35,17 +35,28 @@ function agendaTitles() {
   return state.agenda.entries.map(e => state.agenda.tree.nodes.get(e.id).text).join(' | ')
 }
 
-// The goal the focus has reached when it has no route yet: the bot must plan it
-// before acting on it. Null when the focus is planned, or is an ongoing standing
-// order (follow, guard), which has no route to plan.
+// The first goal on the focus's active path that can't be acted on yet (see
+// GoalTree.planGap), with why: the bot must plan it before acting. Null when
+// the path is planned, or the focus is an ongoing standing order (follow,
+// guard), which has no route to plan.
 function unplannedFocus() {
   const a = state.agenda
   const root = a?.focus()
   if (!root) return null
-  const end = a.tree.activePath(root.id).at(-1)
-  if (!end || end.kind !== 'goal' || end.status !== 'open' || end.strategies.length) return null
-  if (end === root && a.entries.find(e => e.id === root.id)?.ongoing) return null
-  return end
+  if (!root.strategies.length && a.entries.find(e => e.id === root.id)?.ongoing) return null
+  for (const n of a.tree.activePath(root.id)) {
+    if (n.kind !== 'goal') continue
+    const why = a.tree.planGap(n.id)
+    if (why) return { goal: n, why }
+  }
+  return null
+}
+
+// Something changed that the routes in the tree were not written for.
+function markRoutesStale(why) {
+  if (!state.agenda) return
+  state.agenda.tree.markStale(why)
+  saveAgenda()
 }
 
 function stackTitles() { return state.taskStack.map(e => e.t).join(' > ') }
@@ -85,6 +96,7 @@ function renderAgenda() {
 }
 
 module.exports = {
+  markRoutesStale,
   loadAgenda, saveAgenda, syncStack, applyPlanTags, renderAgenda, agendaTitles,
   stackTitles, stackTop, stackTopTitle, unplannedFocus,
 }

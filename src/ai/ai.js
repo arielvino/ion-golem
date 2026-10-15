@@ -110,9 +110,10 @@ async function handleMessages(batch) {
   const isPlayerMessage = !!player
   const message = batch.filter(m => isPlayer(m.username)).map(m => m.message).join('\n')
   const isMonitorCall = !player && batch.some(m => m.username === 'self' && m.message.startsWith('[MONITOR]'))
-  // A [PLAN-FIRST] turn plans the goal the focus reached without a route. Its
-  // actions wait for the end of the reply and run only if the goal got a route
-  // (or a verdict) by then: acting is not a way around planning.
+  // A [PLAN-FIRST] turn plans the goal the focus reached before it could act on
+  // it (no route, a lack= with no subgoal, a route made stale). Its actions wait
+  // for the end of the reply and run only if the gap is closed by then (or the
+  // goal got a verdict): acting is not a way around planning.
   const planGoal = player ? null
     : batch.map(m => m.username === 'self' && /^\[PLAN-FIRST\] goal=(g\d+)/.exec(m.message)).find(Boolean)?.[1] || null
   // A player's message becomes its record BEFORE the context is built, so it sits
@@ -344,10 +345,10 @@ async function handleMessages(batch) {
     // Whatever the stream held back (a deferred `build` and its followers) runs now
     // that processTags has applied the blueprint and plan edits.
     const streamed = dispatched
-    const g = planGoal && state.agenda.tree.nodes.get(planGoal)
-    if (g && g.status === 'open' && !g.strategies.length && pendingActions.length) {
-      console.log(color(c.yellow, `\n  [PLAN] ${planGoal} still has no route: dropped ${pendingActions.join(' → ')}`))
-      state.planErrors.push(`[ACTION:${pendingActions.join('][ACTION:')}] not run → ${planGoal} has no route yet. Plan it first: [PLAN:strat:${planGoal}:<route> needs=<…> pack=<…>], then act in the same reply`)
+    const gap = planGoal && state.agenda.tree.nodes.has(planGoal) && state.agenda.tree.planGap(planGoal)
+    if (gap && pendingActions.length) {
+      console.log(color(c.yellow, `\n  [PLAN] ${planGoal} still unplanned (${gap}): dropped ${pendingActions.join(' → ')}`))
+      state.planErrors.push(`[ACTION:${pendingActions.join('][ACTION:')}] not run → ${planGoal}: ${gap}. Plan it first (see [PLAN-FIRST]), then act in the same reply`)
       pendingActions.length = 0
     }
     dispatchReady(true)
