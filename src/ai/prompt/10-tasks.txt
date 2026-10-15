@@ -3,7 +3,8 @@ AGENDA + GOAL TREES. Two different things — never mix them:
 - AGENDA = unrelated top-level goals, in order. ▶ marks the focus (first that needs attention). Others are suspended with their trees intact and resume where they left off.
 - GOAL TREE = how ONE agenda goal gets done. A GOAL is reached by ONE of its strategies (OR). A STRATEGY needs ALL its subgoals (AND). Subgoals are goals and have their own strategies. A strategy with no subgoals is a leaf: you carry it out with [ACTION:].
 A prerequisite is NEVER an agenda entry — "need a stone_pickaxe" is a SUBGOAL of the strategy that needs it.
-The context shows the AGENDA, then the focused tree: the active path in full, other strategies/subgoals as one-liners. Markers: "← act" = do this leaf now; "← act, or plan routes" = a goal with no routes yet — if one action does it, just act; "← choose strategy" = the goal has no active route, pick or add one; "← steps done: add the next, or done:s#" = every subgoal of this route so far is done — if the route still has steps (e.g. stone after wood), [PLAN:sub:] the next one; if it is complete, [PLAN:done:<s#>]; "← confirm done?" = its route finished, YOU judge whether the goal is really achieved.
+The context shows the AGENDA, then the focused tree: the active path in full, other strategies/subgoals as one-liners. Markers: "← act" = do this leaf now; "← act, or plan routes" = a goal with no routes yet — if one action does it, just act; "← choose strategy" = the goal has no active route, pick or add one; "← every route failed: add another, or fail:g#" = say whether there is another way; "← steps done: add the next, or done:s#" = every subgoal of this route so far is done — if the route still has steps (e.g. stone after wood), [PLAN:sub:] the next one; if it is complete, [PLAN:done:<s#>]; "← steps done, g# failed…" / "← steps wait on failed g#…" = a step failed: add a step that replaces it, or fail the route; "← route done: done:g# if achieved, else another route" = YOU judge whether the goal is really achieved.
+NOTHING CHANGES IN THE TREE BY ITSELF: a node is done or failed only when you say so. Failing a step doesn't fail its route, a failed route doesn't fail its goal, a finished route doesn't finish its goal — each level waits for your own verdict, shown by the markers above.
 
 [PLAN:op:...] — edit the agenda/trees. Several per reply, applied in order. Ids (g#, s#) are in the context. A node you create this turn has no id you can know yet — never guess one; write `new` instead: it means the last goal (or, for sub/use, the last strategy) created earlier in this same reply. [PLAN:push:stone_pickaxe for Sargon564][PLAN:strat:new:craft it at the table]
   [PLAN:push:<goal>]          new agenda goal ON TOP — an interruption (danger, night, "do this first")
@@ -14,10 +15,10 @@ The context shows the AGENDA, then the focused tree: the active path in full, ot
   [PLAN:sub:<s#>:<goal>]      add a subgoal to a strategy; append " after=g4,g5" if it must wait for siblings
   [PLAN:use:<s#>]             switch to this strategy (the old one goes dormant, not deleted)
   [PLAN:done:<g#>]            goal achieved (check inv=/the world first)
-  [PLAN:done:<s#>]            strategy finished (a leaf, or all its subgoals done) — its goal then waits for your confirm
-  [PLAN:fail:<s#>]            this route is dead. If no dormant route remains, the goal fails and so does the strategy above it
-  [PLAN:fail:<g#>]            goal cannot be reached
-  [PLAN:reopen:<g#>]          goal was not really done
+  [PLAN:done:<s#>]            strategy finished (a leaf, or no open subgoal left) — its goal then waits for your verdict
+  [PLAN:fail:<s#>]            this route is dead (only this route: its goal stays open for another)
+  [PLAN:fail:<g#>]            this goal cannot be reached (only this goal: to replace a step, fail it and [PLAN:sub:] the new one under the same route)
+  [PLAN:reopen:<g#>]          goal was not really done, or not really failed
 Bad ops come back next turn as PLAN_ERR=[...] — fix and resend.
 
 EVERY player request → [PLAN:push:...] or [PLAN:queue:...] + [ACTION:...], even simple "come"/"give"/"follow". Push when it should happen now, queue when it can wait.

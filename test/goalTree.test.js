@@ -40,7 +40,8 @@ test('model verdicts on subgoals do not roll up; each level waits for its own', 
   assert.strictEqual(root.status, 'open')
   t.completeStrategy(craft.id)
   assert.strictEqual(craft.status, 'done')
-  assert.strictEqual(root.status, 'verify')
+  assert.strictEqual(root.status, 'open')     // the route finished; the goal waits for the model
+  assert.match(t.render('g1'), /g1 GOAL .*\[open\].* ← route done: done:g1 if achieved, else another route/)
   assert.strictEqual(smelt.status, 'active') // untouched: the model judged ingots done directly
   t.markGoal(root.id, 'done')
   assert.strictEqual(root.status, 'done')
@@ -49,9 +50,9 @@ test('model verdicts on subgoals do not roll up; each level waits for its own', 
 test('a finished leaf strategy never marks its goal done by itself', () => {
   const { t, mine, raw, smelt } = pickaxeTree()
   t.completeStrategy(mine.id)
-  assert.strictEqual(raw.status, 'verify')
+  assert.strictEqual(raw.status, 'open')
   assert.strictEqual(smelt.status, 'active')
-  assert.match(t.render('g1'), /g7 GOAL 3 raw_iron \[verify\] ← confirm done\?/)
+  assert.match(t.render('g1'), /g7 GOAL 3 raw_iron \[open\] ← route done: done:g7 if achieved, else another route/)
 })
 
 test('switching strategy keeps the old one dormant', () => {
@@ -73,17 +74,51 @@ test('failing a strategy leaves the choice to the model while alternatives exist
   assert.strictEqual(t.activePath('g1').at(-1).id, cave.id)
 })
 
-test('failure propagates up until a goal with a surviving alternative', () => {
-  const { t, raw, mine, cave, smelt, ingots, craft, root, loot } = pickaxeTree()
+test('failure never propagates: every route failing leaves the goal open for the model', () => {
+  const { t, raw, mine, cave, smelt, ingots, craft, root } = pickaxeTree()
   t.failStrategy(mine.id)
   t.failStrategy(cave.id)
-  assert.strictEqual(raw.status, 'failed')
-  assert.strictEqual(smelt.status, 'failed')
-  assert.strictEqual(ingots.status, 'failed') // smelt was its only strategy
-  assert.strictEqual(craft.status, 'failed')
-  assert.strictEqual(root.status, 'open')    // loot is still dormant
-  assert.strictEqual(root.active, null)
-  assert.strictEqual(loot.status, 'dormant')
+  assert.strictEqual(raw.status, 'open')
+  assert.strictEqual(smelt.status, 'active')
+  assert.strictEqual(ingots.status, 'open')
+  assert.strictEqual(craft.status, 'active')
+  assert.strictEqual(root.status, 'open')
+  assert.match(t.render('g1'), /g7 GOAL 3 raw_iron \[open\] ← every route failed: add another, or fail:g7/)
+})
+
+// The dragon run (2026-10-15): the model failed a subgoal to replace it, and the
+// failure took the strategy and the root goal down with it.
+test('failing a subgoal leaves its strategy alive for a replacement step', () => {
+  const { t, raw, smelt, ingots, root } = pickaxeTree()
+  t.markGoal(raw.id, 'failed')
+  assert.strictEqual(smelt.status, 'active')
+  assert.strictEqual(ingots.status, 'open')
+  assert.strictEqual(root.status, 'open')
+  assert.match(t.render('g1'), /s6 STRAT smelt raw iron \[active\] ← steps done, g7 failed: add the next or a replacement, or done:s6 \/ fail:s6/)
+  const other = t.addGoal(smelt.id, { text: '3 raw_iron from the deepslate vein' })
+  assert.strictEqual(t.activePath('g1').at(-1).id, other.id)
+  t.markGoal(other.id, 'done')
+  t.completeStrategy(smelt.id)                 // a failed step doesn't block finishing the route
+  assert.strictEqual(smelt.status, 'done')
+})
+
+test('steps waiting on a failed sibling are pointed out', () => {
+  const t = new GoalTree()
+  const r = t.addGoal(null, { text: 'pickaxe' })
+  const s = t.addStrategy(r.id, { text: 'craft' })
+  const planks = t.addGoal(s.id, { text: 'planks' })
+  t.addGoal(s.id, { text: 'pickaxe', after: [planks.id] })
+  t.markGoal(planks.id, 'failed')
+  assert.match(t.render(r.id), /s2 STRAT craft \[active\] ← steps wait on failed g3: add a replacement, or fail:s2/)
+})
+
+test('failing a goal is only that goal', () => {
+  const { t, ingots, craft, root } = pickaxeTree()
+  t.markGoal(ingots.id, 'failed')
+  assert.strictEqual(craft.status, 'active')
+  assert.strictEqual(root.status, 'open')
+  t.markGoal(root.id, 'failed')
+  assert.strictEqual(root.status, 'failed')
 })
 
 test('cannot activate a failed strategy', () => {
@@ -92,15 +127,25 @@ test('cannot activate a failed strategy', () => {
   assert.throws(() => t.activate(mine.id), /failed/)
 })
 
-test('a leaf strategy completing asks the model to verify a model-judged goal', () => {
+test('a finished route asks the model to judge its goal; not achieved → pick another route', () => {
   const t = new GoalTree()
   const r = t.addGoal(null, { text: 'find a village' })
   const s = t.addStrategy(r.id, { text: 'walk east' })
   t.completeStrategy(s.id)
-  assert.strictEqual(r.status, 'verify')
-  assert.match(t.render('g1'), /confirm done\?/)
-  t.markGoal(r.id, 'open') // model: not really
   assert.strictEqual(r.status, 'open')
+  assert.match(t.render('g1'), /← route done: done:g1 if achieved, else another route/)
+  const n = t.addStrategy(r.id, { text: 'walk north' })   // model: not really
+  assert.strictEqual(n.status, 'active')
+  assert.strictEqual(s.status, 'done')
+  assert.strictEqual(t.activePath('g1').at(-1).id, n.id)
+})
+
+test('a stored goal in the retired verify status loads as open', () => {
+  const t = GoalTree.fromJSON({ seq: 2, nodes: [
+    { id: 'g1', kind: 'goal', text: 'x', reason: '', status: 'verify', parent: null, strategies: ['s2'], active: 's2', after: [] },
+    { id: 's2', kind: 'strategy', text: 'y', parent: 'g1', status: 'done', goals: [], est: null }] })
+  assert.strictEqual(t.nodes.get('g1').status, 'open')
+  assert.match(t.render('g1'), /← route done: done:g1/)
 })
 
 test('after: edges gate subgoal order', () => {
@@ -127,17 +172,17 @@ test('render shows the active path and one-line siblings only', () => {
   assert.match(out, /s9 dormant cave-surface ore/)
 })
 
-test('a new strategy revives a failed root, not a failed subgoal', () => {
-  const { t, root, craft, loot, raw, mine, cave } = pickaxeTree()
-  t.failStrategy(craft.id)
-  t.failStrategy(loot.id)
-  assert.strictEqual(root.status, 'failed')
+test('a new strategy revives a failed goal: the model has another way to try', () => {
+  const { t, root, raw } = pickaxeTree()
+  t.markGoal(root.id, 'failed')
   const trade = t.addStrategy(root.id, { text: 'trade with a villager' })
   assert.strictEqual(root.status, 'open')
-  assert.strictEqual(root.active, trade.id)
-  t.failStrategy(mine.id); t.failStrategy(cave.id)
-  t.addStrategy(raw.id, { text: 'ask a player' })
-  assert.strictEqual(raw.status, 'failed')
+  assert.strictEqual(root.active, 's2')                     // craft is still the active route
+  assert.strictEqual(trade.status, 'dormant')
+  t.markGoal(raw.id, 'failed')
+  const ask = t.addStrategy(raw.id, { text: 'ask a player' })
+  assert.strictEqual(raw.status, 'open')
+  assert.strictEqual(ask.status, 'dormant')
 })
 
 test('removeRoot deletes the whole subtree', () => {

@@ -11,17 +11,19 @@
 // This is decomposition only. The tree holds any number of roots, unordered;
 // which root is worked on, and in what order, is the Agenda's job (agenda.js).
 //
-// Completion is judged by the model, at every level. A strategy is finished
-// only when the model says so, even once all its subgoals are done: routes are
-// decomposed one level at a time, so the done subgoals may be just the first
-// steps. When a goal's strategy finishes, the goal goes to `verify` and waits
-// for the model to confirm it (done) or reopen it. Handing specific checks
-// over to code is a later step.
+// Every verdict is the model's, at every level: a node is done or failed only
+// when the model says so, and nothing rolls up or down by itself. A strategy
+// isn't finished because its subgoals are done (routes are decomposed one level
+// at a time, so they may be just the first steps); a goal isn't achieved
+// because its route finished, nor failed because its routes did; a strategy
+// isn't dead because one of its subgoals failed (the model may replace that
+// step). Where the tree needs a verdict, render() puts a marker on the node.
+// Handing specific checks over to code is a later step.
 //
 // Pure data + operations; no bot or fs access. The caller handles persistence
 // via toJSON/fromJSON.
 
-const GOAL_STATUS = ['open', 'verify', 'done', 'failed']
+const GOAL_STATUS = ['open', 'done', 'failed']
 const STRAT_STATUS = ['dormant', 'active', 'done', 'failed']
 
 class GoalTreeError extends Error {}
@@ -59,13 +61,11 @@ class GoalTree {
       id: `s${++this.seq}`, kind: 'strategy', text, parent: goal.id,
       status: 'dormant', goals: [], est: est || null,
     }
-    // A new route revives a failed root: the model has found another way to
-    // try. A failed subgoal has already failed its parent strategy, so the fix
-    // for that belongs one level up.
-    if (goal.status === 'failed' && !goal.parent) goal.status = 'open'
+    // A new route for a failed goal is the model saying it has another way to try.
+    if (goal.status === 'failed') goal.status = 'open'
     this.nodes.set(strat.id, strat)
     goal.strategies.push(strat.id)
-    if (!goal.active && goal.status === 'open') this.activate(strat.id)
+    if (!this._route(goal) && goal.status === 'open') this.activate(strat.id)
     return strat
   }
 
@@ -78,18 +78,18 @@ class GoalTree {
       throw new GoalTreeError(`${strat.id} is ${strat.status}; cannot activate`)
     }
     const goal = this.nodes.get(strat.parent)
-    if (goal.active && goal.active !== strat.id) this.nodes.get(goal.active).status = 'dormant'
+    const prev = this._route(goal)
+    if (prev && prev !== strat) prev.status = 'dormant'
     goal.active = strat.id
     strat.status = 'active'
     return strat
   }
 
-  // Model verdict on a goal. 'done' may be given from open or verify.
-  // 'open' reopens a done/verify goal (e.g. the model saw it was premature).
+  // Model verdict on a goal. 'open' reopens a done or failed goal (e.g. the
+  // model saw it was premature).
   markGoal(goalId, status) {
     const goal = this._get(goalId, 'goal')
     if (!GOAL_STATUS.includes(status)) throw new GoalTreeError(`bad goal status "${status}"`)
-    if (status === 'failed') return this._failGoal(goal)
     goal.status = status
     // Reopened after its route finished: that route is spent, so the goal has
     // none until the model adds or picks one (a new strategy then activates).
@@ -97,28 +97,24 @@ class GoalTree {
     return goal
   }
 
-  // Mark a strategy finished: a leaf, or one whose subgoals are all done.
+  // Mark a strategy finished: a leaf, or one with no open subgoal left (a
+  // failed one counts as settled: the model has replaced or dropped that step).
+  // Its goal stays open until the model judges it.
   completeStrategy(strategyId) {
     const strat = this._get(strategyId, 'strategy')
-    const left = strat.goals.filter(id => this.nodes.get(id).status !== 'done')
+    const left = strat.goals.filter(id => this.nodes.get(id).status === 'open')
     if (left.length) throw new GoalTreeError(`${strat.id} still has subgoals to finish: ${left.join(', ')}`)
     strat.status = 'done'
-    const goal = this.nodes.get(strat.parent)
-    if (goal.status !== 'open') return strat
-    goal.status = 'verify'
     return strat
   }
 
-  // A strategy is dead. Its goal loses its active route; if no viable strategy
-  // remains the goal fails, which fails the parent strategy, and so on up.
-  // Choosing among the surviving dormant strategies is left to the model.
+  // A strategy is dead. Its goal loses its active route, and stays open: picking
+  // another route, or failing the goal, is the model's call.
   failStrategy(strategyId) {
     const strat = this._get(strategyId, 'strategy')
     strat.status = 'failed'
     const goal = this.nodes.get(strat.parent)
     if (goal.active === strat.id) goal.active = null
-    const viable = goal.strategies.some(id => this.nodes.get(id).status === 'dormant')
-    if (!viable) this._failGoal(goal)
     return strat
   }
 
@@ -140,23 +136,24 @@ class GoalTree {
     return [...this.nodes.values()].filter(n => n.kind === 'goal' && !n.parent)
   }
 
-  // Subgoals of a strategy that need attention now: open (with every `after`
-  // sibling done), or awaiting the model's verdict.
+  // Subgoals of a strategy that need attention now: open, with every `after`
+  // sibling done.
   actionable(strategyId) {
     const strat = this._get(strategyId, 'strategy')
-    return strat.goals.map(id => this.nodes.get(id)).filter(g => g.status === 'verify' ||
-      (g.status === 'open' && g.after.every(a => this.nodes.get(a).status === 'done')))
+    return strat.goals.map(id => this.nodes.get(id)).filter(g =>
+      g.status === 'open' && g.after.every(a => this.nodes.get(a).status === 'done'))
   }
 
   // [goal, strategy, goal, strategy, …] from a root down to the first node that
-  // needs work. Ends at a goal with no active strategy (needs a decision), a
-  // goal awaiting verification, or a leaf strategy (needs actions).
+  // needs work. Ends at a goal that needs a verdict or a route (none active, or
+  // its route finished), or at a strategy (a leaf needs actions; otherwise it has
+  // no actionable subgoal and needs the next step or a verdict).
   activePath(rootId) {
     const path = []
     let goal = this._get(rootId, 'goal')
     while (goal) {
       path.push(goal)
-      if (goal.status === 'verify' || !goal.active) break
+      if (goal.status !== 'open' || !goal.active || this.nodes.get(goal.active).status === 'done') break
       const strat = this.nodes.get(goal.active)
       path.push(strat)
       goal = this.actionable(strat.id)[0] || null
@@ -191,8 +188,11 @@ class GoalTree {
         const why = n.reason ? ` {${n.reason}}` : ''
         // A goal with no routes yet may be a one-action job ("come", "give"):
         // act on it directly; routes are for when that isn't enough.
-        const need = n.status === 'verify' ? ' ← confirm done?'
+        const strats = n.strategies.map(id => this.nodes.get(id))
+        const need = n.status !== 'open' ? ''
           : n.strategies.length === 0 ? ' ← act, or plan routes'
+          : n.active && this.nodes.get(n.active).status === 'done' ? ` ← route done: done:${n.id} if achieved, else another route`
+          : !n.active && strats.every(s => s.status === 'failed') ? ` ← every route failed: add another, or fail:${n.id}`
           : !n.active ? ' ← choose strategy' : ''
         lines.push(`${pad}${n.id} GOAL ${n.text} [${n.status}]${why}${need}`)
         for (const sid of n.strategies) {
@@ -201,8 +201,13 @@ class GoalTree {
           lines.push(`${pad}  ${s.id} ${s.status} ${s.text}${fmtEst(s.est)}`)
         }
       } else {
+        const subs = n.goals.map(id => this.nodes.get(id))
+        const failed = subs.filter(g => g.status === 'failed').map(g => g.id).join(',')
         const leaf = n.goals.length === 0 ? ' ← act'
-          : n.goals.every(id => this.nodes.get(id).status === 'done') ? ` ← steps done: add the next, or done:${n.id}` : ''
+          : this.actionable(n.id).length > 0 ? ''
+          : subs.some(g => g.status === 'open') ? ` ← steps wait on failed ${failed}: add a replacement, or fail:${n.id}`
+          : failed ? ` ← steps done, ${failed} failed: add the next or a replacement, or done:${n.id} / fail:${n.id}`
+          : ` ← steps done: add the next, or done:${n.id}`
         lines.push(`${pad}${n.id} STRAT ${n.text} [${n.status}]${fmtEst(n.est)}${leaf}`)
         for (const gid of n.goals) {
           if (onPath.has(gid)) continue
@@ -225,7 +230,10 @@ class GoalTree {
     const t = new GoalTree()
     if (!data) return t
     t.seq = data.seq || 0
-    for (const n of data.nodes || []) t.nodes.set(n.id, n)
+    for (const n of data.nodes || []) {
+      if (n.kind === 'goal' && n.status === 'verify') n.status = 'open'   // retired status: now a marker
+      t.nodes.set(n.id, n)
+    }
     return t
   }
 
@@ -244,14 +252,10 @@ class GoalTree {
     return d
   }
 
-  _failGoal(goal) {
-    goal.status = 'failed'
-    goal.active = null
-    if (goal.parent) {
-      const strat = this.nodes.get(goal.parent)
-      if (strat.status === 'active' || strat.status === 'dormant') this.failStrategy(strat.id)
-    }
-    return goal
+  // The goal's strategy in progress: the active one, unless it has finished.
+  _route(goal) {
+    const s = goal.active && this.nodes.get(goal.active)
+    return s && s.status === 'active' ? s : null
   }
 }
 
