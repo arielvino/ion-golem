@@ -50,14 +50,15 @@ test('focus skips failed roots, which stay listed until dealt with', () => {
   const a = new Agenda()
   const pick = a.push('iron_pickaxe for Sargon', SARGON)
   const house = a.queue('build a house', SARGON)
-  a.tree.failStrategy(a.tree.addStrategy(pick.id, { text: 'craft' }).id)
+  a.tree.addStrategy(pick.id, { text: 'craft' })
+  a.tree.markGoal(pick.id, 'failed')
   assert.strictEqual(a.focus().id, house.id)
   assert.match(a.render(), /failed\] \{Sargon\} ← failed: new strategy or ask Sargon/)
   a.tree.addStrategy(pick.id, { text: 'trade' })
   assert.strictEqual(a.focus().id, pick.id)
 })
 
-test('a goal awaiting verification keeps focus', () => {
+test('a goal whose route finished keeps focus', () => {
   const a = new Agenda()
   const r = a.push('find a village', SARGON)
   a.queue('later', SARGON)

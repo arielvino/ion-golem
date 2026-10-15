@@ -8,9 +8,9 @@
 //   sub:<s#>:<text>       add a subgoal to a strategy               → g#
 //                         optional trailing " after=g4,g5" for order
 //   use:<s#>              switch the goal to this strategy
-//   done:<g#|s#>          goal achieved / strategy finished (its subgoals all done)
-//   fail:<g#|s#>          goal or strategy is dead
-//   reopen:<g#>           goal was not really done
+//   done:<g#|s#>          goal achieved / strategy finished (no open subgoal left)
+//   fail:<g#|s#>          goal or strategy is dead (only that node)
+//   reopen:<g#>           goal was not really done or failed
 //
 // In place of an id, `new` names a node this same reply created, whose id the
 // model can't know yet: the last goal for ops that take a goal, the last
