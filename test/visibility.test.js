@@ -40,15 +40,32 @@ function buildColumns(worldMap) {
 
 // --- Mock world -----------------------------------------------------------
 // worldMap: "x,y,z" -> block name. Everything absent is air.
-function makeBot(worldMap, { pos = new Vec3(0.5, 0.5, 0.5), yaw = 0, pitch = 0, entities = {} } = {}) {
+// light: (x, y, z) → block light of the cell; given, the bot is in the overworld (the
+// light gate is on), otherwise in no dimension at all (no gate).
+function makeBot(worldMap, { pos = new Vec3(0.5, 0.5, 0.5), yaw = 0, pitch = 0, entities = {}, light = null } = {}) {
   const blockAt = (v) => ({ name: worldMap.get(`${v.x},${v.y},${v.z}`) || 'air', position: v })
-  return {
+  const columns = buildColumns(worldMap)
+  // getColumn serves the LOS rays (fastworld); a column with no blocks is all air.
+  const getColumn = (cx, cz) => {
+    const c = columns.find(c => c.chunkX === String(cx) && c.chunkZ === String(cz))
+    const col = { minY: MIN_Y, sections: c ? c.column.sections : new Array(NUM_SECTIONS).fill(null) }
+    if (light) {
+      col.blockLightSections = Array.from({ length: NUM_SECTIONS + 2 }, (_, s) => ({
+        get: (i) => light(cx * 16 + (i & 15), MIN_Y + (s - 1) * 16 + (i >> 8), cz * 16 + ((i >> 4) & 15)),
+      }))
+      col.skyLightSections = []
+    }
+    return col
+  }
+  const bot = {
     version: '26.1',
     entity: { position: pos, yaw, pitch },
     entities,
     blockAt,
-    world: { getColumns: () => buildColumns(worldMap) },
+    world: { getColumns: () => columns, getColumn },
   }
+  if (light) Object.assign(bot, { game: { dimension: 'minecraft:overworld', minY: MIN_Y }, time: { timeOfDay: 6000 }, registry: mcData })
+  return bot
 }
 
 function w(entries) {
@@ -164,6 +181,23 @@ test('surveyVisible: FOV culls blocks behind the bot', () => {
   // omni mode should now include it
   const s2 = surveyVisible({ maxDistance: 40, omni: true })
   assert.ok(s2.blocks.gold_ore, 'omni mode includes block behind')
+})
+
+test('surveyVisible: in the dark overworld an ore is not seen, a torch-lit one is', () => {
+  const world = w([['0,0,-4', 'coal_ore']])
+  state.bot = makeBot(world, { light: () => 0 })
+  assert.ok(!surveyVisible({ maxDistance: 40, omni: true }).blocks.coal_ore, 'dark ore must not be seen')
+  // Lit only in the cell in front of its south face (toward the bot); the air between is dark.
+  state.bot = makeBot(world, { light: (x, y, z) => x === 0 && y === 0 && z === -3 ? 12 : 0 })
+  assert.ok(surveyVisible({ maxDistance: 40, omni: true }).blocks.coal_ore, 'lit face seen through dark air')
+  // Lit only behind it: the face the bot sees stays dark.
+  state.bot = makeBot(world, { light: (x, y, z) => x === 0 && y === 0 && z === -5 ? 12 : 0 })
+  assert.ok(!surveyVisible({ maxDistance: 40, omni: true }).blocks.coal_ore, 'far side lit only')
+})
+
+test('surveyVisible: a light source shows in the dark', () => {
+  state.bot = makeBot(w([['0,0,-4', 'glowstone']]), { light: () => 0 })
+  assert.ok(surveyVisible({ maxDistance: 40, omni: true }).blocks.glowstone)
 })
 
 test('formatSurvey: hazards/resources sort first and string is well-formed', () => {

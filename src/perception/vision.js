@@ -4,6 +4,7 @@ const state = require('../core/state')
 const { TRANSPARENT, NOTABLE_TRANSPARENT, PASSABLE, HAZARDS, RESOURCES } = require('../config/blocks')
 const fw = require('./fastworld')
 const { blockLabel, addByState, formatByState } = require('../world/blockLabel')
+const { lightGate } = require('./light')
 
 // Resolve a name Set to its state-id lookup table (see fastworld.js). Returns null for
 // an unrecognised set so callers can fall back to the original blockAt path.
@@ -188,6 +189,8 @@ function detectGaps(hitDists, dirs, bands, maxDist, eyePos) {
 //        'reach' = rays only pass through blocks the bot can walk through
 // yawCenter: null = full sphere, or radians (0=south, PI/2=west, PI=north, -PI/2=east)
 // yawSpread: half-angle of the cone in radians (default PI = full sphere, PI/4 = 45° cone)
+// In the overworld a block too dark to see (light.js) is not reported or remembered; the
+// ray goes on through dark see-through cells, so a lit block beyond them still shows.
 function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter = null, yawSpread = Math.PI) {
   const bot = state.bot
   if (!bot?.entity) return null
@@ -245,6 +248,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
     try { return fw.stateNames(require('minecraft-data')(bot.version)) } catch (e) { return null }
   })()
   const reachMap = new Map() // key -> 'yes' | null (null = needs resolution)
+  const gate = lightGate(bot)
 
   for (let ri = 0; ri < dirs.length; ri++) {
     const dir = dirs[ri]
@@ -264,6 +268,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         if (isDiagBlocked(bot, prevBx, prevBy, prevBz, bx, by, bz, passThrough))
           passageBlocked = true
       }
+      const fx = prevBx, fy = prevBy, fz = prevBz   // the cell in front: a solid hit here is seen by its light
       prevBx = bx; prevBy = by; prevBz = bz
 
       const key = `${bx},${by},${bz}`
@@ -290,9 +295,11 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         st = block.stateId
       }
       seen.add(key)
+      const faceLit = gate && gate.faceLit(st, bx, by, bz)
       if (passThrough.has(name)) {
         if (passageBlocked) break
         airCount++
+        if (faceLit && !faceLit(fx, fy, fz)) continue   // too dark to see: not recorded
         // Record passable blocks near bot for DB pathfinding corridor data
         if (step <= 5) {
           results.allBlocks.push({ x: bx, y: by, z: bz, name, state: st })
@@ -314,6 +321,7 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
         if (passageBlocked) break
         // Transparent but not passable = barrier (glass, water, leaves, iron bars, etc.)
         if (!PASSABLE.has(name)) hadBarrier = true
+        if (faceLit && !faceLit(fx, fy, fz)) continue
         if (NOTABLE_TRANSPARENT.has(name)) {
           if (!results.seenBlocks[name]) results.seenBlocks[name] = []
           if (results.seenBlocks[name].length < 10) {
@@ -328,6 +336,8 @@ function castVisionRays(resolution = 16, maxDist = 256, mode = 'see', yawCenter 
       }
 
       if (passageBlocked) { solid.add(key); break }
+      // A dark face: unseen, and left for another ray that may reach a lit face of it.
+      if (faceLit && !faceLit(fx, fy, fz)) { seen.delete(key); break }
 
       solid.add(key)
       if (step <= 2) {
