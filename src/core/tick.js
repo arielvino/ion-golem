@@ -37,7 +37,8 @@ async function raceAbort(promise, timeoutMs = 30000) {
         check = setInterval(() => {
           if (state.abortSignal) { clearInterval(check); check = null; reject(new AbortError()) }
         }, 200)
-        promise.finally(() => { if (check) { clearInterval(check); check = null } })
+        // .finally makes a promise of its own, rejected with the original's error: handle it.
+        promise.finally(() => { if (check) { clearInterval(check); check = null } }).catch(() => {})
       }),
       new Promise((_, reject) => {
         timer = setTimeout(() => { timer = null; reject(new Error('timeout')) }, timeoutMs)
