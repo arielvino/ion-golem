@@ -54,12 +54,13 @@ class GoalTree {
     return goal
   }
 
-  addStrategy(goalId, { text, est } = {}) {
+  addStrategy(goalId, { text, est, needs, pack } = {}) {
     if (!text) throw new GoalTreeError('strategy needs text')
     const goal = this._get(goalId, 'goal')
     const strat = {
       id: `s${++this.seq}`, kind: 'strategy', text, parent: goal.id,
       status: 'dormant', goals: [], est: est || null,
+      needs: needs || null, pack: pack || null,
     }
     // A new route for a failed goal is the model saying it has another way to try.
     if (goal.status === 'failed') goal.status = 'open'
@@ -186,11 +187,9 @@ class GoalTree {
       const pad = '  '.repeat(depth)
       if (n.kind === 'goal') {
         const why = n.reason ? ` {${n.reason}}` : ''
-        // A goal with no routes yet may be a one-action job ("come", "give"):
-        // act on it directly; routes are for when that isn't enough.
         const strats = n.strategies.map(id => this.nodes.get(id))
         const need = n.status !== 'open' ? ''
-          : n.strategies.length === 0 ? ' ← act, or plan routes'
+          : n.strategies.length === 0 ? ' ← plan a route'
           : n.active && this.nodes.get(n.active).status === 'done' ? ` ← route done: done:${n.id} if achieved, else another route`
           : !n.active && strats.every(s => s.status === 'failed') ? ` ← every route failed: add another, or fail:${n.id}`
           : !n.active ? ' ← choose strategy' : ''
@@ -209,6 +208,7 @@ class GoalTree {
           : failed ? ` ← steps done, ${failed} failed: add the next or a replacement, or done:${n.id} / fail:${n.id}`
           : ` ← steps done: add the next, or done:${n.id}`
         lines.push(`${pad}${n.id} STRAT ${n.text} [${n.status}]${fmtEst(n.est)}${leaf}`)
+        if (n.needs || n.pack) lines.push(`${pad}  needs: ${n.needs || '?'} | pack: ${n.pack || '?'}`)
         for (const gid of n.goals) {
           if (onPath.has(gid)) continue
           const g = this.nodes.get(gid)

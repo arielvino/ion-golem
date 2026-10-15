@@ -4,7 +4,7 @@ const state = require('../core/state')
 const { sleep, stopAll, AbortError } = require('../core/tick')
 const { handleMessages, abortResponse } = require('../ai/ai')
 const { executeAction } = require('../actions')
-const { stackTopTitle, stackTop } = require('./tasks')
+const { stackTopTitle, stackTop, unplannedFocus } = require('./tasks')
 const { launchBackground, isBackgroundRunning, consumeBackgroundResult } = require('./backgroundTask')
 const { preCheck, scanHostiles } = require('./guard')
 const { FOOD_STARVING } = require('../config/safety')
@@ -161,6 +161,11 @@ function autonomousLine(bgResult) {
       state.noActionRounds = 0
       return { kind: 'stuck', line: `[SELF-CHECK] stuck=${taskDesc}` }
     }
+    const unplanned = unplannedFocus()
+    if (unplanned) {
+      console.log(color(c.white, `\n  [LOOP] planning: ${unplanned.id} "${unplanned.text}"`))
+      return { kind: 'plan', goal: unplanned.id, line: `[PLAN-FIRST] goal=${unplanned.id} "${unplanned.text}"` }
+    }
     console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
     return { kind: 'task', line: `[SELF-CHECK] task=${taskDesc}` }
   }
@@ -235,7 +240,7 @@ async function startEngine() {
       // Progress = emitted actions or a plan edit. A turn that only decomposes a
       // goal or picks a strategy is real work, not a stall. Counted, not measured off
       // the queue length: streamed actions launch (and leave the queue) mid-reply.
-      if (own?.kind === 'task' && !fromPlayer) {
+      if ((own?.kind === 'task' || own?.kind === 'plan') && !fromPlayer) {
         if (state.actionOpCount === beforeActionOps && state.planOpCount === beforePlanOps) {
           state.noActionRounds++
           console.log(color(c.yellow, `\n  [LOOP] no actions or plan edits (round ${state.noActionRounds}/${MAX_NO_ACTION})`))

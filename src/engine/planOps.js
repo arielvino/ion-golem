@@ -4,7 +4,10 @@
 //   queue:<text>          new agenda goal at the bottom (later)     → g#
 //   move:<g#>:<index>     reorder an agenda goal (0 = top)
 //   cancel:<g#>           remove an agenda goal (owner only)
-//   strat:<g#>:<text>     add a strategy to a goal (first = active) → s#
+//   strat:<g#>:<text> needs=<…> pack=<…>
+//                         add a strategy to a goal (first = active) → s#
+//                         needs= and pack= are required: the route walked
+//                         through to its end before it starts
 //   sub:<s#>:<text>       add a subgoal to a strategy               → g#
 //                         optional trailing " after=g4,g5" for order
 //   use:<s#>              switch the goal to this strategy
@@ -57,6 +60,13 @@ function parse(body) {
     const m = /^(.*?)\s+after=([gs0-9,\s]+)$/.exec(out.text)
     if (m) { out.text = m[1]; out.after = m[2].split(',').map(s => s.trim()).filter(Boolean) }
   }
+  if (out.text && op === 'strat') {
+    const m = /^(.*?)\s+needs=(.*?)\s+pack=(.*)$/s.exec(out.text)
+    if (!m || !m[1].trim() || !m[2].trim() || !m[3].trim()) {
+      throw new GoalTreeError('strat needs the route walked through first: <route> needs=<every tool, material, station and fuel it takes, and which you lack> pack=<what to carry for where it goes, or none if you can restock there>')
+    }
+    out.text = m[1].trim(); out.needs = m[2].trim(); out.pack = m[3].trim()
+  }
   if (fields.includes('text') && !out.text) throw new GoalTreeError(`${op} needs text`)
   return out
 }
@@ -89,7 +99,7 @@ function apply(agenda, op, by, made = {}) {
     case 'move': agenda.move(op.id, op.index); return `move ${op.id} → ${op.index}`
     case 'cancel': agenda.cancel(op.id, by); return `cancel ${op.id}`
     case 'strat': {
-      const s = made1(t.addStrategy(op.id, { text: op.text }), 'strat')
+      const s = made1(t.addStrategy(op.id, { text: op.text, needs: op.needs, pack: op.pack }), 'strat')
       return `strat ${s.id} "${s.text}" for ${op.id}${s.status === 'active' ? ' (active)' : ''}`
     }
     case 'sub': {

@@ -35,6 +35,19 @@ function agendaTitles() {
   return state.agenda.entries.map(e => state.agenda.tree.nodes.get(e.id).text).join(' | ')
 }
 
+// The goal the focus has reached when it has no route yet: the bot must plan it
+// before acting on it. Null when the focus is planned, or is an ongoing standing
+// order (follow, guard), which has no route to plan.
+function unplannedFocus() {
+  const a = state.agenda
+  const root = a?.focus()
+  if (!root) return null
+  const end = a.tree.activePath(root.id).at(-1)
+  if (!end || end.kind !== 'goal' || end.status !== 'open' || end.strategies.length) return null
+  if (end === root && a.entries.find(e => e.id === root.id)?.ongoing) return null
+  return end
+}
+
 function stackTitles() { return state.taskStack.map(e => e.t).join(' > ') }
 function stackTop() { return state.taskStack.length > 0 ? state.taskStack[state.taskStack.length - 1] : null }
 function stackTopTitle() { const top = stackTop(); return top ? top.t : null }
@@ -73,5 +86,5 @@ function renderAgenda() {
 
 module.exports = {
   loadAgenda, saveAgenda, syncStack, applyPlanTags, renderAgenda, agendaTitles,
-  stackTitles, stackTop, stackTopTitle,
+  stackTitles, stackTop, stackTopTitle, unplannedFocus,
 }
