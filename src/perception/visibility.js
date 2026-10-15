@@ -13,6 +13,7 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { rayClear, hasLineOfSight } = require('./vision')
 const { scanCandidates } = require('./chunkScan')
+const { lightGate } = require('./light')
 const fw = require('./fastworld')
 const { HAZARDS, RESOURCES } = require('../config/blocks')
 const { addByState, formatByState } = require('../world/blockLabel')
@@ -49,18 +50,21 @@ function inFov(eye, look, point, cosHalf) {
 // This is an approximation of true per-pixel visibility, deliberately: a block that is
 // ~95% occluded may read as unseen, which is harmless for awareness/navigation.
 // `passSet` overrides which blocks the sightline passes through (default: see-through).
-function blockVisible(eye, bx, by, bz, passSet) {
+// `faceLit` (from light.js's faceLit), when given, also needs the face to be lit: it is
+// called with the cell in front of each face, and a dark face doesn't count.
+function blockVisible(eye, bx, by, bz, passSet, faceLit) {
   const faces = []
-  if (eye.x > bx + 1) faces.push({ d: eye.x - (bx + 1), p: new Vec3(bx + 1, by + 0.5, bz + 0.5) })
-  else if (eye.x < bx) faces.push({ d: bx - eye.x, p: new Vec3(bx, by + 0.5, bz + 0.5) })
-  if (eye.y > by + 1) faces.push({ d: eye.y - (by + 1), p: new Vec3(bx + 0.5, by + 1, bz + 0.5) })
-  else if (eye.y < by) faces.push({ d: by - eye.y, p: new Vec3(bx + 0.5, by, bz + 0.5) })
-  if (eye.z > bz + 1) faces.push({ d: eye.z - (bz + 1), p: new Vec3(bx + 0.5, by + 0.5, bz + 1) })
-  else if (eye.z < bz) faces.push({ d: bz - eye.z, p: new Vec3(bx + 0.5, by + 0.5, bz) })
+  if (eye.x > bx + 1) faces.push({ d: eye.x - (bx + 1), p: new Vec3(bx + 1, by + 0.5, bz + 0.5), f: [bx + 1, by, bz] })
+  else if (eye.x < bx) faces.push({ d: bx - eye.x, p: new Vec3(bx, by + 0.5, bz + 0.5), f: [bx - 1, by, bz] })
+  if (eye.y > by + 1) faces.push({ d: eye.y - (by + 1), p: new Vec3(bx + 0.5, by + 1, bz + 0.5), f: [bx, by + 1, bz] })
+  else if (eye.y < by) faces.push({ d: by - eye.y, p: new Vec3(bx + 0.5, by, bz + 0.5), f: [bx, by - 1, bz] })
+  if (eye.z > bz + 1) faces.push({ d: eye.z - (bz + 1), p: new Vec3(bx + 0.5, by + 0.5, bz + 1), f: [bx, by, bz + 1] })
+  else if (eye.z < bz) faces.push({ d: bz - eye.z, p: new Vec3(bx + 0.5, by + 0.5, bz), f: [bx, by, bz - 1] })
 
   if (faces.length === 0) return true // eye sits within the block's cell on every axis
   faces.sort((a, b) => b.d - a.d) // most face-on first → best early-exit odds
   for (const f of faces) {
+    if (faceLit && !faceLit(...f.f)) continue
     if (rayClear(eye, f.p, passSet)) return true
   }
   return false
@@ -87,6 +91,7 @@ function surveyVisible(opts = {}) {
   const cosHalf = omni ? -1 : Math.cos((fovDeg / 2) * DEG)
   const eye = bot.entity.position.offset(0, 1.62, 0)
   const look = viewVector(bot)
+  const gate = lightGate(bot)
 
   // Discover candidates (cone-culled, distance-bounded, exposure-filtered), nearest-first.
   let candidates = []
@@ -104,7 +109,7 @@ function surveyVisible(opts = {}) {
     const existing = blocks[cnd.name]
     if (existing && existing.many) continue // saturated: don't even LOS-test (bounds cost)
     losTests++
-    if (!blockVisible(eye, cnd.x, cnd.y, cnd.z)) continue
+    if (!blockVisible(eye, cnd.x, cnd.y, cnd.z, undefined, gate?.faceLit(cnd.state, cnd.x, cnd.y, cnd.z))) continue
     visibleCount++
     const rec = existing || (blocks[cnd.name] = { count: 0, many: false, nearest: null, nearestDist: Infinity })
     rec.count++
@@ -148,12 +153,14 @@ function getLastSurvey() { return _lastSurvey }
 //      THROUGH are recorded at their real block name (air/water/…). Those cells
 //      are provably visible (the ray reached the solid), so this stays no-x-ray,
 //      and it is what makes seen drops/pits real instead of staying "unknown".
-// Nothing the bot can't see is ever written. Feeds the same `blocks` DB the
+// Nothing the bot can't see is ever written, and in the overworld that includes what is
+// too dark to see (light.js): an unlit block, or an unlit cell on a sightline. Feeds the same `blocks` DB the
 // planner reads, so optimistic-unknown planning converges as the bot looks around.
 
 // Voxel-walk the clear sightline eye→(block center), recording the real name of
-// each integer cell strictly before the solid. Cells already in `seen` are skipped.
-function _markSightline(eye, cnd, seen, writes, names) {
+// each integer cell strictly before the solid. Cells already in `seen` are skipped, and
+// with a light gate so are unlit ones.
+function _markSightline(eye, cnd, seen, writes, names, gate) {
   const bot = state.bot
   const tx = cnd.x + 0.5, ty = cnd.y + 0.5, tz = cnd.z + 0.5
   const dx = tx - eye.x, dy = ty - eye.y, dz = tz - eye.z
@@ -170,6 +177,7 @@ function _markSightline(eye, cnd, seen, writes, names) {
     lastKey = key
     if (seen.has(key)) continue
     seen.add(key)
+    if (gate && !gate.lit(bx, by, bz)) continue
     // Was bot.blockAt per cell purely to read `.name`. fastworld returns null for an
     // unloaded column, which the old code also recorded as 'air' (blockAt → null left
     // the initialiser untouched), so the fallback preserves that.
@@ -212,15 +220,16 @@ function surveyForNav({ maxDistance = 32, passableRange = 22, maxCandidates = NA
   const t1 = performance.now()
   const tick = bot.time?.age || 0
   const names = fw.stateNames(require('minecraft-data')(bot.version))
+  const gate = lightGate(bot)
   const writes = []         // {x,y,z,name,state}
   const seen = new Set()    // "x,y,z" dedup across solids + sightline cells
   let solids = 0, passables = 0, losTests = 0
   for (const cnd of candidates) {
     losTests++
-    if (!blockVisible(eye, cnd.x, cnd.y, cnd.z)) continue
+    if (!blockVisible(eye, cnd.x, cnd.y, cnd.z, undefined, gate?.faceLit(cnd.state, cnd.x, cnd.y, cnd.z))) continue
     const sk = cnd.x + ',' + cnd.y + ',' + cnd.z
     if (!seen.has(sk)) { seen.add(sk); writes.push({ x: cnd.x, y: cnd.y, z: cnd.z, name: cnd.name, state: cnd.state ?? null }); solids++ }
-    if (cnd.dist <= passableRange) passables += _markSightline(eye, cnd, seen, writes, names)
+    if (cnd.dist <= passableRange) passables += _markSightline(eye, cnd, seen, writes, names, gate)
   }
 
   const t2 = performance.now()
