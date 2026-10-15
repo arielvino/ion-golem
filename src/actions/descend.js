@@ -8,8 +8,9 @@
 //   [ACTION:jumpdown:DIR]     step off a ledge (north/south/east/west) or break the
 //                             floor (down) and take the fall. :blind = landing unseen.
 //
-// Both read the block DB (what the bot has seen), never the live world. A fall is
-// reported with its expected damage; only a certainly lethal one is refused.
+// Both read the block DB (what the bot has seen), never the live world. digdown
+// only digs onto a block it has seen (floorVerdict). jumpdown reports a fall with
+// its expected damage and refuses only a certainly lethal one.
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { sleep, stopAll, isAborted } = require('../core/tick')
@@ -51,6 +52,28 @@ function fail(msg) {
 }
 
 // ── digdown ───────────────────────────────────────────────────────────────
+// Why the floor under feet `f` must not be dug, or null when it may. A player's rule:
+// never dig straight down onto a block you haven't seen. The cell under the floor
+// is hidden until the floor breaks, so it has to be known from before (a pillar the
+// bot built, a cave seen from the side); otherwise a cave, lava or water may be there.
+function floorVerdict(f) {
+  const floorY = f.y - 1
+  const fall = measureFall(f.x, f.y, f.z, 1)
+  if (fall.hazard) return `${fall.hazard} under the floor at y${fall.at}`
+  if (fall.water) return `water under the floor at y${fall.at} — the shaft would flood`
+  if (fall.unknown) {
+    const beside = fall.blocks === 1 && neighbourFall(f.x, floorY, f.z)
+    return `the block under the floor (y${fall.at}) was never seen, and I don't dig straight down onto what I haven't seen. ` +
+      (beside ? `The columns beside it are open: ${describeFall(beside)} — [ACTION:jumpdown:down] takes that fall`
+        : `Go down with a staircase (staircase:DIR:yN) instead`)
+  }
+  // A known drop is certain damage: stop and let the model choose jumpdown.
+  if (fall.blocks > SAFE_FALL) {
+    return `breaking this floor drops ${describeFall(fall)}. Use [ACTION:jumpdown:down] to take that fall, or jumpdown:DIR off a ledge`
+  }
+  return null
+}
+
 async function doDigDown(arg, opts = {}) {
   stopAll()
   const bot = state.bot
@@ -82,24 +105,9 @@ async function doDigDown(arg, opts = {}) {
       if (!bot.entity.onGround) return fail(`digdown stopped at y${f.y}: not standing on anything`)
       surveyForNav({ maxDistance: 16 })
     }
-    // What digging the floor would drop me onto. An unseen cell under the floor is
-    // normal (it's hidden until the floor breaks) — dig on, like a player would,
-    // unless the columns beside it show open air below: then it's likely a drop.
     reveal([[f.x + 1, floorY - 1, f.z], [f.x - 1, floorY - 1, f.z], [f.x, floorY - 1, f.z + 1], [f.x, floorY - 1, f.z - 1]])
-    let fall = measureFall(f.x, f.y, f.z, 1)
-    if (fall.unknown && fall.blocks === 1) fall = neighbourFall(f.x, floorY, f.z) || fall
-    if (fall.hazard) return fail(`digdown stopped at y${f.y}: ${fall.hazard} under the floor at y${fall.at}`)
-    if (fall.water) return fail(`digdown stopped at y${f.y}: water under the floor at y${fall.at} — the shaft would flood`)
-    // A known drop is certain damage: stop and let the model choose jumpdown. An
-    // estimated one is only the worst case: dig on while even that is survivable.
-    if (!fall.unknown && !fall.estimated && fall.blocks > SAFE_FALL) {
-      return fail(`digdown stopped at y${f.y} after ${steps} blocks: breaking this floor drops ${describeFall(fall)}. ` +
-        `Use [ACTION:jumpdown:down] to take that fall, or jumpdown:DIR off a ledge`)
-    }
-    if (fall.estimated && damageOf(fall) >= bot.health) {
-      return fail(`digdown stopped at y${f.y} after ${steps} blocks: the floor may open onto a drop of ${describeFall(fall)} — ` +
-        `lethal at ${Math.round(bot.health)} HP if the column below is hollow (it is unseen). Heal first (eat), then dig on`)
-    }
+    const why = floorVerdict(f)
+    if (why) return fail(`digdown stopped at y${f.y} after ${steps} blocks: ${why}`)
 
     await centerInBlock(bot)
     const dug = await digBlock(new Vec3(f.x, floorY, f.z), { intent, reason: 'digdown', ignorePathBlocks: true })
@@ -185,4 +193,4 @@ async function doJumpDown(arg) {
   logEvent(`jumpdown:${dirName} fell ${dropped} blocks, HP ${Math.round(hp0)}→${hp1}, now at ${Object.values(feet()).join(',')}`)
 }
 
-module.exports = { doDigDown, doJumpDown }
+module.exports = { floorVerdict, doDigDown, doJumpDown }
