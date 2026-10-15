@@ -53,7 +53,10 @@ function setupAutonomous(interruptFn) {
     const pf = bot.pathfinder
     pathless = pf?.isMoving() || !pf?.goal ? 0 : pathless + 1
     const steered = pf?.isMoving() || (pf?.goal && pathless <= PATHLESS_GRACE_TICKS)
-    if (!e || bot.health <= 0 || steered) return release()
+    if (!e || bot.health <= 0) return release()
+    // Steered: the pathfinder owns the controls, and may already have set jump this tick
+    // (to hold its depth while it digs in water), so stand down without touching them.
+    if (steered) { floating = false; return }
     const eye = bot.blockAt(e.position.offset(0, 1.62, 0))
     if (e.isInWater && eye && (WATER_BLOCKS.has(eye.name) || eye.name === 'bubble_column')) {
       if (!bot.controlState.jump) bot.setControlState('jump', true)
