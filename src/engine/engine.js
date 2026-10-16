@@ -4,7 +4,7 @@ const state = require('../core/state')
 const { sleep, stopAll, AbortError } = require('../core/tick')
 const { handleMessages, abortResponse } = require('../ai/ai')
 const { executeAction } = require('../actions')
-const { stackTopTitle, stackTop } = require('./tasks')
+const { stackTopTitle } = require('./tasks')
 const { launchBackground, isBackgroundRunning, consumeBackgroundResult } = require('./backgroundTask')
 const { preCheck, scanHostiles } = require('./guard')
 const { FOOD_STARVING } = require('../config/safety')
@@ -133,42 +133,38 @@ function idleWakeReason(bgResult) {
   return null
 }
 
-// --- The autonomous line: what the bot's own state asks of this turn ---
-// MONITOR while actions run, SELF-CHECK on the focused goal, and when fully idle
-// only if idleWakeReason finds a real signal. null = nothing of our own to raise.
-function autonomousLine(bgResult) {
-  // Held: nothing of its own to work on or report, only the real signals. A task that
-  // ends (the one the hold stopped, or a reflex fight) isn't one.
+// --- The bot's own line in a turn ---
+// Every turn has the same form: [TURN] woke=<why this turn happens>. What to do in
+// it — keep safe, answer a player, fix the plan, act, or change nothing — is the
+// model's call, in that order (EACH TURN in the prompt); the context holds the
+// facts. The engine only decides whether a turn is worth a model call at all.
+// null = no reason of the bot's own (player chat and events still make a turn).
+const IDLE_HEARTBEAT_MS = 60000   // idle with nothing to do: still look around now and then
+let lastOwnTurn = 0
+function turnLine(bgResult) {
+  const woke = []
   if (require('./holdMode').isHeld()) {
+    // Held: only the real signals. A task that ends (the one the hold stopped, or a
+    // reflex fight) isn't one.
     const wake = idleWakeReason(null)
-    if (!wake) return null
-    console.log(color(c.cyan, `  [LOOP] held, woken: ${wake}`))
-    return { kind: 'held', line: '[SELF-CHECK] held' }
+    if (wake) woke.push(wake)
+  } else {
+    const wake = idleWakeReason(bgResult)
+    if (wake) woke.push(wake)
+    if (isBackgroundRunning() || state.actionQueue.length > 0) woke.push('task-running')
+    else if (stackTopTitle()) woke.push('goal')
+    else if (require('./leadMode').wantsWake()) woke.push('lead: no goal')
+    else if (Date.now() - lastOwnTurn >= IDLE_HEARTBEAT_MS) woke.push('idle-check')
   }
-  const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
-  if (actionsRunning) {
-    const { getBackgroundSummary, queueSummary } = require('./backgroundTask')
-    const summary = getBackgroundSummary() || 'running'
-    const queue = queueSummary()
-    console.log(color(c.white, `\n  [MONITOR] actions active: ${summary}, queue: ${queue}`))
-    return { kind: 'monitor', line: `[MONITOR] task=${summary} queue=${queue}` }
+  if (!woke.length) return null
+  lastOwnTurn = Date.now()
+  let line = `[TURN] woke=${[...new Set(woke)].join(',')}`
+  if (state.noActionRounds >= MAX_NO_ACTION) {
+    line += ` no_progress=${state.noActionRounds}`
+    state.noActionRounds = 0
   }
-  if (stackTopTitle()) {
-    const top = stackTop()
-    const taskDesc = top.d ? `"${top.t}" (${top.d})` : `"${top.t}"`
-    if (state.noActionRounds >= MAX_NO_ACTION) {
-      console.log(color(c.yellow, '\n  [LOOP] stuck 3x — reporting to player'))
-      state.noActionRounds = 0
-      return { kind: 'stuck', line: `[SELF-CHECK] stuck=${taskDesc}` }
-    }
-    console.log(color(c.white, `\n  [LOOP] working on: ${taskDesc} (path depth: ${state.taskStack.length}, idle rounds: ${state.noActionRounds})`))
-    return { kind: 'task', line: `[SELF-CHECK] task=${taskDesc}` }
-  }
-  let wake = idleWakeReason(bgResult)
-  if (!wake && require('./leadMode').wantsWake()) wake = 'lead: no goal'
-  if (!wake) return null
-  console.log(color(c.cyan, `  [LOOP] idle wake: ${wake}`))
-  return { kind: 'idle', line: '[SELF-CHECK] agenda=idle' }
+  console.log(color(c.white, `\n  [LOOP] ${line}`))
+  return { line, working: woke.includes('goal') }
 }
 
 // --- Core engine loop ---
@@ -210,7 +206,7 @@ async function startEngine() {
       }
 
       const messages = state.messageQueue.splice(0)
-      const own = autonomousLine(bgResult)
+      const own = turnLine(bgResult)
       if (!messages.length && !own) continue  // nothing to say: no model call
       const batch = own ? [...messages, { username: 'self', message: own.line }] : messages
       const fromPlayer = messages.some(m => m.username !== 'self' && m.username !== 'event')
@@ -235,7 +231,8 @@ async function startEngine() {
       // Progress = emitted actions or a plan edit. A turn that only decomposes a
       // goal or picks a strategy is real work, not a stall. Counted, not measured off
       // the queue length: streamed actions launch (and leave the queue) mid-reply.
-      if (own?.kind === 'task' && !fromPlayer) {
+      // Only turns with a goal to work on and nothing running count.
+      if (own?.working && !fromPlayer) {
         if (state.actionOpCount === beforeActionOps && state.planOpCount === beforePlanOps) {
           state.noActionRounds++
           console.log(color(c.yellow, `\n  [LOOP] no actions or plan edits (round ${state.noActionRounds}/${MAX_NO_ACTION})`))
@@ -255,4 +252,4 @@ function stopEngine() {
   state.engineRunning = false
 }
 
-module.exports = { startEngine, stopEngine, interrupt, softInterrupt, processActionQueue, autonomousLine }
+module.exports = { startEngine, stopEngine, interrupt, softInterrupt, processActionQueue, turnLine }

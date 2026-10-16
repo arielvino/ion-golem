@@ -4,9 +4,13 @@
 //   queue:<text>          new agenda goal at the bottom (later)     → g#
 //   move:<g#>:<index>     reorder an agenda goal (0 = top)
 //   cancel:<g#>           remove an agenda goal (owner only)
-//   strat:<g#>:<text>     add a strategy to a goal (first = active) → s#
+//   strat:<g#>:<text> needs=<…> pack=<…> lack=<…>
+//                         add a strategy to a goal (first = active) → s#
+//                         all three are required: the route walked through
+//                         to its end before it starts
 //   sub:<s#>:<text>       add a subgoal to a strategy               → g#
-//                         optional trailing " after=g4,g5" for order
+//                         optional trailing " after=g4,g5" for order, and
+//                         " first" to put it before the open siblings
 //   use:<s#>              switch the goal to this strategy
 //   done:<g#|s#>          goal achieved / strategy finished (no open subgoal left)
 //   fail:<g#|s#>          goal or strategy is dead (only that node)
@@ -54,8 +58,17 @@ function parse(body) {
     if (m) { out.text = m[1]; out.reason = m[2].trim() }
   }
   if (out.text && op === 'sub') {
+    const f = /^(.*?)\s+first$/.exec(out.text)
+    if (f) { out.text = f[1]; out.first = true }
     const m = /^(.*?)\s+after=([gs0-9,\s]+)$/.exec(out.text)
     if (m) { out.text = m[1]; out.after = m[2].split(',').map(s => s.trim()).filter(Boolean) }
+  }
+  if (out.text && op === 'strat') {
+    const m = /^(.*?)\s+needs=(.*?)\s+pack=(.*?)\s+lack=(.*)$/s.exec(out.text)
+    if (!m || !m[1].trim() || !m[2].trim() || !m[3].trim() || !m[4].trim()) {
+      throw new GoalTreeError('strat needs the route walked through first: <route> needs=<every tool, material, station and fuel it takes, checked against inv=> pack=<what to carry for where it goes, or none if you can restock there> lack=<what of needs= and pack= you don\'t have and its own steps don\'t get, or none>; each lack gets a [PLAN:sub:] in the same reply')
+    }
+    out.text = m[1].trim(); out.needs = m[2].trim(); out.pack = m[3].trim(); out.lack = m[4].trim()
   }
   if (fields.includes('text') && !out.text) throw new GoalTreeError(`${op} needs text`)
   return out
@@ -89,11 +102,11 @@ function apply(agenda, op, by, made = {}) {
     case 'move': agenda.move(op.id, op.index); return `move ${op.id} → ${op.index}`
     case 'cancel': agenda.cancel(op.id, by); return `cancel ${op.id}`
     case 'strat': {
-      const s = made1(t.addStrategy(op.id, { text: op.text }), 'strat')
+      const s = made1(t.addStrategy(op.id, { text: op.text, needs: op.needs, pack: op.pack, lack: op.lack }), 'strat')
       return `strat ${s.id} "${s.text}" for ${op.id}${s.status === 'active' ? ' (active)' : ''}`
     }
     case 'sub': {
-      const g = made1(t.addGoal(op.id, { text: op.text, after: op.after }), 'goal')
+      const g = made1(t.addGoal(op.id, { text: op.text, after: op.after, first: op.first }), 'goal')
       return `sub ${g.id} "${g.text}" under ${op.id}`
     }
     case 'use': t.activate(op.id); return `use ${op.id}`

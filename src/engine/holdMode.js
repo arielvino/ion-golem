@@ -2,7 +2,7 @@
 //
 // Set by [ACTION:hold] (a player said "stop and wait"); released by [ACTION:resume] or
 // by any other action from the model, since acting is no longer waiting. While held the
-// engine raises no SELF-CHECK or MONITOR turns of its own: the model wakes only for
+// engine raises no turns of its own for the goal or a task: the model wakes only for
 // player chat, events and real threats (hostiles, low health, drowning, starving), and
 // the survival reflexes (fight back, eat, swim up) still run. Not persisted: a restart
 // ends the hold.

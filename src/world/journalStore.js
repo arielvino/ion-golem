@@ -131,7 +131,7 @@ function formatTurn({ said, actions = [], views = [], why }) {
 
 // The last turn in one line, for the next one's PREV=: what woke it, why it
 // did what it did, what it set in motion and changed in its plan.
-//   #11 SELF-CHECK | why: logs first | did: mine:log:4 | plan: strat s4 for g3 | said: "Tree first."
+//   #11 woke goal | why: logs first | did: mine:log:4 | plan: strat s4 for g3 | said: "Tree first."
 function formatPrevTurn({ turn, trigger, why, actions = [], plan = [], planErrors = 0, said, outcome }) {
   const parts = [`#${turn} ${trigger}`]
   if (outcome) parts.push(outcome)

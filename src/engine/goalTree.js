@@ -36,7 +36,7 @@ class GoalTree {
 
   // ---- construction ----
 
-  addGoal(parentStrategyId, { text, reason, after } = {}) {
+  addGoal(parentStrategyId, { text, reason, after, first } = {}) {
     if (!text) throw new GoalTreeError('goal needs text')
     const parent = parentStrategyId ? this._get(parentStrategyId, 'strategy') : null
     const goal = {
@@ -48,18 +48,22 @@ class GoalTree {
       for (const a of goal.after) {
         if (!parent.goals.includes(a)) throw new GoalTreeError(`after: ${a} is not a sibling subgoal of ${parent.id}`)
       }
-      parent.goals.push(goal.id)
+      // `first`: a step that has to come before the open ones, e.g. a
+      // prerequisite found missing halfway: it takes the focus from them.
+      if (first) parent.goals.unshift(goal.id)
+      else parent.goals.push(goal.id)
     }
     this.nodes.set(goal.id, goal)
     return goal
   }
 
-  addStrategy(goalId, { text, est } = {}) {
+  addStrategy(goalId, { text, est, needs, pack, lack } = {}) {
     if (!text) throw new GoalTreeError('strategy needs text')
     const goal = this._get(goalId, 'goal')
     const strat = {
       id: `s${++this.seq}`, kind: 'strategy', text, parent: goal.id,
       status: 'dormant', goals: [], est: est || null,
+      needs: needs || null, pack: pack || null, lack: lack || null, stale: null,
     }
     // A new route for a failed goal is the model saying it has another way to try.
     if (goal.status === 'failed') goal.status = 'open'
@@ -82,7 +86,31 @@ class GoalTree {
     if (prev && prev !== strat) prev.status = 'dormant'
     goal.active = strat.id
     strat.status = 'active'
+    strat.stale = null
     return strat
+  }
+
+  // Something happened that the active routes were not written for (e.g. death
+  // emptied the inventory): each one says so until the model keeps it
+  // ([PLAN:use:] on it) or replaces it.
+  markStale(why) {
+    for (const n of this.nodes.values()) {
+      if (n.kind === 'strategy' && n.status === 'active') n.stale = why
+    }
+  }
+
+  // Why this goal can't be acted on yet, or null. Its route has to be walked
+  // through first: no route at all, a route whose lack= has no subgoal to get
+  // it, or a route written before something changed it.
+  planGap(goalId) {
+    const goal = this._get(goalId, 'goal')
+    if (goal.status !== 'open') return null
+    if (!goal.strategies.length) return 'no route'
+    const strat = goal.active && this.nodes.get(goal.active)
+    if (!strat || strat.status !== 'active') return null
+    if (strat.stale) return `route ${strat.id} was written before ${strat.stale}`
+    if (lacks(strat) && !strat.goals.length) return `route ${strat.id} lacks ${strat.lack} and has no subgoal to get it`
+    return null
   }
 
   // Model verdict on a goal. 'open' reopens a done or failed goal (e.g. the
@@ -186,11 +214,9 @@ class GoalTree {
       const pad = '  '.repeat(depth)
       if (n.kind === 'goal') {
         const why = n.reason ? ` {${n.reason}}` : ''
-        // A goal with no routes yet may be a one-action job ("come", "give"):
-        // act on it directly; routes are for when that isn't enough.
         const strats = n.strategies.map(id => this.nodes.get(id))
         const need = n.status !== 'open' ? ''
-          : n.strategies.length === 0 ? ' ← act, or plan routes'
+          : n.strategies.length === 0 ? ' ← plan a route'
           : n.active && this.nodes.get(n.active).status === 'done' ? ` ← route done: done:${n.id} if achieved, else another route`
           : !n.active && strats.every(s => s.status === 'failed') ? ` ← every route failed: add another, or fail:${n.id}`
           : !n.active ? ' ← choose strategy' : ''
@@ -203,12 +229,15 @@ class GoalTree {
       } else {
         const subs = n.goals.map(id => this.nodes.get(id))
         const failed = subs.filter(g => g.status === 'failed').map(g => g.id).join(',')
-        const leaf = n.goals.length === 0 ? ' ← act'
+        const leaf = n.stale ? ` ← written before ${n.stale}: keep it ([PLAN:use:${n.id}]) or replace it ([PLAN:strat:${n.parent}:…] then [PLAN:use:new])`
+          : lacks(n) && n.goals.length === 0 ? ` ← lack= has no subgoal: [PLAN:sub:${n.id}:…] for what you lack`
+          : n.goals.length === 0 ? ' ← act'
           : this.actionable(n.id).length > 0 ? ''
           : subs.some(g => g.status === 'open') ? ` ← steps wait on failed ${failed}: add a replacement, or fail:${n.id}`
           : failed ? ` ← steps done, ${failed} failed: add the next or a replacement, or done:${n.id} / fail:${n.id}`
           : ` ← steps done: add the next, or done:${n.id}`
         lines.push(`${pad}${n.id} STRAT ${n.text} [${n.status}]${fmtEst(n.est)}${leaf}`)
+        if (n.needs || n.pack) lines.push(`${pad}  needs: ${n.needs || '?'} | pack: ${n.pack || '?'} | lack: ${n.lack || '?'}`)
         for (const gid of n.goals) {
           if (onPath.has(gid)) continue
           const g = this.nodes.get(gid)
@@ -257,6 +286,12 @@ class GoalTree {
     const s = goal.active && this.nodes.get(goal.active)
     return s && s.status === 'active' ? s : null
   }
+}
+
+// lack= names what the route takes and doesn't get in its own steps; "none"
+// (or nothing written, from before lack= existed) means it has all of it.
+function lacks(strat) {
+  return !!strat.lack && !/^none\b/i.test(strat.lack.trim())
 }
 
 function fmtEst(est) {
