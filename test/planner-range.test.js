@@ -29,5 +29,7 @@ test('with the walk range, the plan walks straight up to the trunk', () => {
   assert.ok(p.length <= 14, `short path (${p.length} nodes)`)
   assert.ok(Math.max(...p.map(n => n.z)) <= 13, 'never walks away from the tree')
   const end = p[p.length - 1]
-  assert.ok(Math.hypot(end.x + 0.5, end.y - 1, end.z + 0.5) <= 3.5, 'ends within range of the trunk')
+  // The walk arrives by the pathfinder's GoalNear rule: whole-block distance to the trunk
+  // block (0,1,0) within the range, at the feet or the block above.
+  assert.ok([0, 1].some(dy => Math.hypot(end.x, end.y + dy - 1, end.z) <= 3), 'ends within range of the trunk')
 })
