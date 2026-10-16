@@ -495,6 +495,7 @@ function createBot() {
         require('./src/core/utils').logEvent(`death: ${cause}${pos ? ` at ${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}` : ''}`)
         state.diedAt = Date.now()
         require('./src/engine/tasks').markRoutesStale('you died and lost your inventory')
+        require('./src/engine/safetyCheck').onDeath()
         wake(`[GAME EVENT] You (${bot.username}) ${cause}. You have died and respawned — check your position and inventory.`)
       }
       return
