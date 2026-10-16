@@ -28,6 +28,8 @@ module.exports = {
   agenda: null,
   taskStack: [],
   planErrors: [],     // [PLAN:...] failures, shown to the model next turn
+  turnIndex: -1,      // AI turns sent this run: the [BOOT] turn is 0
+  prevTurn: '',       // one-line summary of the last turn, shown on the next as PREV=
   planOpCount: 0,     // successful [PLAN:...] ops ever; a planning-only turn is progress
   actionOpCount: 0,   // [ACTION:...] tags ever dispatched; mainLoop's progress signal
   journal: null,      // episodic memory: records + model notes (world/journal.js)

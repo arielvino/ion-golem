@@ -129,6 +129,20 @@ function formatTurn({ said, actions = [], views = [], why }) {
   return [parts.join(' '), ...tail].filter(Boolean).join(' | ')
 }
 
+// The last turn in one line, for the next one's PREV=: what woke it, why it
+// did what it did, what it set in motion and changed in its plan.
+//   #11 SELF-CHECK | why: logs first | did: mine:log:4 | plan: strat s4 for g3 | said: "Tree first."
+function formatPrevTurn({ turn, trigger, why, actions = [], plan = [], planErrors = 0, said, outcome }) {
+  const parts = [`#${turn} ${trigger}`]
+  if (outcome) parts.push(outcome)
+  if (why) parts.push(`why: ${clip(why.trim(), 160)}`)
+  if (actions.length || !outcome) parts.push(`did: ${actions.length ? actions.join(', ') : 'nothing'}`)
+  if (plan.length) parts.push(`plan: ${clip(plan.join('; '), 200)}`)
+  if (planErrors) parts.push(`${planErrors} plan error${planErrors > 1 ? 's' : ''} (PLAN_ERR)`)
+  if (said) parts.push(`said: "${clip(said.replace(/\s+/g, ' ').trim(), 120)}"`)
+  return parts.join(' | ')
+}
+
 // The "why" of a [LOG:why; used=...; missing=...] tag.
 function logWhy(rawReply) {
   const m = /\[LOG:([^\]]*)\]/.exec(rawReply)
@@ -150,4 +164,4 @@ function markShown() {
   saveJournal()
 }
 
-module.exports = { currentNode, nodeLabel, loadJournal, saveJournal, renderNew, renderNotesBlock, applyNoteTags, markShown, recordTurn, formatTurn, logWhy, NOTE_TAG }
+module.exports = { currentNode, nodeLabel, loadJournal, saveJournal, renderNew, renderNotesBlock, applyNoteTags, markShown, recordTurn, formatTurn, formatPrevTurn, logWhy, NOTE_TAG }
