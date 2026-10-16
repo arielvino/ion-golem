@@ -145,6 +145,12 @@ function autonomousLine(bgResult) {
     console.log(color(c.cyan, `  [LOOP] held, woken: ${wake}`))
     return { kind: 'held', line: '[SELF-CHECK] held' }
   }
+  // The bot's own safety comes before any goal, running or not.
+  const danger = require('./safetyCheck').safetyReason()
+  if (danger) {
+    console.log(color(c.yellow, `\n  [LOOP] safety: ${danger}`))
+    return { kind: 'safety', line: `[SAFETY] why=${danger}` }
+  }
   const actionsRunning = isBackgroundRunning() || state.actionQueue.length > 0
   if (actionsRunning) {
     const { getBackgroundSummary, queueSummary } = require('./backgroundTask')
