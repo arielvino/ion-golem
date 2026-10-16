@@ -12,12 +12,12 @@ const wire = (name, damage) => Item.fromNotch({
 })
 
 test('damageable item shows remaining/max from its damage component', () => {
-  assert.equal(itemLabel(wire('iron_pickaxe', 38)), 'iron_pickaxe(212/250)')
-  assert.equal(itemLabel(wire('diamond_chestplate', 500)), `diamond_chestplate(${registry.itemsByName.diamond_chestplate.maxDurability - 500}/${registry.itemsByName.diamond_chestplate.maxDurability})`)
+  assert.equal(itemLabel(wire('iron_pickaxe', 38)), 'iron_pickaxe(212 of 250 left)')
+  assert.equal(itemLabel(wire('diamond_chestplate', 500)), `diamond_chestplate(${registry.itemsByName.diamond_chestplate.maxDurability - 500} of ${registry.itemsByName.diamond_chestplate.maxDurability} left)`)
 })
 
 test('undamaged tool reads full; inventory form drops the x1 count', () => {
-  assert.equal(itemLabel(wire('wooden_pickaxe'), true), 'wooden_pickaxe(59/59)')
+  assert.equal(itemLabel(wire('wooden_pickaxe'), true), 'wooden_pickaxe(59 of 59 left)')
 })
 
 test('stackables keep the count, empty slot reads nothing', () => {

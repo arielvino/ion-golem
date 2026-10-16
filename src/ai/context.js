@@ -19,11 +19,12 @@ const { snapshot, renderDelta } = require('./delta')
 const { renderNearby, equipOf } = require('./nearby')
 const { blockLabel } = require('../world/blockLabel')
 
-// Item name with remaining durability for damageable items: iron_pickaxe(212/250).
+// Item name with remaining durability for damageable items: iron_pickaxe(212 of 250 left).
+// Spelled out: a bare 130/131 was read as used/max ("one swing from retirement").
 // Stackables keep the xN count instead (withCount).
 function itemLabel(item, withCount = false) {
   if (!item) return 'nothing'
-  if (item.maxDurability) return `${item.name}(${item.maxDurability - (item.durabilityUsed || 0)}/${item.maxDurability})`
+  if (item.maxDurability) return `${item.name}(${item.maxDurability - (item.durabilityUsed || 0)} of ${item.maxDurability} left)`
   return withCount ? `${item.name}x${item.count}` : item.name
 }
 
