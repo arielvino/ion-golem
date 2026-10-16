@@ -44,10 +44,12 @@ let wdBaseline = null               // { task, x, y, z, alt, t }
 // --- Hard interrupt: full stop (used for kicks, disconnects, etc.) ---
 // keepResponse: a streamed [ACTION:stop] fires this mid-reply — the reply that asked
 // for the stop must keep streaming (its later actions are the requeue).
-function interrupt({ keepResponse = false } = {}) {
+// keepFlee: a reflex kills the running task, but a flee the model asked for and that is
+// still waiting in the queue stays: it launches next and joins the reflex's run (#82).
+function interrupt({ keepResponse = false, keepFlee = false } = {}) {
   state.abortSignal = true
   state.interrupted = true
-  state.actionQueue = []
+  state.actionQueue = keepFlee ? state.actionQueue.filter(a => a.actionStr.split(':')[0] === 'flee') : []
   stopAll()
   if (!keepResponse) abortResponse()  // cancel in-flight AI response (keeps persistent process alive)
   try { state.bot.pathfinder.setGoal(null) } catch(e) {}

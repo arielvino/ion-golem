@@ -26,7 +26,7 @@ function setupAutonomous(interruptFn) {
       const eating = state.backgroundTask?.action === 'eat' || state.actionQueue.some(a => a.actionStr === 'eat')
       if (edibleFoods(bot).length > 0 && !eating) {
         console.log(`  [AUTO] HP=${Math.round(bot.health)}, eating`)
-        interruptFn({ keepResponse: true })
+        interruptFn({ keepResponse: true, keepFlee: true })
         // Prepend eat to front of queue instead of replacing
         setTimeout(() => {
           state.actionQueue.unshift({ actionStr: 'eat', username: 'auto' })
@@ -82,7 +82,7 @@ function setupAutonomous(interruptFn) {
       lastDrowningDispatch = Date.now()
       console.log(`  [AUTO] DROWNING! oxygen=${bot.oxygenLevel}, dispatching swimup`)
       // keepResponse: an AI turn in flight finishes; only the running task dies.
-      interruptFn({ keepResponse: true })
+      interruptFn({ keepResponse: true, keepFlee: true })
       setTimeout(() => {
         state.actionQueue.unshift({ actionStr: 'swimup', username: 'auto' })
         require('./engine').processActionQueue()
@@ -102,6 +102,9 @@ function setupAutonomous(interruptFn) {
   function autoFight(attacker, logLine, chatLine) {
     // Running from a swarm (the reflex or a flee action) beats turning to fight.
     if (bot.melee.target || state.retreating || state.currentTask === 'fleeing') return false
+    // So does a flee the model asked for that is still waiting to launch: the attack's
+    // interrupt would clear it from the queue (#82).
+    if (state.actionQueue.some(a => a.actionStr.split(':')[0] === 'flee')) return false
     if (state.creeperReflex) return false   // a creeper is fusing: block or run first, fight after
     if (state.dragonBreathReflex) return false    // in dragon's breath: get out first
     if (pending?.isValid && Date.now() - pendingAt < T.AUTOFIGHT_LAUNCH_GRACE) return false
@@ -126,7 +129,7 @@ function setupAutonomous(interruptFn) {
     sendChat(chatLine)
     // keepResponse: a reflex kills the running task, never the model's turn. A stream of
     // mobs (a spawner) used to abort every turn, so the model never got to answer it.
-    interruptFn({ keepResponse: true })
+    interruptFn({ keepResponse: true, keepFlee: true })
     // Prepend attack to front of queue instead of replacing, and launch it now — left
     // to the engine it would wait for the next tick, up to 5s of free hits.
     setTimeout(() => {
@@ -222,7 +225,7 @@ function setupAutonomous(interruptFn) {
 
     if (inLava) {
       console.log(`  [AUTO] LAVA DAMAGE! HP=${Math.round(bot.health)}, fleeing`)
-      interruptFn({ keepResponse: true })
+      interruptFn({ keepResponse: true, keepFlee: true })
       const escapeLava = async () => {
         bot.setControlState('jump', true)
         bot.setControlState('forward', true)
