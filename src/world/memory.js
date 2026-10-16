@@ -148,6 +148,7 @@ function initDB() {
   if (addColIfMissing('structures', 'origin_y', 'INTEGER')) migrated = true
   if (addColIfMissing('structures', 'origin_z', 'INTEGER')) migrated = true
   if (addColIfMissing('blocks', 'reachable', "TEXT DEFAULT 'unknown'")) migrated = true
+  if (addColIfMissing('path_blocks', 'block', 'TEXT')) migrated = true
   // The block's protocol state id: its properties (a frame's eye, a door's open/half,
   // a slab's type). NULL = not known, e.g. rows written before this column existed.
   if (addColIfMissing('blocks', 'state', 'INTEGER')) migrated = true
@@ -206,8 +207,8 @@ function initDB() {
     queryRegion: db.prepare(`SELECT x, y, z, name, state FROM blocks
       WHERE dim=cur_dim() AND x BETWEEN ? AND ? AND y BETWEEN ? AND ? AND z BETWEEN ? AND ?`),
     // Path blocks
-    addPathBlock: db.prepare(`INSERT OR REPLACE INTO path_blocks (dim,x,y,z,path_type,created_at) VALUES (cur_dim(),?,?,?,?,?)`),
-    isPathBlock: db.prepare(`SELECT 1 FROM path_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
+    addPathBlock: db.prepare(`INSERT OR REPLACE INTO path_blocks (dim,x,y,z,path_type,created_at,block) VALUES (cur_dim(),?,?,?,?,?,?)`),
+    isPathBlock: db.prepare(`SELECT block FROM path_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     removePathBlock: db.prepare(`DELETE FROM path_blocks WHERE dim=cur_dim() AND x=? AND y=? AND z=?`),
     countPathBlocksNear: db.prepare(`SELECT COUNT(*) as c FROM path_blocks
       WHERE dim=cur_dim() AND (x-?)*(x-?)+(y-?)*(y-?)+(z-?)*(z-?) < ?`),
@@ -494,12 +495,27 @@ function queryRegion(x1, y1, z1, x2, y2, z2) {
 }
 
 // --- Path blocks ---
+// A path cell remembers the block the path left there (the step's floor, or the air the bot
+// walked through), read from the bot's own footing as it passes.
 function trackPathBlock(x, y, z, pathType) {
-  try { state.stmts.addPathBlock.run(x, y, z, pathType, gameTick()) } catch (e) { console.warn('  [MEMORY] addPathBlock err:', e.message) }
+  let block = null
+  try { block = state.bot?.blockAt(new Vec3(x, y, z))?.name ?? null } catch (e) {}
+  try { state.stmts.addPathBlock.run(x, y, z, pathType, gameTick(), block) } catch (e) { console.warn('  [MEMORY] addPathBlock err:', e.message) }
 }
 
-function isPathBlock(x, y, z) {
-  try { return !!state.stmts.isPathBlock.get(x, y, z) } catch (e) { return false }
+// `now`, the block there now, if known: a cell that holds something other than what the
+// path left (a player filled the old staircase) is no longer the path, and is forgotten.
+function isPathBlock(x, y, z, now) {
+  try {
+    const row = state.stmts.isPathBlock.get(x, y, z)
+    if (!row) return false
+    if (now && row.block && row.block !== now) {
+      state.stmts.removePathBlock.run(x, y, z)
+      console.log(`  [PATH] ${x},${y},${z} was ${row.block}, now ${now}: no longer a path block`)
+      return false
+    }
+    return true
+  } catch (e) { return false }
 }
 
 function clearOldPathBlocks(maxAgeTicks = 36000) { // 30 min at 20 ticks/sec
