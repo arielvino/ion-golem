@@ -469,13 +469,13 @@ async function doStaircase(arg, opts = {}) {
   stopAll()
   const bot = state.bot
   const { dirName, dir, untilStr } = parseHeadingArgs(arg)
-  if (!dir) { pushFail(`staircase: bad direction "${dirName}" (use north/south/east/west)`); return }
+  if (!dir) { pushFail(`staircase: bad direction "${dirName}" (use north/south/east/west)`); return false }
   const curY = Math.round(bot.entity.position.y)
   const u = buildUntil(untilStr, curY)
-  if (!u) { pushFail(`staircase: bad/missing condition "${untilStr}" (use yN or Nsteps)`); return }
+  if (!u) { pushFail(`staircase: bad/missing condition "${untilStr}" (use yN or Nsteps)`); return false }
   // A staircase must go up or down; a bare step-count defaults to descending.
   const pattern = u.pattern || 'down'
-  if (pattern === 'flat') { pushFail(`staircase: "${untilStr}" needs a vertical goal — use yN`); return }
+  if (pattern === 'flat') { pushFail(`staircase: "${untilStr}" needs a vertical goal — use yN`); return false }
   state.currentTask = `staircase ${dirName} until ${u.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await digHeading('staircase', dir, { pattern, until: u.fn, untilDesc: u.desc }, { intent })
@@ -487,9 +487,9 @@ async function doMove(arg) {
   stopAll()
   const bot = state.bot
   const { dirName, dir, untilStr } = parseHeadingArgs(arg)
-  if (!dir) { pushFail(`move: bad direction "${dirName}" (use north/south/east/west)`); return }
+  if (!dir) { pushFail(`move: bad direction "${dirName}" (use north/south/east/west)`); return false }
   const u = buildUntil(untilStr, Math.round(bot.entity.position.y))
-  if (!u) { pushFail(`move: bad/missing condition "${untilStr}" (use wall or Nsteps)`); return }
+  if (!u) { pushFail(`move: bad/missing condition "${untilStr}" (use wall or Nsteps)`); return false }
   state.currentTask = `move ${dirName} until ${u.desc}`
   const ok = await digHeading('move', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc })
   state.currentTask = null
@@ -504,12 +504,12 @@ async function doTunnel(arg, opts = {}) {
   stopAll()
   const bot = state.bot
   const { dirName, dir, untilStr } = parseHeadingArgs(arg)
-  if (!dir) { pushFail(`tunnel: bad direction "${dirName}" (use north/south/east/west)`); return }
+  if (!dir) { pushFail(`tunnel: bad direction "${dirName}" (use north/south/east/west)`); return false }
   const u = buildUntil(untilStr, Math.round(bot.entity.position.y))
-  if (!u) { pushFail(`tunnel: bad/missing condition "${untilStr}" (use wall or Nsteps)`); return }
+  if (!u) { pushFail(`tunnel: bad/missing condition "${untilStr}" (use wall or Nsteps)`); return false }
   if (u.pattern === 'up' || u.pattern === 'down') {
     pushFail(`tunnel: "${untilStr}" is a vertical goal — use staircase:${dirName}:${untilStr} to change Y`)
-    return
+    return false
   }
   state.currentTask = `tunnel ${dirName} until ${u.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
