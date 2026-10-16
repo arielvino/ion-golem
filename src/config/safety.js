@@ -15,7 +15,6 @@ module.exports = {
   OXYGEN_DROWNING: 4,   // autonomous: dispatch swimup (only if head is verified in water)
   OXYGEN_LOW: 6,        // guard/nav/engine: drowning interrupt
   OXYGEN_FALL_SAFE: 10, // above this we weren't underwater → treat damage as a fall
-  OXYGEN_SURFACED: 18,  // swimup target: stop once breath is essentially restored
 
   // --- Food (0–20) ---
   FOOD_STARVING: 0,     // food at 0 means health starts ticking down → wake to eat
