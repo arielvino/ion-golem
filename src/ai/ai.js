@@ -4,7 +4,7 @@ const path = require('path')
 const state = require('../core/state')
 const { getBotContext } = require('./context')
 const { renderTips } = require('./tips')
-const { applyPlanTags, agendaTitles } = require('../engine/tasks')
+const { applyPlanTags, agendaTitles, unplannedFocus } = require('../engine/tasks')
 const { applyNoteTags, markShown, recordTurn, formatPrevTurn, logWhy, currentNode } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
@@ -96,21 +96,25 @@ function flattenMessages(msgs) {
 }
 
 // --- AI Provider ---
-// One persistent Sonnet process answers every turn, [MONITOR] ticks included.
+// One persistent Sonnet process answers every turn.
 let provider = null
 
 // --- Main message handler ---
 // One model turn for everything pending: player chat, game events and the bot's
-// own MONITOR/SELF-CHECK line. Goals the turn creates are owned by the last player
-// who spoke in it, and its actions are attributed to them; with no player, 'self'.
-// What woke this turn, in a word or two: the player who spoke, else the engine's
-// own tag ([MONITOR], [SELF-CHECK], [PLAN-FIRST], [GAME EVENT] …).
+// own [TURN] line. Goals the turn creates are owned by the last player who spoke
+// in it, and its actions are attributed to them; with no player, 'self'.
+// What woke this turn, in a word or two: the player who spoke, else the bot's
+// own woke= reasons, else the engine's tag ([GAME EVENT] …).
 function turnTrigger(batch, isPlayer) {
   const players = [...new Set(batch.filter(m => isPlayer(m.username)).map(m => m.username))]
   if (players.length) return `${players.join(', ')} spoke`
-  const tags = [...new Set(batch.map(m => /^\[([A-Z][A-Z -]*)\]/.exec(m.message)?.[1]).filter(Boolean))]
-  return tags.join(', ') || batch.map(m => m.username).join(', ')
+  const own = batch.map(m => /^\[TURN\] woke=(\S+)/.exec(m.message)?.[1]).find(Boolean)
+  const tags = [...new Set(batch.map(m => /^\[([A-Z][A-Z -]*)\]/.exec(m.message)?.[1]).filter(t => t && t !== 'TURN'))]
+  return [own && `woke ${own}`, ...tags].filter(Boolean).join(', ') || batch.map(m => m.username).join(', ')
 }
+
+// Survival moves aren't goal work: they run even while the plan has a gap.
+const UNGATED_ACTIONS = new Set(['eat', 'sleep', 'flee', 'equip', 'unequip', 'stop', 'hold', 'resume', 'attack', 'shoot', 'swimup'])
 
 async function handleMessages(batch) {
   const isPlayer = (u) => u !== 'self' && u !== 'event'
@@ -118,13 +122,11 @@ async function handleMessages(batch) {
   const username = player ? player.username : 'self'
   const isPlayerMessage = !!player
   const message = batch.filter(m => isPlayer(m.username)).map(m => m.message).join('\n')
-  const isMonitorCall = !player && batch.some(m => m.username === 'self' && m.message.startsWith('[MONITOR]'))
-  // A [PLAN-FIRST] turn plans the goal the focus reached before it could act on
-  // it (no route, a lack= with no subgoal, a route made stale). Its actions wait
-  // for the end of the reply and run only if the gap is closed by then (or the
-  // goal got a verdict): acting is not a way around planning.
-  const planGoal = player ? null
-    : batch.map(m => m.username === 'self' && /^\[PLAN-FIRST\] goal=(g\d+)/.exec(m.message)).find(Boolean)?.[1] || null
+  // Acting is not a way around planning: when the bot works on its own and the
+  // focus has a gap in its plan (no route, a lack= with no subgoal, a route made
+  // stale), the turn's actions wait for the end of the reply, and goal work runs
+  // only if the gap is closed by then. A player's turn is theirs to direct.
+  const gapAtStart = player ? null : unplannedFocus()
   // A player's message becomes its record BEFORE the context is built, so it sits
   // in this turn's NEW= with its own r# and the line below points at it. Recorded
   // after, it showed up unnumbered now and again as a record next turn — and a
@@ -232,7 +234,7 @@ async function handleMessages(batch) {
     let chatText = ''
     const pendingActions = []
     let dispatched = 0      // pendingActions[0..dispatched) already handed to the engine
-    let deferred = !!planGoal   // hit an action that must wait for the end of the reply
+    let deferred = !!gapAtStart   // hit an action that must wait for the end of the reply
     let queueReplaced = false
     let logsShown = 0
 
@@ -317,7 +319,7 @@ async function handleMessages(batch) {
     const outTok = resp.usage?.output_tokens || 0
     const cachRead = resp.usage?.cache_read_input_tokens || 0
     const cachCreate = resp.usage?.cache_creation_input_tokens || 0
-    console.log(color(c.gray, `  [API]${isMonitorCall ? ' [monitor]' : ''} ${resp.totalMs}ms (first token: ${resp.firstTokenMs}ms, api: ${resp.apiMs}ms) | in=${inTok}tok out=${outTok}tok | cache: read=${cachRead} create=${cachCreate}`))
+    console.log(color(c.gray, `  [API] ${resp.totalMs}ms (first token: ${resp.firstTokenMs}ms, api: ${resp.apiMs}ms) | in=${inTok}tok out=${outTok}tok | cache: read=${cachRead} create=${cachCreate}`))
     console.log(color(c.cyan, `  [MODEL-OUT]`) + ` ${fullText}\n`)
 
     logChat({ type: 'ai', raw: fullText, stack: [...state.taskStack], agenda: agendaTitles(), messages: msgs })
@@ -360,11 +362,17 @@ async function handleMessages(batch) {
     // Whatever the stream held back (a deferred `build` and its followers) runs now
     // that processTags has applied the blueprint and plan edits.
     const streamed = dispatched
-    const gap = planGoal && state.agenda.tree.nodes.has(planGoal) && state.agenda.tree.planGap(planGoal)
-    if (gap && pendingActions.length) {
-      console.log(color(c.yellow, `\n  [PLAN] ${planGoal} still unplanned (${gap}): dropped ${pendingActions.join(' → ')}`))
-      state.planErrors.push(`[ACTION:${pendingActions.join('][ACTION:')}] not run → ${planGoal}: ${gap}. Plan it first (see [PLAN-FIRST]), then act in the same reply`)
-      pendingActions.length = 0
+    const gapAtEnd = gapAtStart && unplannedFocus()
+    if (gapAtEnd) {
+      const { goal, why } = gapAtEnd
+      const dropped = pendingActions.filter(a => !UNGATED_ACTIONS.has(a.split(':')[0]))
+      if (dropped.length) {
+        console.log(color(c.yellow, `\n  [PLAN] ${goal.id} still unplanned (${why}): dropped ${dropped.join(' → ')}`))
+        state.planErrors.push(`[ACTION:${dropped.join('][ACTION:')}] not run → ${goal.id}: ${why}. Close that gap in the plan first, then act in the same reply`)
+        const kept = pendingActions.filter(a => UNGATED_ACTIONS.has(a.split(':')[0]))
+        pendingActions.length = 0
+        pendingActions.push(...kept)
+      }
     }
     dispatchReady(true)
     if (pendingActions.length > 0) {
