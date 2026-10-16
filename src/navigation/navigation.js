@@ -94,7 +94,7 @@ async function digBlock(pos, opts = {}) {
   }
 
   // Protect path blocks (staircases, tunnels) from being destroyed
-  if (!opts.ignorePathBlocks && isPathBlock(pos.x, pos.y, pos.z)) {
+  if (!opts.ignorePathBlocks && isPathBlock(pos.x, pos.y, pos.z, b.name)) {
     console.log(`  digBlock: path block at ${pos.x},${pos.y},${pos.z}, skipping`)
     return { ok: false, reason: 'path' }
   }
