@@ -422,6 +422,7 @@ function createBot() {
 
   // A whisper (/msg) is a player talking to the bot like chat; mineflayer emits it as
   // 'whisper' ("X whispers to you: …" isn't chat's <X> form), so it takes the same path.
+  let aiOffNoticeAt = 0
   const onChat = (username, message) => {
     if (username === bot.username) return
     console.log(color(c.bold + c.white, `\n<${username}> ${message}`))
@@ -442,8 +443,12 @@ function createBot() {
       return
     }
     // With model calls paused nothing would answer, so say so from code. The message is still
-    // queued below and reaches the AI once it is back on.
-    if (state.aiPaused) require('./src/core/utils').sendChat(`[ai] AI is off, so I can't answer right now.${state.debugMode ? ' "!ai on" turns it back on.' : ''}`)
+    // queued below and reaches the AI once it is back on. Once per 30 s: another AI-off bot
+    // answers the notice with its own, and a reply to every line ping-pongs forever.
+    if (state.aiPaused && Date.now() - aiOffNoticeAt > 30000) {
+      aiOffNoticeAt = Date.now()
+      require('./src/core/utils').sendChat(`[ai] AI is off, so I can't answer right now.${state.debugMode ? ' "!ai on" turns it back on.' : ''}`)
+    }
     logChatDB('chat', username, message)
     state.noActionRounds = 0
     // Soft interrupt: abort self-loop AI call (if running) to free the provider,

@@ -35,6 +35,19 @@ function getBestRecipe(itemId, invMap) {
   const idToName = getIdToName()
   const recipes = mcData.recipes[itemId]
   if (!recipes || recipes.length === 0) return null
+  // A missing ingredient the bot can craft right now (planks from the logs it holds) is
+  // nearly in hand; one it can't (bamboo, with no recipe) is not. Rank recipes by the
+  // latter first, so sticks go through planks and not through bamboo, the last recipe.
+  const craftable = new Map()
+  const canCraft = (name) => {
+    if (!craftable.has(name)) {
+      const it = mcData.itemsByName[name]
+      let ok = false
+      try { ok = !!it && state.bot.recipesFor(it.id, null, 1, true).length > 0 } catch (e) {}
+      craftable.set(name, ok)
+    }
+    return craftable.get(name)
+  }
   let best = null
   for (const r of recipes) {
     const needs = {}
@@ -50,15 +63,20 @@ function getBestRecipe(itemId, invMap) {
       }
     }
     const needsTable = r.inShape && r.inShape[0] && r.inShape[0].length === 3
-    let missingTotal = 0
+    let missingTotal = 0, missingHard = 0
     if (invMap) {
       for (const [mat, count] of Object.entries(needs)) {
         const have = countMat(mat, invMap)
-        if (have < count) missingTotal += (count - have)
+        if (have < count) {
+          missingTotal += (count - have)
+          if (!canCraft(mat)) missingHard += (count - have)
+        }
       }
     }
-    if (!best || missingTotal < best.missingCount || (missingTotal === best.missingCount)) {
-      best = { needs, needsTable, missingCount: missingTotal }
+    // On a full tie the earlier recipe stays.
+    if (!best || missingHard < best.missingHard ||
+        (missingHard === best.missingHard && missingTotal < best.missingCount)) {
+      best = { needs, needsTable, missingCount: missingTotal, missingHard }
     }
     if (missingTotal === 0) break
   }

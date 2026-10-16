@@ -159,6 +159,9 @@ async function digBlock(pos, opts = {}) {
     try {
       await raceAbort(bot.dig(b, true, inside ? 'auto' : 'raycast'), 30000)
     } catch (e) {
+      // raceAbort only stops waiting: mineflayer's dig runs on and breaks the block when
+      // its timer ends, after the stop. Cancel it on the server too.
+      try { bot.stopDigging() } catch (err) {}
       if (e.message !== 'Block not in view') throw e
       console.log(`  digBlock: ${b.name} at ${pos.x},${pos.y},${pos.z} not in view, skipping`)
       return { ok: false, reason: 'not_visible', block: b.name }

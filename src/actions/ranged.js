@@ -178,7 +178,7 @@ function blockHeight(bot, x, y, z) {
     const liveBlock = bot.blockAt(new Vec3(x, y, z))
     const live = liveBlock?.name
     if (live && live !== name) {
-      try { state.stmts.upsertBlock.run(x, y, z, live, now, liveBlock.stateId) } catch (e) {}
+      try { state.stmts.upsertBlock.run(x, y, z, live, bot.time?.age || 0, liveBlock.stateId) } catch (e) {}
       name = live
     }
   }
