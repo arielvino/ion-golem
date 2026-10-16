@@ -10,6 +10,7 @@ const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
 const T = require('../config/timings')
+const { closeIn } = require('./pickup')
 
 async function doMine(targetName, opts = {}) {
   stopAll()
@@ -252,6 +253,7 @@ async function doCollect() {
     if (isAborted() || !item.isValid) continue
     try {
       await navigateTo(item.position.x, item.position.y, item.position.z, 1, 8000, { noReachCheck: true })
+      await closeIn(item, { aborted: isAborted })
     } catch (e) {
       if (e instanceof AbortError) throw e
     }
