@@ -603,7 +603,7 @@ async function doSwimUp() {
       } else if (!require('../engine/breakPermission').mayBreak(headBlock.name, hp, 'swimup')) {
         // no-unpermitted-breaking mode: not even to reach air
       } else {
-        try { await raceAbort(bot.dig(headBlock), 30000); logGameEvent('mine', headBlock.name, 1, hp.x, hp.y, hp.z, { reason: 'swimup' }) } catch(e) { console.warn('  [SWIM] dig err:', e.message) }
+        try { await raceAbort(bot.dig(headBlock), 30000); logGameEvent('mine', headBlock.name, 1, hp.x, hp.y, hp.z, { reason: 'swimup' }) } catch(e) { try { bot.stopDigging() } catch(err) {} console.warn('  [SWIM] dig err:', e.message) }
       }
     }
     await sleep(400)
