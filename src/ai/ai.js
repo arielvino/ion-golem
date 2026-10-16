@@ -5,7 +5,7 @@ const state = require('../core/state')
 const { getBotContext } = require('./context')
 const { renderTips } = require('./tips')
 const { applyPlanTags, agendaTitles } = require('../engine/tasks')
-const { applyNoteTags, markShown, recordTurn, logWhy, currentNode } = require('../world/journalStore')
+const { applyNoteTags, markShown, recordTurn, formatPrevTurn, logWhy, currentNode } = require('../world/journalStore')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
 const { createProvider } = require('./ai-provider')
@@ -103,6 +103,15 @@ let provider = null
 // One model turn for everything pending: player chat, game events and the bot's
 // own MONITOR/SELF-CHECK line. Goals the turn creates are owned by the last player
 // who spoke in it, and its actions are attributed to them; with no player, 'self'.
+// What woke this turn, in a word or two: the player who spoke, else the engine's
+// own tag ([MONITOR], [SELF-CHECK], [PLAN-FIRST], [GAME EVENT] …).
+function turnTrigger(batch, isPlayer) {
+  const players = [...new Set(batch.filter(m => isPlayer(m.username)).map(m => m.username))]
+  if (players.length) return `${players.join(', ')} spoke`
+  const tags = [...new Set(batch.map(m => /^\[([A-Z][A-Z -]*)\]/.exec(m.message)?.[1]).filter(Boolean))]
+  return tags.join(', ') || batch.map(m => m.username).join(', ')
+}
+
 async function handleMessages(batch) {
   const isPlayer = (u) => u !== 'self' && u !== 'event'
   const player = [...batch].reverse().find(m => isPlayer(m.username))
@@ -120,7 +129,12 @@ async function handleMessages(batch) {
   })
   // Tips are advice, not state, so they join the input here rather than inside getBotContext.
   const context = [getBotContext(), renderTips()].filter(Boolean).join('\n')
-  const input = `${context}\n${lines.join('\n')}`
+  // Every turn is numbered from the [BOOT] turn (0) and carries the last one in a line.
+  const turn = ++state.turnIndex
+  const trigger = turnTrigger(batch, isPlayer)
+  const turnLine = `TURN=${turn}${state.prevTurn ? ` PREV=[${state.prevTurn}]` : ''}`
+  state.prevTurn = formatPrevTurn({ turn, trigger, outcome: 'no reply (cut off)' })
+  const input = `${context}\n${turnLine}\n${lines.join('\n')}`
   for (const m of batch) logChat({ type: 'user', username: m.username, message: m.message, context })
 
   function processTags(rawReply) {
@@ -166,7 +180,7 @@ async function handleMessages(batch) {
 
   async function streamAndProcess(msgs) {
     // Log model input
-    console.log(color(c.cyan, `\n  [MODEL-IN] ${msgs.length} messages:`))
+    console.log(color(c.cyan, `\n  [MODEL-IN] turn #${turn}, ${msgs.length} messages:`))
     for (const m of msgs) {
       const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
       // Format context block: one key per line
@@ -302,6 +316,7 @@ async function handleMessages(batch) {
 
     logChat({ type: 'ai', raw: fullText, stack: [...state.taskStack], agenda: agendaTitles(), messages: msgs })
 
+    const planErrorsBefore = state.planErrors.length
     const planApplied = processTags(fullText)
 
     if (!chatSent) {
@@ -344,6 +359,11 @@ async function handleMessages(batch) {
       console.log(color(c.green, `\n  -> ${pendingActions.length} action(s): ${pendingActions.join(' → ')}${streamed ? ` (${streamed} started mid-reply)` : ''}`))
     }
 
+    state.prevTurn = formatPrevTurn({
+      turn, trigger, why: logWhy(fullText), actions: pendingActions, plan: planApplied,
+      planErrors: Math.max(0, state.planErrors.length - planErrorsBefore),
+      said: chatText && !/^[.\s…]+$/.test(chatText) ? chatText : '',
+    })
     recordTurn({
       said: chatText && !/^[.\s…]+$/.test(chatText) ? chatText : '',
       actions: pendingActions,
@@ -362,9 +382,11 @@ async function handleMessages(batch) {
   } catch (err) {
     if (err.message?.includes('abort') || err.message?.includes('SIGTERM')) {
       console.log('  [API] aborted (player interrupted)')
+      state.prevTurn = formatPrevTurn({ turn, trigger, outcome: 'interrupted before the reply ended' })
       return 'aborted'
     }
     console.error(color(c.red, `API error: ${err.message}`))
+    state.prevTurn = formatPrevTurn({ turn, trigger, outcome: 'no reply (model error)' })
     provider.destroy()
     provider = createProvider()
     provider.init(SYSTEM_PROMPT)
@@ -420,4 +442,4 @@ function getPersonalities() {
   return PERSONALITIES
 }
 
-module.exports = { handleMessages, sendChat, initChatLogs, initAI, abortResponse, switchPersonality, getPersonalities }
+module.exports = { handleMessages, turnTrigger, sendChat, initChatLogs, initAI, abortResponse, switchPersonality, getPersonalities }
