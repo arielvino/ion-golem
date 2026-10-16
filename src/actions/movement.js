@@ -8,7 +8,6 @@ const { sendChat, recordFailure, logEvent, fuzzyMatch, resolvePlayerName } = req
 const { logGameEvent, queryBlockMemory } = require('../world/memory')
 const { dbBlock } = require('../navigation/atomicSteps')
 const { tagOf, findTagged } = require('../perception/entityTag')
-const { OXYGEN_SURFACED } = require('../config/safety')
 const { WATER_BLOCKS, STRUCTURAL_AIR, PASSABLE } = require('../config/blocks')
 
 // Best-known position of a player. If their entity is in render range we have
@@ -588,12 +587,29 @@ function turnFail(target, why) {
   return false
 }
 
+// Surfaced is judged by the body, not by breath: in an air gap under a ceiling the
+// eyes can be just over the water and oxygen full while the bot is trapped (#136).
+// The eyes must be out of the water with nothing solid in the block over them; a 1-high
+// air gap under a ceiling is a pocket, not the surface.
+function swimSurfaced(bot) {
+  const eyePos = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0)
+  const eye = bot.blockAt(eyePos)
+  const over = bot.blockAt(eyePos.offset(0, 1, 0))
+  if (over && over.boundingBox === 'block') return { ok: false, why: `${over.name} overhead at ${over.position.x},${over.position.y},${over.position.z}` }
+  if (eye && WATER_BLOCKS.has(eye.name)) return { ok: false, why: 'my head is still under water' }
+  return { ok: true }
+}
+
 async function doSwimUp() {
   const bot = state.bot
   state.currentTask = 'swimming up'
   bot.clearControlStates()
-  for (let i = 0; i < 30; i++) {
-    if (bot.oxygenLevel >= OXYGEN_SURFACED) { console.log('  [swimup] surfaced, oxygen restored'); break }
+  let up = swimSurfaced(bot)
+  // Bounded as a whole: under a ceiling every pass may try a slow dig overhead.
+  const deadline = Date.now() + 30000
+  for (let i = 0; i < 30 && Date.now() < deadline; i++) {
+    up = swimSurfaced(bot)
+    if (up.ok) { console.log('  [swimup] surfaced'); break }
     bot.setControlState('jump', true)
     const headBlock = bot.blockAt(bot.entity.position.offset(0, 2, 0))
     if (headBlock && !STRUCTURAL_AIR.has(headBlock.name) && !WATER_BLOCKS.has(headBlock.name) && headBlock.diggable) {
@@ -603,20 +619,26 @@ async function doSwimUp() {
       } else if (!require('../engine/breakPermission').mayBreak(headBlock.name, hp, 'swimup')) {
         // no-unpermitted-breaking mode: not even to reach air
       } else {
-        try { await raceAbort(bot.dig(headBlock), 30000); logGameEvent('mine', headBlock.name, 1, hp.x, hp.y, hp.z, { reason: 'swimup' }) } catch(e) { try { bot.stopDigging() } catch(err) {} console.warn('  [SWIM] dig err:', e.message) }
+        try { await raceAbort(bot.dig(headBlock), Math.max(1000, deadline - Date.now())); logGameEvent('mine', headBlock.name, 1, hp.x, hp.y, hp.z, { reason: 'swimup' }) } catch(e) { try { bot.stopDigging() } catch(err) {} console.warn('  [SWIM] dig err:', e.message) }
       }
     }
     await sleep(400)
   }
-  // Stay surfaced a bit longer
+  // Stay surfaced a bit longer. Bobbing with jump held dips the eyes under now and then,
+  // so any surfaced sample here counts.
   for (let j = 0; j < 5; j++) {
     bot.setControlState('jump', true)
     await sleep(400)
+    if (!up.ok) up = swimSurfaced(bot)
   }
   bot.setControlState('jump', false)
-
-  console.log('  [swimup] done')
   state.currentTask = null
+  if (!up.ok) {
+    console.log(`  [swimup] not surfaced: ${up.why}`)
+    recordFailure(`swimup - couldn't surface: ${up.why}`)
+    return false
+  }
+  console.log('  [swimup] done')
 }
 
 const PORTAL_SEARCH = 48
