@@ -5,12 +5,37 @@ const { tickWait, raceAbort, AbortError, stopAll, isAborted } = require('../core
 const { navigateTo, digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
-const { approachToTouch, touchFailText } = require('../perception/touch')
+const { approachToTouch, touchFailText, canTouch } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
 const T = require('../config/timings')
 const { closeIn } = require('./pickup')
+
+// Thin plant cover that hangs on a block's faces. The crosshair stops on it, so a log
+// wrapped in vines can't be clicked until they're gone; a player just breaks them first.
+const COVER = new Set(['vine', 'glow_lichen'])
+const SIDES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+
+// Break the cover on `pos` that the bot can touch, nearest first, until `pos` itself
+// can be touched. Returns the final canTouch result.
+async function clearCover(pos) {
+  const bot = state.bot
+  const here = bot.entity.position
+  const covers = SIDES.map(([dx, dy, dz]) => pos.offset(dx, dy, dz))
+    .filter(p => COVER.has(bot.blockAt(p)?.name))
+    .sort((a, b) => here.distanceTo(a) - here.distanceTo(b))
+  let t = canTouch(pos)
+  for (const p of covers) {
+    if (t.ok || isAborted()) break
+    if (!canTouch(p).ok) continue
+    const name = bot.blockAt(p).name
+    const r = await digBlock(p, { intent: 'clear-no-tool', reason: 'clear_cover', ignorePathBlocks: true })
+    console.log(`  [mine] cleared ${name} at ${p.x},${p.y},${p.z} off the target: ${r.ok ? 'ok' : r.reason}`)
+    t = canTouch(pos)
+  }
+  return t
+}
 
 async function doMine(targetName, opts = {}) {
   stopAll()
@@ -145,8 +170,10 @@ async function doMine(targetName, opts = {}) {
 
   // Walk up to it; dig only when it is in reach and in sight. Being out of reach says
   // nothing about the block itself, so it is reported, never blacklisted.
-  const touch = await approachToTouch(bPos, 15000)
+  let touch = await approachToTouch(bPos, 15000)
   if (!touch || isAborted()) break
+  if (touch.reason === 'not_visible') touch = await clearCover(bPos)
+  if (isAborted()) break
   if (!touch.ok) {
     const why = touchFailText(block.name, bPos, touch)
     console.log(`  can't mine: ${why}`)
