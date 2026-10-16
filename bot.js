@@ -349,6 +349,7 @@ function createBot() {
     bot.once('end', () => { clearInterval(visionInterval) })
     require('./src/perception/blockActivity').bind(bot)
     require('./src/perception/footing').bind(bot)
+    require('./src/perception/riders').bind(bot)
 
     setupAutonomous(interrupt)
     require('./src/perception/playerSignals').bind(bot)
