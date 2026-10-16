@@ -9,6 +9,7 @@ const { approachToTouch, touchFailText } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
+const T = require('../config/timings')
 
 async function doMine(targetName, opts = {}) {
   stopAll()
@@ -239,16 +240,38 @@ async function doCollect() {
     if (nearEnts.length > 0) console.log(`  no items found, nearby entities: ${nearEnts.slice(0, 10).join(', ')}`)
   }
   console.log(`  ${items.length} items nearby`)
+  if (items.length === 0) {
+    state.currentTask = null
+    recordFailure('collect - no dropped items within 32 blocks')
+    return false
+  }
+  // The walk ends within reach of the item as the pathfinder sees it, which is not
+  // always within pickup range, so check each item really came over.
+  const left = []
   for (const item of items) {
     if (isAborted() || !item.isValid) continue
     try {
       await navigateTo(item.position.x, item.position.y, item.position.z, 1, 8000, { noReachCheck: true })
-      try { await tickWait(300) } catch(e) { break }
     } catch (e) {
       if (e instanceof AbortError) throw e
     }
+    // The server hands the item over a tick or more after the hitbox touches it.
+    try {
+      for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[item.id]; t += 50) await tickWait(50)
+    } catch (e) { break }
+    if (bot.entities[item.id]) left.push(item)
   }
   state.currentTask = null
+  if (left.length) {
+    const what = left.map(e => {
+      const it = e.getDroppedItem?.()
+      const p = e.position
+      return `${it ? `${it.name}x${it.count}` : 'item'}@${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`
+    })
+    console.log(color(c.yellow, `  collect: still on the ground: ${what.join(', ')}`))
+    recordFailure(`collect - walked to ${left.length} of ${items.length} items and they are still on the ground: ${what.join(', ')}`)
+    return false
+  }
 }
 
 module.exports = { doMine, doCollect }
