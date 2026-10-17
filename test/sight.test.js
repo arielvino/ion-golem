@@ -93,3 +93,18 @@ test('DARK= line: plain words, left out when the surroundings are lit', () => {
   assert.strictEqual(formatSight(s, { here: 0, share: 1, dirs: [['E', 1], ['W', 1]] }),
     'DARK=[you stand in darkness (0/15) | 100% of the space within 8 blocks of you is dark]')
 })
+
+// seenBlocks marks a block "underwater" only when the water right above it was seen too:
+// an ore seen from a cave below a lake must not reveal the lake.
+test('seenBlocks: underwater only under seen water', () => {
+  const { seenBlocks } = require('../src/perception/sight')
+  const names = { 1: 'iron_ore', 2: 'water' }
+  const bot = { registry: { blocksByStateId: { 1: { name: 'iron_ore' }, 2: { name: 'water' } }, biomes: {} }, world: { getBiome: () => 0 } }
+  const s = 3, snap = new Uint16Array(s ** 3), seen = new Uint8Array(s ** 3)
+  const at = (x, y, z) => (y * s + z) * s + x
+  // Column x=0: ore at y=0 under seen water. Column x=2: ore at y=0 under unseen water.
+  snap[at(0, 0, 0)] = 1; snap[at(0, 1, 0)] = 2; seen[at(0, 0, 0)] = 1; seen[at(0, 1, 0)] = 1
+  snap[at(2, 0, 0)] = 1; snap[at(2, 1, 0)] = 2; seen[at(2, 0, 0)] = 1
+  const ores = seenBlocks(bot, { snap, side: s, x0: 0, y0: 0, z0: 0 }, seen).filter(b => names[b.id] === 'iron_ore')
+  assert.deepStrictEqual(ores.map(b => [b.x, !!b.underwater]), [[0, true], [2, false]])
+})

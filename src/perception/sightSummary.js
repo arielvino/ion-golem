@@ -50,7 +50,7 @@ function summarizeSight({ eye, dimension, blocks }) {
 
   const total = blocks.length || 1
   const biomeList = [...biomes].filter(([, v]) => v.n / total >= BIOME_MIN).sort((a, b) => b[1].n - a[1].n)
-  const spot = (b, d2) => ({ dist: Math.round(Math.sqrt(d2)), dir: compass(b.x + 0.5 - eye.x, b.z + 0.5 - eye.z), at: { x: b.x, y: b.y, z: b.z } })
+  const spot = (b, d2) => ({ dist: Math.round(Math.sqrt(d2)), dir: compass(b.x + 0.5 - eye.x, b.z + 0.5 - eye.z), at: { x: b.x, y: b.y, z: b.z }, ...(b.underwater && { underwater: true }) })
   // all: every block's spot, nearest first (only the resources layer lists them all).
   const listOf = (map, all = false) => [...map].map(([name, e]) => ({
     name, count: e.n, far: Math.round(Math.sqrt(e.far2)), ...spot(e.at, e.d2),
@@ -75,7 +75,8 @@ const pct = (x) => `${Math.round(100 * x)}%`
 // The context lines — data only; how to read them belongs in the system prompt. An empty
 // layer is left out. Entries: NAME×COUNT nearest DIST DIR@X,Y,Z, and for unnatural blocks
 // "(to FARm)" when there are several. Resources list every spot instead of the nearest:
-// NAME×COUNT: DIST DIR@X,Y,Z; DIST DIR@X,Y,Z… with " | " between kinds (coords hold commas).
+// NAME×COUNT: DIST DIR@X,Y,Z; DIST DIR@X,Y,Z… with " | " between kinds (coords hold commas),
+// a spot under seen water marked " underwater".
 // dark: lookAround's dark (castRays' near, or null): DARK= is left out when almost nothing near is dark.
 function formatSight(s, dark = null) {
   const item = (e) => `${e.name}×${e.count} nearest ${e.dist}m ${e.dir}@${e.at.x},${e.at.y},${e.at.z}`
@@ -84,7 +85,7 @@ function formatSight(s, dark = null) {
   if (s.biomes.length) lines.push(`BIOMES=[${s.biomes.map(b => `${b.name} ${pct(b.share)}`).join(', ')}]`)
   if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)} (${m.count})`).join(', ')}`).join(' | ')}]`)
   if (s.decoration.length) lines.push(`DECOR=[${s.decoration.map(item).join(', ')}]`)
-  const spots = (e) => `${e.name}×${e.count}: ${e.spots.map(p => `${p.dist}m ${p.dir}@${p.at.x},${p.at.y},${p.at.z}`).join('; ')}`
+  const spots = (e) => `${e.name}×${e.count}: ${e.spots.map(p => `${p.dist}m ${p.dir}@${p.at.x},${p.at.y},${p.at.z}${p.underwater ? ' underwater' : ''}`).join('; ')}`
   if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(spots).join(' | ')}]`)
   if (s.unnatural.length) lines.push(`UNNATURAL=[${s.unnatural.map(spread).join(', ')}]`)
   if (dark && dark.share >= DARK_MIN) {

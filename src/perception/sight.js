@@ -22,6 +22,8 @@ const { Vec3 } = require('vec3')
 const { performance } = require('perf_hooks')
 
 const AIR = new Set(['air', 'cave_air', 'void_air'])
+// Water, and the blocks that only exist in it (a kelp or seagrass cell is water too).
+const WATER = new Set(['water', 'bubble_column', 'kelp', 'kelp_plant', 'seagrass', 'tall_seagrass'])
 
 const MIN_LIGHT = 1          // below this a block is too dark to see
 
@@ -171,12 +173,15 @@ function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen) {
     const key = `${x >> 2},${y >> 2},${z >> 2}`
     let biome = biomeCache.get(key)
     if (biome === undefined) { p.set(x, y, z); biome = bot.registry.biomes[bot.world.getBiome(p)]?.name || 'unknown'; biomeCache.set(key, biome) }
-    out.push({ id: snap[i], name, x, y, z, biome })
+    // Under water: the block above is water the bot saw too (no guessing past what is seen).
+    const up = i + side * side
+    const underwater = y < y0 + side - 1 && seen[up] && WATER.has(nameOf(snap[up]))
+    out.push(underwater ? { id: snap[i], name, x, y, z, biome, underwater } : { id: snap[i], name, x, y, z, biome })
   }
   return out
 }
 
-// → { eye, radius, blocks: [{ id, name, x, y, z, biome }] (no air), dark (castRays' near, null
+// → { eye, radius, blocks: [{ id, name, x, y, z, biome, underwater? }] (no air), dark (castRays' near, null
 //   outside the overworld), rays, open (rays that reached R unblocked), ms: { snapshot, rays, blocks } }
 function lookAround(bot, R = 64) {
   const now = () => performance.now()
