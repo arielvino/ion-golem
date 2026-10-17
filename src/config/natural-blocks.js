@@ -21,6 +21,8 @@ const BADLANDS = { biomes: ['badlands', 'wooded_badlands', 'eroded_badlands'] }
 
 const WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak']
 const CORALS = ['tube', 'brain', 'bubble', 'fire', 'horn']
+// Poplar trees have no poplar_leaves: each tree is one of three colours.
+const POPLAR = ['poplar_log', 'red_poplar_leaves', 'orange_poplar_leaves', 'yellow_poplar_leaves']
 const ORES = ['coal', 'iron', 'copper', 'gold', 'redstone', 'lapis', 'diamond', 'emerald']
 
 const RULES = [
@@ -38,6 +40,7 @@ const RULES = [
     'medium_amethyst_bud', 'small_amethyst_bud', 'smooth_basalt',   // geodes
     'sculk', 'sculk_vein', 'sculk_sensor', 'sculk_catalyst', 'sculk_shrieker',
     'raw_iron_block', 'raw_copper_block',            // ore veins
+    'sulfur', 'potent_sulfur', 'cinnabar', 'sulfur_spike',   // sulfur caves and sulfur springs
     ...ORES.flatMap(o => [`${o}_ore`, `deepslate_${o}_ore`])], OW],
   [['red_sand', 'red_sandstone', 'terracotta', 'white_terracotta', 'orange_terracotta',
     'yellow_terracotta', 'brown_terracotta', 'red_terracotta', 'light_gray_terracotta'], BADLANDS],
@@ -45,6 +48,7 @@ const RULES = [
 
   // ---- overworld plants
   [[...WOODS.flatMap(w => [`${w}_log`, `${w}_leaves`]), 'azalea_leaves', 'flowering_azalea_leaves',
+    ...POPLAR, 'red_shrub', 'shelf_mushroom',        // dappled forest
     'mangrove_roots', 'muddy_mangrove_roots', 'mangrove_propagule', 'creaking_heart', 'pale_hanging_moss',
     'bee_nest', 'vine', 'glow_lichen', 'cocoa',
     'short_grass', 'tall_grass', 'fern', 'large_fern', 'bush', 'dead_bush', 'short_dry_grass', 'tall_dry_grass',
@@ -84,6 +88,7 @@ const RESOURCE = new Map([
 // in RULES, which decides where it is natural at all.
 const DECORATION = new Set([
   ...WOODS.flatMap(w => [`${w}_log`, `${w}_leaves`]), 'azalea_leaves', 'flowering_azalea_leaves',
+  ...POPLAR, 'red_shrub', 'shelf_mushroom', 'sulfur_spike',
   'mangrove_roots', 'muddy_mangrove_roots', 'mangrove_propagule', 'creaking_heart', 'pale_hanging_moss',
   'bee_nest', 'vine', 'glow_lichen', 'cocoa',
   'short_grass', 'tall_grass', 'fern', 'large_fern', 'bush', 'dead_bush', 'short_dry_grass', 'tall_dry_grass',
