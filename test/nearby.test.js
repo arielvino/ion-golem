@@ -18,7 +18,7 @@ test('close mobs get tags; far ones are counted per kind after far:', () => {
     mob('sheep', 30), mob('sheep', 10), mob('zombie', 35), mob('sheep', 60),
     mob('skeleton', 50, { equipment: [{ name: 'bow' }] }), mob('skeleton', 90),
   ], here, RANGES)
-  assert.match(r.text, /^sheep#a001@10,64,0\(10m\), zombie#a002@35,64,0\(35m\), far: sheep×2\(30m\+\), skeleton×2\(50m\+\)$/)
+  assert.match(r.text, /^sheep#a001@10,64,0\(10m,white\), zombie#a002@35,64,0\(35m\), far: white_sheep×2\(30m\+\), skeleton×2\(50m\+\)$/)
   assert.deepStrictEqual(r.seen, ['sheep#a001', 'zombie#a002'])
   assert.deepStrictEqual(r.far, { skeleton: 2 })
 })
@@ -43,4 +43,13 @@ test('drops are listed within pickup range only, with stack size', () => {
 
 test('nothing visible → none', () => {
   assert.strictEqual(renderNearby([], here, RANGES).text, 'none')
+})
+
+test('sheep show their wool colour, and far ones are counted per colour', () => {
+  const wool = state.bot.registry.entitiesByName.sheep.metadataKeys.indexOf('wool')
+  const sheep = (d, v) => mob('sheep', d, { metadata: { [wool]: v } })
+  // 0 white, 15 black, 0x10|14 = sheared red. A white sheep's wool byte is the default,
+  // which the server doesn't send: the first one has none.
+  const r = renderNearby([mob('sheep', 5), sheep(8, 0x1e), sheep(30, 0), sheep(31, 0), sheep(32, 15), sheep(33, 0x10)], here, RANGES)
+  assert.match(r.text, /^sheep#\w{4}@5,64,0\(5m,white\), sheep#\w{4}@8,64,0\(8m,red,sheared\), far: white_sheep×2\(30m\+\), black_sheep×1\(32m\+\), sheared_sheep×1\(33m\+\)$/)
 })
