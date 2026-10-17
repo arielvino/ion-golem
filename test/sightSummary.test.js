@@ -68,3 +68,11 @@ test('RESOURCES: every spot of each ore, nearest first, kinds apart', () => {
   assert.strictEqual(layer(view, 'RESOURCES'),
     'RESOURCES=[coal×3: 11m S@0,60,10; 21m S@0,60,20; 30m S@0,60,30 | diamond×1: 11m E@10,60,0]')
 })
+
+// An ore with seen water right above it is a lake or sea bed: mining it means swimming.
+test('RESOURCES: a spot under water says so', () => {
+  const at = (name, x, y, z, extra) => ({ id: null, name, x, y, z, biome: 'river', ...extra })
+  const view = [at('iron_ore', 0, 60, 10, { underwater: true }), at('iron_ore', 0, 60, 20)]
+  assert.strictEqual(layer(view, 'RESOURCES'),
+    'RESOURCES=[iron×2: 11m S@0,60,10 underwater; 21m S@0,60,20]')
+})
