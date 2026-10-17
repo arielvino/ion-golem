@@ -59,6 +59,9 @@ const PROMPT_ORDER = [
   '30-navigation.txt',
   '40-autonomous.txt',
   '50-actions.txt',
+  // eval runs arbitrary JS in the bot process — never advertise it outside --debug.
+  // Keyed off process.argv for the same reason as DBG_PERSONALITY below.
+  ...(process.argv.includes('--debug') ? ['51-debug-actions.txt'] : []),
   '55-views.txt',
   '57-past-views.txt',
   '60-building.txt',

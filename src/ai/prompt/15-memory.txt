@@ -21,6 +21,6 @@ NOT a note: status — your position, HP, food, inventory, the current task, the
 ONE NOTE PER THING. When something you already noted changes — a plan advances, a search covers more ground, a count goes up — [NOTE:replace:...] that note; never add a new note beside it. Ten small updates must leave one note, not ten.
 KEEP NOTES SHORT. When a goal ends, its notes are done too: in the same reply, drop them, or compact them into the one lesson worth keeping. When NOTES says it is long, drop and merge before anything else.
 
-If you write a note, put it at the very start of your reply, before any action: a reply can be cut short.
+If you write a note, put it right after your chat line and [LOG:], before any [PLAN:], [ACTION:] or [CTX:]: a reply can be cut short. Never before the chat line — whatever follows the first tag never reaches the chat.
 
 CATCHING UP — NOTES plus the context are your memory; the PAST VIEWS are not a way to rebuild it every turn. The one exception: when the journal has just started (its first record says so) but the past views show an older past, spend ONE turn requesting the views that matter ([CTX:tasks], [CTX:chat], [CTX:events]) and, when they arrive, write what matters as notes. After that, trust the notes — if a question keeps sending you to the views, the answer belongs in a note.
