@@ -85,7 +85,7 @@ test('dark around: a dark gap with light beyond still counts dark; standing in t
 
 test('DARK= line: plain words, left out when the surroundings are lit', () => {
   const { formatSight } = require('../src/perception/sightSummary')
-  const s = { seen: 30, biomes: [], terrain: [], resources: [], unexplained: [] }
+  const s = { seen: 30, biomes: [], terrain: [], decoration: [], resources: [], unnatural: [] }
   assert.ok(!formatSight(s, null).includes('DARK'))
   assert.ok(!formatSight(s, { here: 15, share: 0.01, dirs: [['down', 0.1]] }).includes('DARK'))
   assert.strictEqual(formatSight(s, { here: 15, share: 0.3, dirs: [['E', 0.9], ['down', 0.4], ['N', 0.1]] }),

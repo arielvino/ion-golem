@@ -18,7 +18,7 @@ const fs = require('fs')
 const mineflayer = require('mineflayer')
 const { Vec3 } = require('vec3')
 const { performance } = require('perf_hooks')
-const { recognizeView, formatPlacesContext } = require('../src/perception/recognize')
+const { recognizeView, formatStructures } = require('../src/perception/recognize')
 const { snapshot, castRays, seenBlocks, opaqueTable, AIR } = require('../src/perception/sight')
 const state = require('../src/core/state')
 const { summarizeSight, formatSight } = require('../src/perception/sightSummary')
@@ -209,7 +209,7 @@ async function main() {
     const rec = recognizeView({ eye, blocks: vis }, { maxDistance: R })
     const tRec = now() - t
     t = now()
-    const sight = summarizeSight({ dimension: bot.game.dimension, eye, blocks: vis, places: rec.places })
+    const sight = summarizeSight({ dimension: bot.game.dimension, eye, blocks: vis })
     const tSum = now() - t
     out.ms.biome = +tBiome.toFixed(1); out.ms.recognize = +tRec.toFixed(1); out.ms.summary = +tSum.toFixed(1)
     out.sight = sight
@@ -226,7 +226,7 @@ async function main() {
     console.log(table(blocks, blockN, 15))
     console.log(`  biome lookup ${tBiome.toFixed(0)} ms, recognize ${tRec.toFixed(0)} ms, summary ${tSum.toFixed(0)} ms`)
     console.log('  --- what the model would get:')
-    console.log((formatSight(sight) + '\n' + (formatPlacesContext(rec).trim() || 'PLACES=[]')).split('\n').map(l => '  ' + l).join('\n'))
+    console.log((formatSight(sight) + '\n' + (formatStructures(rec).trim() || 'STRUCTURES=[]')).split('\n').map(l => '  ' + l).join('\n'))
   }
   // Every sample merged, grouped by the biome each seen block is in, then sorted.
   console.log('\n##### BY BIOME (all samples merged) #####')

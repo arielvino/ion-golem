@@ -6,8 +6,9 @@
 // so that blocks added by future Minecraft versions count as tells until someone lists them.
 //
 // The scope is checked against the biome of the block itself, not of where the bot stands.
-// A noise block is either TERRAIN (the area's material: summarized as name + %) or a RESOURCE:
-// natural and normal but rare and worth going for, reported with count and nearest spot.
+// A noise block is TERRAIN (what the ground itself is made of: summarized as name + %),
+// DECORATION (what grows or lies on it: trees, plants, boulders, fossils; count and nearest
+// spot) or a RESOURCE (an ore; count and nearest spot).
 // Biome-scoped rules are strict: a badlands tree or terracotta band that crosses into the
 // neighbouring river's biome cells reads as a tell (edge tolerance: TODO.md).
 
@@ -20,6 +21,8 @@ const BADLANDS = { biomes: ['badlands', 'wooded_badlands', 'eroded_badlands'] }
 
 const WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak']
 const CORALS = ['tube', 'brain', 'bubble', 'fire', 'horn']
+// Poplar trees have no poplar_leaves: each tree is one of three colours.
+const POPLAR = ['poplar_log', 'red_poplar_leaves', 'orange_poplar_leaves', 'yellow_poplar_leaves']
 const ORES = ['coal', 'iron', 'copper', 'gold', 'redstone', 'lapis', 'diamond', 'emerald']
 
 const RULES = [
@@ -37,6 +40,7 @@ const RULES = [
     'medium_amethyst_bud', 'small_amethyst_bud', 'smooth_basalt',   // geodes
     'sculk', 'sculk_vein', 'sculk_sensor', 'sculk_catalyst', 'sculk_shrieker',
     'raw_iron_block', 'raw_copper_block',            // ore veins
+    'sulfur', 'potent_sulfur', 'cinnabar', 'sulfur_spike',   // sulfur caves and sulfur springs
     ...ORES.flatMap(o => [`${o}_ore`, `deepslate_${o}_ore`])], OW],
   [['red_sand', 'red_sandstone', 'terracotta', 'white_terracotta', 'orange_terracotta',
     'yellow_terracotta', 'brown_terracotta', 'red_terracotta', 'light_gray_terracotta'], BADLANDS],
@@ -44,6 +48,7 @@ const RULES = [
 
   // ---- overworld plants
   [[...WOODS.flatMap(w => [`${w}_log`, `${w}_leaves`]), 'azalea_leaves', 'flowering_azalea_leaves',
+    ...POPLAR, 'red_shrub', 'shelf_mushroom',        // dappled forest
     'mangrove_roots', 'muddy_mangrove_roots', 'mangrove_propagule', 'creaking_heart', 'pale_hanging_moss',
     'bee_nest', 'vine', 'glow_lichen', 'cocoa',
     'short_grass', 'tall_grass', 'fern', 'large_fern', 'bush', 'dead_bush', 'short_dry_grass', 'tall_dry_grass',
@@ -71,20 +76,39 @@ const RULES = [
   [['end_stone', 'chorus_plant', 'chorus_flower'], END],
 ]
 
-// Resource block -> the name the model sees; ore variants merge ('deepslate_iron_ore' -> iron).
-// Only counts where the block is noise: an ore block in the wrong dimension is unexplained.
+// Resource block (an ore) -> the name the model sees; variants merge ('deepslate_iron_ore' -> iron).
+// Only counts where the block is noise: an ore block in the wrong dimension is unnatural.
 const RESOURCE = new Map([
   ...ORES.flatMap(o => [[`${o}_ore`, o], [`deepslate_${o}_ore`, o]]),
   ['raw_iron_block', 'iron'], ['raw_copper_block', 'copper'],
   ['nether_gold_ore', 'gold'], ['nether_quartz_ore', 'quartz'], ['ancient_debris', 'ancient_debris'],
-  ['budding_amethyst', 'amethyst'], ['amethyst_cluster', 'amethyst'], ['obsidian', 'obsidian'],
-  ['glowstone', 'glowstone'],
-  // food and crafting plants
-  ['sugar_cane', 'sugar_cane'], ['pumpkin', 'pumpkin'], ['melon', 'melon'], ['cocoa', 'cocoa'],
-  ['sweet_berry_bush', 'sweet_berries'], ['cave_vines', 'glow_berries'], ['cave_vines_plant', 'glow_berries'],
-  ['bee_nest', 'bee_nest'], ['kelp', 'kelp'], ['kelp_plant', 'kelp'], ['bamboo', 'bamboo'],
-  ['brown_mushroom', 'mushroom'], ['red_mushroom', 'mushroom'],
-  ['brown_mushroom_block', 'mushroom'], ['red_mushroom_block', 'mushroom'],
+])
+
+// Natural blocks that grow or lie on the ground rather than make it up. Every one is also
+// in RULES, which decides where it is natural at all.
+const DECORATION = new Set([
+  ...WOODS.flatMap(w => [`${w}_log`, `${w}_leaves`]), 'azalea_leaves', 'flowering_azalea_leaves',
+  ...POPLAR, 'red_shrub', 'shelf_mushroom', 'sulfur_spike',
+  'mangrove_roots', 'muddy_mangrove_roots', 'mangrove_propagule', 'creaking_heart', 'pale_hanging_moss',
+  'bee_nest', 'vine', 'glow_lichen', 'cocoa',
+  'short_grass', 'tall_grass', 'fern', 'large_fern', 'bush', 'dead_bush', 'short_dry_grass', 'tall_dry_grass',
+  'firefly_bush', 'leaf_litter', 'pink_petals', 'wildflowers',
+  'dandelion', 'poppy', 'blue_orchid', 'allium', 'azure_bluet', 'red_tulip', 'orange_tulip', 'white_tulip',
+  'pink_tulip', 'oxeye_daisy', 'cornflower', 'lily_of_the_valley', 'sunflower', 'lilac', 'rose_bush', 'peony',
+  'open_eyeblossom', 'closed_eyeblossom',
+  'sugar_cane', 'cactus', 'cactus_flower', 'bamboo', 'bamboo_sapling', 'pumpkin', 'melon', 'sweet_berry_bush',
+  'brown_mushroom_block', 'red_mushroom_block', 'mushroom_stem', 'brown_mushroom', 'red_mushroom',
+  'azalea', 'flowering_azalea', 'cave_vines', 'cave_vines_plant', 'spore_blossom', 'hanging_roots',
+  'big_dripleaf', 'big_dripleaf_stem', 'small_dripleaf', 'moss_carpet', 'pale_moss_carpet', 'pointed_dripstone',
+  'lily_pad', 'seagrass', 'tall_seagrass', 'kelp', 'kelp_plant', 'sea_pickle',
+  ...CORALS.flatMap(c => [`${c}_coral`, `${c}_coral_fan`, `${c}_coral_wall_fan`]),
+  'budding_amethyst', 'amethyst_cluster', 'large_amethyst_bud', 'medium_amethyst_bud', 'small_amethyst_bud',
+  'mossy_cobblestone',                               // taiga boulders
+  'bone_block', 'dried_ghast', 'glowstone',          // soul sand valley fossils, ghastlings, ceiling clusters
+  'crimson_stem', 'nether_wart_block', 'crimson_roots', 'crimson_fungus', 'weeping_vines', 'weeping_vines_plant',
+  'warped_stem', 'warped_wart_block', 'warped_roots', 'warped_fungus', 'twisting_vines', 'twisting_vines_plant',
+  'nether_sprouts', 'shroomlight',
+  'chorus_plant', 'chorus_flower',
 ])
 
 const NOISE = new Map()   // name -> [scope]
@@ -96,10 +120,10 @@ function isNoise(name, dimension, biome) {
   return (NOISE.get(name) || []).some(s => s.dims ? s.dims.includes(dim) : s.biomes.includes(biome))
 }
 
-// 'terrain' | 'resource' | null (not natural here: a structure, a portal or a player).
+// 'terrain' | 'decoration' | 'resource' | null (not natural here: a structure, a portal or a player).
 function roleOf(name, dimension, biome) {
   if (!isNoise(name, dimension, biome)) return null
-  return RESOURCE.has(name) ? 'resource' : 'terrain'
+  return RESOURCE.has(name) ? 'resource' : DECORATION.has(name) ? 'decoration' : 'terrain'
 }
 
-module.exports = { isNoise, roleOf, NOISE, RESOURCE }
+module.exports = { isNoise, roleOf, NOISE, RESOURCE, DECORATION }

@@ -1,24 +1,22 @@
 // sightSummary.js — what the bot sees, in the layers the model reads it by.
 //
-// Input is one view: every visible block with its position and the biome it sits in, plus
-// the places recognize.js made of the same view. Each block gets its role there
-// (config/natural-blocks.js) and lands in one layer:
+// Input is one view: every visible block with its position and the biome it sits in. Each
+// block gets its role there (config/natural-blocks.js) and lands in one layer:
 //
 //   biomes       which biomes the view covers, by share of the visible blocks
-//   terrain      the ordinary material of each biome: its top TERRAIN_TOP names with %
-//   resources    natural but rare and worth going for (ores, food plants): count + nearest
-//   places       recognized structures (recognize.js reads the view on its own; natural
-//                blocks such as obsidian can be its cues too)
-//   unexplained  not natural here and not part of a recognized place: a player, or a
-//                structure no fingerprint knows. count + nearest
+//   terrain      what the ground of each biome is made of: every material with % and count
+//   decoration   natural, on the ground rather than of it (trees, plants, boulders,
+//                fossils): count + nearest
+//   resources    ores: count + nearest
+//   unnatural    not natural here: a structure, a portal or a player's work. Count, nearest,
+//                and how far the farthest one is. Places recognize.js made of them are
+//                reported beside this (recognize.js formatStructures), not instead of it.
 const { roleOf, RESOURCE } = require('../config/natural-blocks')
 const { NEAR } = require('./sight')
-const { blockLabel } = require('../world/blockLabel')
 
-const TERRAIN_TOP = 5
 const BIOME_MIN = 0.01    // biomes under this share of the view are left out
 const TERRAIN_MIN = 0.005 // terrain materials under this share of their biome are left out
-const LIST_MAX = 10       // resources / unexplained entries
+const LIST_MAX = 20       // decoration / resources / unnatural entries
 const DARK_MIN = 0.02     // less of the near space dark than this: no DARK= line
 const DIR_DARK = 0.6      // a direction this dark (share of its rays) reads "dark"
 const DIR_PART = 0.2      // ... and this, "partly dark"
@@ -28,19 +26,17 @@ const DIR_WORDS = { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
-// blocks: [{ id, name, x, y, z, biome }] (no air; id = state id).
-// Terrain is grouped by name: it says what the area is made of, and a state split
-// (oak_leaves by distance, vine by side) only crowded real materials out of the top few.
-// Unexplained blocks are grouped by label (name plus state). places: recognizeCues(...).places or [].
-function summarizeSight({ dimension, eye, blocks, places = [] }) {
-  const explained = new Set(places.flatMap(p => [...p.counts.keys()]))
+// blocks: [{ id, name, x, y, z, biome }] (no air; id = state id). Every layer is grouped by
+// block name: it says what the area holds, and a state split (oak_leaves by distance, stairs
+// by facing) would only crowd real kinds out of the list.
+function summarizeSight({ eye, dimension, blocks }) {
   const biomes = new Map()     // biome -> { n, terrain: Map(name -> n) }
-  const found = { resource: new Map(), unexplained: new Map() }   // label -> { n, d2, at }
-  const note = (map, label, b) => {
+  const found = { decoration: new Map(), resource: new Map(), unnatural: new Map() }   // name -> { n, d2, at, far2 }
+  const note = (map, name, b) => {
     const dx = b.x + 0.5 - eye.x, dy = b.y + 0.5 - eye.y, dz = b.z + 0.5 - eye.z, d2 = dx * dx + dy * dy + dz * dz
-    const e = map.get(label)
-    if (!e) map.set(label, { n: 1, d2, at: b })
-    else { e.n++; if (d2 < e.d2) { e.d2 = d2; e.at = b } }
+    const e = map.get(name)
+    if (!e) map.set(name, { n: 1, d2, at: b, far2: d2 })
+    else { e.n++; if (d2 < e.d2) { e.d2 = d2; e.at = b } if (d2 > e.far2) e.far2 = d2 }
   }
   for (const b of blocks) {
     let bm = biomes.get(b.biome)
@@ -49,40 +45,44 @@ function summarizeSight({ dimension, eye, blocks, places = [] }) {
     const role = roleOf(b.name, dimension, b.biome)
     if (role === 'terrain') bm.terrain.set(b.name, (bm.terrain.get(b.name) || 0) + 1)
     else if (role === 'resource') note(found.resource, RESOURCE.get(b.name), b)
-    else if (!explained.has(b.name)) note(found.unexplained, blockLabel(b.name, b.id), b)
+    else note(found[role ?? 'unnatural'], b.name, b)
   }
 
   const total = blocks.length || 1
   const biomeList = [...biomes].filter(([, v]) => v.n / total >= BIOME_MIN).sort((a, b) => b[1].n - a[1].n)
   const listOf = (map) => [...map].map(([name, e]) => ({
-    name, count: e.n, dist: Math.round(Math.sqrt(e.d2)), dir: compass(e.at.x + 0.5 - eye.x, e.at.z + 0.5 - eye.z),
-    at: { x: e.at.x, y: e.at.y, z: e.at.z },
-  })).sort((a, b) => a.dist - b.dist).slice(0, LIST_MAX)
+    name, count: e.n, dist: Math.round(Math.sqrt(e.d2)), far: Math.round(Math.sqrt(e.far2)),
+    dir: compass(e.at.x + 0.5 - eye.x, e.at.z + 0.5 - eye.z), at: { x: e.at.x, y: e.at.y, z: e.at.z },
+  })).sort((a, b) => b.count - a.count || a.dist - b.dist).slice(0, LIST_MAX)
   return {
     seen: blocks.length,
     biomes: biomeList.map(([name, v]) => ({ name, share: v.n / total })),
     terrain: biomeList.map(([name, v]) => {
       const n = [...v.terrain.values()].reduce((s, c) => s + c, 0) || 1
-      return { biome: name, top: [...v.terrain].sort((a, b) => b[1] - a[1]).slice(0, TERRAIN_TOP)
-        .filter(([, c]) => c / n >= TERRAIN_MIN).map(([m, c]) => ({ name: m, share: c / n })) }
-    }),
+      return { biome: name, top: [...v.terrain].sort((a, b) => b[1] - a[1])
+        .filter(([, c]) => c / n >= TERRAIN_MIN).map(([m, c]) => ({ name: m, count: c, share: c / n })) }
+    }).filter(t => t.top.length),
+    decoration: listOf(found.decoration),
     resources: listOf(found.resource),
-    unexplained: listOf(found.unexplained),
+    unnatural: listOf(found.unnatural),
   }
 }
 
 const pct = (x) => `${Math.round(100 * x)}%`
 
 // The context lines — data only; how to read them belongs in the system prompt. An empty
-// layer is left out. Entries: NAMExCOUNT@X,Y,Z (the nearest one) DIST DIR.
+// layer is left out. Entries: NAME×COUNT nearest DIST DIR@X,Y,Z, and for unnatural blocks
+// "(to FARm)" when there are several.
 // dark: lookAround's dark (castRays' near, or null): DARK= is left out when almost nothing near is dark.
 function formatSight(s, dark = null) {
-  const item = (e) => `${e.name}x${e.count}@${e.at.x},${e.at.y},${e.at.z} ${e.dist}m ${e.dir}`
+  const item = (e) => `${e.name}×${e.count} nearest ${e.dist}m ${e.dir}@${e.at.x},${e.at.y},${e.at.z}`
+  const spread = (e) => item(e) + (e.count > 1 ? ` (to ${e.far}m)` : '')
   const lines = []
   if (s.biomes.length) lines.push(`BIOMES=[${s.biomes.map(b => `${b.name} ${pct(b.share)}`).join(', ')}]`)
-  if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)}`).join(', ')}`).join(' | ')}]`)
+  if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)} (${m.count})`).join(', ')}`).join(' | ')}]`)
+  if (s.decoration.length) lines.push(`DECOR=[${s.decoration.map(item).join(', ')}]`)
   if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(item).join(', ')}]`)
-  if (s.unexplained.length) lines.push(`UNEXPLAINED=[${s.unexplained.map(item).join(', ')}]`)
+  if (s.unnatural.length) lines.push(`UNNATURAL=[${s.unnatural.map(spread).join(', ')}]`)
   if (dark && dark.share >= DARK_MIN) {
     const where = (lo, hi) => dark.dirs.filter(([, f]) => f >= lo && f < hi).map(([d]) => DIR_WORDS[d]).join(', ')
     const full = where(DIR_DARK, 2), part = where(DIR_PART, DIR_DARK)
@@ -95,4 +95,4 @@ function formatSight(s, dark = null) {
   return lines.join('\n')
 }
 
-module.exports = { summarizeSight, formatSight, TERRAIN_TOP }
+module.exports = { summarizeSight, formatSight }

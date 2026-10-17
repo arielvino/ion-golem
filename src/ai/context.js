@@ -1,9 +1,8 @@
 // Bot context builder — assembles real-time state snapshot for AI prompts
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
-const { getLastVisionResult, formatVision, hasLineOfSight } = require('../perception/vision')
-const { getLastSurvey } = require('../perception/visibility')
-const { recognizeView, formatPlacesContext } = require('../perception/recognize')
+const { getLastVisionResult, hasLineOfSight } = require('../perception/vision')
+const { recognizeView, formatStructures } = require('../perception/recognize')
 const { lookAround } = require('../perception/sight')
 const { summarizeSight, formatSight } = require('../perception/sightSummary')
 const ranges = require('../config/ranges')
@@ -219,9 +218,6 @@ function getBotContext() {
   const others = Object.keys(bot.players).filter(n => n !== bot.username).sort()
   const playerPosStr = ` PLAYERS=[${others.map(describePlayer).join(', ') || 'none online'}]`
 
-  // Context "see=" comes purely from the find+LOS survey (the new view) — no ray vision.
-  const visionInfo = formatVision(null, { survey: getLastSurvey() })
-
   let biomeStr = ''
   try {
     const footBlock = bot.blockAt(bot.entity.position.offset(0, -1, 0))
@@ -231,15 +227,15 @@ function getBotContext() {
     }
   } catch(e) { console.warn('  [CTX] biome detection err:', e.message) }
 
-  // One all-round ray view feeds both the place guesses and the material layers
-  // (BIOMES / TERRAIN / RESOURCES / UNEXPLAINED), so they always agree on what is seen.
+  // One all-round ray view feeds both the structure guesses and the material layers
+  // (BIOMES / TERRAIN / DECOR / RESOURCES / UNNATURAL), so they always agree on what is seen.
   let placesInfo = '', sightInfo = ''
   try {
     const t0 = Date.now()
     const view = lookAround(bot, ranges.sight.viewBlocks)
     const r = recognizeView(view, { maxDistance: ranges.sight.placesBlocks })
-    placesInfo = formatPlacesContext(r)
-    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, places: r?.places || [] })
+    placesInfo = formatStructures(r)
+    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks })
     sightInfo = ' ' + formatSight(summary, view.dark).split('\n').join(' ')
     const ms = Date.now() - t0
     if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
@@ -277,7 +273,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20${require('./survivalFields').regenLine(bot)}${require('../perception/effects').contextLine()} held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${require('./survivalFields').timeLine(bot)}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/floatMode').contextLine()}${require('../engine/leadMode').contextLine()}${require('../navigation/terraformGate').contextLine()}${require('../engine/holdMode').contextLine()}${require('../world/strongholdFinder').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20${require('./survivalFields').regenLine(bot)}${require('../perception/effects').contextLine()} held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${require('./survivalFields').timeLine(bot)}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/floatMode').contextLine()}${require('../engine/leadMode').contextLine()}${require('../navigation/terraformGate').contextLine()}${require('../engine/holdMode').contextLine()}${require('../world/strongholdFinder').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }
