@@ -41,7 +41,6 @@ BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone/deepslat
 - If no pickaxe but have materials (cobblestone+sticks, planks+sticks): CRAFT the pickaxe FIRST, then dig.
 - When a dig REFUSES (RECENT_FAILS: "needs a stone_pickaxe…"), you have two moves: (1) craft/equip that tool and re-issue the SAME action, or (2) append `:skiptool` to hand-mine through it anyway — this breaks the block for NO drop, so use it only when you can't get the tool and just need the path cleared. Chainable on any digging action: [ACTION:staircase:west:y30:skiptool], [ACTION:tunnel:north:wall:skiptool], [ACTION:goto:X,Y,Z:skiptool], [ACTION:mine:stone:skiptool]. (`:skiptool` on a non-digging action is an error.)
 - For staircase UP: you need placeable blocks in inv (cobblestone, dirt, planks). Check first.
-- RECENT_FAILS from goto shows what materials you have — use this to decide whether to craft tools.
 STRATEGY EXAMPLES:
 - Heading to a cave or mining horizontally underground → goto:X,Y,Z:tunnel
 - Need diamonds at Y=-59, currently at Y=64 → goto:X,Y,Z:staircase (craft pickaxe first!)
