@@ -27,6 +27,12 @@ function itemLabel(item, withCount = false) {
   return withCount ? `${item.name}x${item.count}` : item.name
 }
 
+// Raw meat: an item with a cooked_ form (beef → cooked_beef). It shows in inv= with a
+// hint, so the bot thinks of the furnace or campfire before eating it raw.
+function rawMeatHint(name) {
+  return require('minecraft-data')(state.bot.version).itemsByName[`cooked_${name}`] ? '(hint: can I cook it?)' : ''
+}
+
 // --- Main context builder ---
 function getBotContext() {
   const bot = state.bot
@@ -35,7 +41,7 @@ function getBotContext() {
   // every swing doesn't read as a held/armor change.
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
   const offhand = bot.inventory.slots[45]?.name || 'nothing'
-  const inv = bot.inventory.items().map(i => itemLabel(i, true)).join(', ') || 'empty'
+  const inv = bot.inventory.items().map(i => itemLabel(i, true) + rawMeatHint(i.name)).join(', ') || 'empty'
   const armorItems = [
     bot.inventory.slots[5], bot.inventory.slots[6],
     bot.inventory.slots[7], bot.inventory.slots[8]
