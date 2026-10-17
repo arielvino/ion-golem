@@ -54,6 +54,17 @@ test('layers: terrain, decoration, ores and unnatural blocks are kept apart', ()
   ]
   assert.strictEqual(layer(view, 'TERRAIN'), 'TERRAIN=[desert: sand 100% (20)]')
   assert.strictEqual(layer(view, 'DECOR'), 'DECOR=[sugar_cane×3 nearest 21m E@20,64,5]')
-  assert.strictEqual(layer(view, 'RESOURCES'), 'RESOURCES=[iron×2 nearest 24m E@23,64,5]')
+  assert.strictEqual(layer(view, 'RESOURCES'), 'RESOURCES=[iron×2: 24m E@23,64,5; 25m E@24,64,5]')
   assert.strictEqual(layer(view, 'UNNATURAL'), 'UNNATURAL=[cut_sandstone×4 nearest 26m E@25,64,5 (to 28m)]')
+})
+
+// Every visible ore, not just the nearest: a vein's far blocks are where the next dig goes.
+test('RESOURCES: every spot of each ore, nearest first, kinds apart', () => {
+  const at = (name, x, y, z) => ({ id: null, name, x, y, z, biome: 'plains' })
+  const view = [
+    at('coal_ore', 0, 60, 30), at('coal_ore', 0, 60, 10), at('coal_ore', 0, 60, 20),
+    at('diamond_ore', 10, 60, 0),
+  ]
+  assert.strictEqual(layer(view, 'RESOURCES'),
+    'RESOURCES=[coal×3: 11m S@0,60,10; 21m S@0,60,20; 30m S@0,60,30 | diamond×1: 11m E@10,60,0]')
 })
