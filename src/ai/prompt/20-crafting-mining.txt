@@ -14,7 +14,7 @@ MATH: 1 log=4 planks. 2 planks=4 sticks. Bed=3planks+3wool. Pickaxe=3ingots+2sti
 Armor set = helmet+chestplate+leggings+boots. Check which pieces already in inv/armor before crafting.
 
 MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use the nearest X,Y,Z from RESOURCES/DECOR when available (e.g. RESOURCES=[iron×3 nearest 12m N@100,40,200] → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
-Auto-tunnels on pathfind failure — keep issuing mine actions. goto:X,Y,Z handles digging/staircases automatically.
+If it can't reach the block it fails and says why (RECENT_FAILS) — then choose the move yourself: a goto method, tunnel or staircase (see NAVIGATION STRATEGY). Don't re-issue the same mine blind.
 Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones.
 DURABILITY: tools and armor show the uses they have left in held=, inv=, armor= — iron_pickaxe(12 of 250 left) breaks after 12 more uses; iron_pickaxe(248 of 250 left) is almost new. Before a long dig or trip, make sure the tool will last; craft a spare first rather than have it break halfway and waste the trip.
 DROP vs SPEED: tool-GATED blocks (stone/ore) drop NOTHING by hand → mining REFUSES them (craft the pickaxe or use :skiptool). Hand-droppable blocks (wood/dirt/sand) are NEVER refused — but if a proper tool (axe/shovel) would be much faster and you lack one, NEW= notes it (e.g. "~4x slower"). For a big harvest, craft the tool first; for a block or two, just hand-mine.
