@@ -110,7 +110,7 @@ async function doMine(targetName, opts = {}) {
     const eb = bot.blockAt(explicitPos)
     if (!eb || !matchingIds.includes(eb.type) || state.skipBlocks.has(at)) {
       console.log(`  explicit coords (${at}) — block not found, wrong type or skipped`)
-      recordFailure(`mine:${targetName} - no ${rawName} at ${at} (${eb ? labelOf(eb) : 'unloaded'}). Mine by name without coords, or pick coords from VISION.`)
+      recordFailure(`mine:${targetName} - no ${rawName} at ${at} (${eb ? labelOf(eb) : 'unloaded'}). Mine by name without coords, or pick coords from RESOURCES/DECOR.`)
       break
     }
     console.log(`  using explicit coords (${at})`)
