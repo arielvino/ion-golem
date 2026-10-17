@@ -13,6 +13,18 @@
 //                reported beside this (recognize.js formatStructures), not instead of it.
 const { roleOf, RESOURCE } = require('../config/natural-blocks')
 const { NEAR } = require('./sight')
+const { stateProps } = require('../world/memory')
+
+// One thing built of two cells (a bed's head and foot, a door's or tall flower's two
+// halves, a double chest's two sides) is one thing to the eye: count only one cell of it.
+function secondCell(b) {
+  const p = b.id == null ? null : stateProps(b.id)
+  if (!p) return false
+  if (p.part === 'head') return true                                          // beds
+  if (p.half === 'upper') return true                                         // doors, tall plants
+  if (p.type === 'right' && /chest$/.test(b.name)) return true               // double chests
+  return false
+}
 
 const BIOME_MIN = 0.01    // biomes under this share of the view are left out
 const TERRAIN_MIN = 0.005 // terrain materials under this share of their biome are left out
@@ -39,6 +51,7 @@ function summarizeSight({ eye, dimension, blocks }) {
     else { e.n++; e.spots.push({ b, d2 }); if (d2 < e.d2) { e.d2 = d2; e.at = b } if (d2 > e.far2) e.far2 = d2 }
   }
   for (const b of blocks) {
+    if (secondCell(b)) continue
     let bm = biomes.get(b.biome)
     if (!bm) biomes.set(b.biome, bm = { n: 0, terrain: new Map() })
     bm.n++
