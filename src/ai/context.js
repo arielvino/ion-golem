@@ -17,6 +17,7 @@ const { providerNames, renderPending, around } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
 const { renderNearby, equipOf } = require('./nearby')
 const { blockLabel } = require('../world/blockLabel')
+const { isCookable } = require('../actions/smelting')
 
 // Item name with remaining durability for damageable items: iron_pickaxe(212 of 250 left).
 // Spelled out: a bare 130/131 was read as used/max ("one swing from retirement").
@@ -27,6 +28,12 @@ function itemLabel(item, withCount = false) {
   return withCount ? `${item.name}x${item.count}` : item.name
 }
 
+// Raw food (beef, potato, …): it shows in inv= with a hint, so the bot thinks of the
+// furnace or campfire before eating it raw.
+function rawFoodHint(name) {
+  return isCookable(name) ? '(hint: can I cook it?)' : ''
+}
+
 // --- Main context builder ---
 function getBotContext() {
   const bot = state.bot
@@ -35,7 +42,7 @@ function getBotContext() {
   // every swing doesn't read as a held/armor change.
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
   const offhand = bot.inventory.slots[45]?.name || 'nothing'
-  const inv = bot.inventory.items().map(i => itemLabel(i, true)).join(', ') || 'empty'
+  const inv = bot.inventory.items().map(i => itemLabel(i, true) + rawFoodHint(i.name)).join(', ') || 'empty'
   const armorItems = [
     bot.inventory.slots[5], bot.inventory.slots[6],
     bot.inventory.slots[7], bot.inventory.slots[8]
