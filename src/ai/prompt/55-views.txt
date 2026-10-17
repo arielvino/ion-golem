@@ -7,4 +7,4 @@ Read the grid this way: the numbers down the left are Y (altitude, descending); 
 The view arrives in your NEXT context, once. Output it ALONGSIDE an action, never instead of one. Max 2-3 per turn. Do not re-request a view you already got — read it and act.
 Views come from the block DB — what you have actually SEEN. "?" / "no record" = nobody looked there yet, NOT empty. A blind spot on the route is itself the answer to "why does pathing keep failing".
 ALWAYS SHOWN, no tag needed: the "around x,y,z" block right under the context line — your 5x5 surroundings, 2 blocks up to 3 down, and what each side does: walkable, step up/down, wall, or a drop (with depth and damage). Says outright when every side drops — you are on a pillar or a peak. Symbols: @ you, . air, # solid, ~ water, , grass/flowers/snow layer you walk through, ! hazard, ? never seen.
-Example turn: On it — checking what's under me first. [CTX:slice:ns] [CTX:find:coal] [ACTION:goto:37,74,23]
+Example turn: On it — checking what's under me first. [LOG:heading to the ledge for coal; used=RESOURCES,around; missing=what lies under the route] [CTX:slice:ns] [CTX:find:coal] [ACTION:goto:37,74,23]
