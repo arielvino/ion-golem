@@ -52,11 +52,11 @@ cd server && java -Xms1G -Xmx2G -jar server.jar nogui   # leave running in anoth
 cd ..
 
 # Run the bot:
-node bot.js --debug             # joins localhost:25565 as "BroDev", verbose logging
+node bot.js --debug             # joins localhost:25565 as "Bro", verbose logging
 ```
 
 Talk to the bot in-game chat and it will respond and act. `--debug` just turns on verbose
-logging and a dev-friendly default name; connection details come from `.env` either way.
+logging; connection details come from `.env` either way.
 
 ## Configuration
 
@@ -70,7 +70,7 @@ offline server with the CLI AI backend, so a fresh clone runs with zero edits.
 | `MC_HOST`     | `localhost`         | Server host to join.                                          |
 | `MC_PORT`     | `25565`             | Server port.                                                  |
 | `MC_VERSION`  | `26.3`              | Protocol version.                                             |
-| `MC_USERNAME` | `Bro` / `BroDev`    | In-game username (`--debug` defaults to `BroDev`).           |
+| `MC_USERNAME` | `Bro`               | In-game username.                                             |
 | `MC_AUTH`     | *(offline)*         | `offline` for cracked/LAN servers, `microsoft` for online-mode. |
 | `IONGOLEM_DATA_DIR` | *(OS data dir)* | Base dir for per-bot state. Defaults to your OS user-data dir (see below). |
 
