@@ -8,7 +8,6 @@ const { findKnownBlocks, reachKnownBlock } = require('../perception/touch')
 const { getInvMap, countMat, generalize, getBestRecipe } = require('../world/recipes')
 const { c, color } = require('../lib/colors')
 const { sendChat, normalizeItemName, recordFailure, fuzzyMatch, clearQueuedActions } = require('../core/utils')
-const { isSmeltable } = require('./smelting')
 const { labelOf } = require('../world/blockLabel')
 
 // --- Crafting helpers ---
@@ -54,73 +53,6 @@ const COLOR_TYPES = [
   'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue',
   'brown', 'green', 'red', 'black',
 ]
-
-async function resolveDependencies(itemId, batchCount, mcData, bot, useTable, depth) {
-  if (depth > 3) return false
-
-  const idToName = {}
-  for (const [n, it] of Object.entries(mcData.itemsByName)) idToName[it.id] = n
-
-  const rawRecipes = mcData.recipes[itemId]
-  if (!rawRecipes || rawRecipes.length === 0) return false
-
-  // Pick the recipe with most materials available
-  const invMap = getInvMap()
-  const best = getBestRecipe(itemId, invMap)
-  if (!best) return false
-
-  let resolved = false
-  for (const [matName, needPerBatch] of Object.entries(best.needs)) {
-    const totalNeed = needPerBatch * batchCount
-    const have = countMat(matName, invMap)
-    if (have >= totalNeed) continue
-
-    const matItem = mcData.itemsByName[matName]
-    if (!matItem) continue
-
-    // Skip if this material requires smelting (no crafting recipe)
-    const matRecipes = mcData.recipes[matItem.id]
-    if (!matRecipes || matRecipes.length === 0) continue
-
-    // Check if this material is smeltable — if so, skip auto-crafting it
-    if (isSmeltable(matName)) continue
-
-    const deficit = totalNeed - have
-    // Figure out how many batches of this material we need
-    // Each recipe produces result.count items
-    const sampleRecipe = matRecipes[0]
-    const outputCount = sampleRecipe.result?.count || 1
-    const batches = Math.ceil(deficit / outputCount)
-
-    console.log(`  [DEP] need ${deficit}x ${matName}, auto-crafting ${batches} batch(es)...`)
-
-    // Recurse to resolve sub-dependencies first
-    await resolveDependencies(matItem.id, batches, mcData, bot, useTable, depth + 1)
-
-    // Now try to craft this intermediate
-    let recipes = bot.recipesFor(matItem.id, null, 1, null)
-    if (recipes.length === 0 && useTable) {
-      recipes = bot.recipesFor(matItem.id, null, 1, useTable)
-    }
-    if (recipes.length > 0) {
-      const matBefore = countInInventory(bot, matName)
-      try {
-        await bot.craft(recipes[0], batches, recipes.length > 0 && recipeNeedsTable(recipes[0]) ? useTable : null)
-        const gained = countInInventory(bot, matName) - matBefore
-        if (gained > 0) {
-          logGameEvent('craft', matName, gained, null, null, null, { reason: 'dependency' })
-          console.log(`  [DEP] auto-crafted ${gained}x ${matName}`)
-          resolved = true
-        } else {
-          console.log(`  [DEP] ${matName} craft resolved but inventory gained nothing (expected ~${batches * outputCount}) — not counting as resolved`)
-        }
-      } catch (e) {
-        console.log(`  [DEP] failed to auto-craft ${matName}: ${e.message}`)
-      }
-    }
-  }
-  return resolved
-}
 
 async function doCraft(targetName, count = 1) {
   const bot = state.bot
@@ -187,19 +119,6 @@ async function doCraft(targetName, count = 1) {
     }
   }
 
-  // --- Auto-resolve dependencies if no recipe found yet ---
-  if (recipes.length === 0 && rawRecipes.length > 0) {
-    console.log(`  [DEP] attempting dependency resolution for ${normalized}...`)
-    const depResolved = await resolveDependencies(item.id, count, mcData, bot, useTable, 0)
-    if (depResolved) {
-      // Re-check recipes after auto-crafting intermediates
-      recipes = bot.recipesFor(item.id, null, 1, null)
-      if (recipes.length === 0 && useTable) {
-        recipes = bot.recipesFor(item.id, null, 1, useTable)
-      }
-    }
-  }
-
   // --- Generalized variant matching (replaces planks-only hack) ---
   if (recipes.length === 0) {
     let matchedSuffix = null
@@ -223,17 +142,6 @@ async function doCraft(targetName, count = 1) {
         let variantRecipes = bot.recipesFor(variantItem.id, null, 1, null)
         if (variantRecipes.length === 0 && useTable) {
           variantRecipes = bot.recipesFor(variantItem.id, null, 1, useTable)
-        }
-        // Also try dependency resolution for the variant
-        if (variantRecipes.length === 0) {
-          const variantRaw = mcData.recipes[variantItem.id] || []
-          if (variantRaw.length > 0) {
-            await resolveDependencies(variantItem.id, count, mcData, bot, useTable, 0)
-            variantRecipes = bot.recipesFor(variantItem.id, null, 1, null)
-            if (variantRecipes.length === 0 && useTable) {
-              variantRecipes = bot.recipesFor(variantItem.id, null, 1, useTable)
-            }
-          }
         }
         if (variantRecipes.length > 0) {
           console.log(`  variant match: ${normalized} → ${variantName}`)
@@ -283,7 +191,14 @@ async function doCraft(targetName, count = 1) {
         for (const [mat, cnt] of Object.entries(best.needs)) {
           const have = countMat(mat, invMap)
           if (have < cnt) {
-            missing.push(`${generalize(mat)}(need ${cnt}, have ${have})`)
+            // Intermediates are the AI's own steps (no auto-chain): name the craft that makes
+            // this one from what is in the inventory now. Planks name the wood actually held
+            // (the recipe's own pick of wood is arbitrary).
+            const heldWood = mat.endsWith('_planks') && Object.keys(invMap).find(k => /_(log|stem)$/.test(k) && mcData.itemsByName[k.replace(/_(log|stem)$/, '_planks')])
+            const step = heldWood ? heldWood.replace(/_(log|stem)$/, '_planks') : mat
+            const stepItem = mcData.itemsByName[step]
+            const how = stepItem && bot.recipesFor(stepItem.id, null, 1, true).length > 0 ? `; craft:${step} first` : ''
+            missing.push(`${generalize(mat)}(need ${cnt}, have ${have}${how})`)
             missingMats.push(mat)
           }
         }

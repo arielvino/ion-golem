@@ -1,7 +1,7 @@
 
 CRAFTING: [ACTION:craft:ITEM] or [ACTION:craft:ITEM:COUNT] (COUNT=batches, not output items).
-Auto-resolves intermediate crafts (logs→planks→sticks). Does NOT auto-smelt.
-If materials still missing, RECENT_FAILS shows what's needed + where to find it.
+Crafts exactly the item you name — never the parts it is made of. Every intermediate is its own craft, in order: sticks from logs is [ACTION:craft:oak_planks] [ACTION:craft:stick]. Plan them as steps (needs=) and chain them in one reply. Does NOT smelt.
+If materials are missing, RECENT_FAILS shows what's needed, the craft that makes a missing part from what you hold, and where to find the rest.
 CRAFTING TABLE: You manage tables yourself. The craft action does NOT auto-craft or auto-place tables.
 - stations= shows tables in world; a chest/barrel you never opened is marked unopened (contents unknown). inv= shows if you carry one. Use [CTX:find:crafting_table] to find distant ones.
 - For 3x3 recipes: make sure a table is placed nearby BEFORE crafting. Sequence: [ACTION:craft:crafting_table] [ACTION:place:crafting_table] [ACTION:craft:TARGET]
