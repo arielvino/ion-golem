@@ -7,7 +7,7 @@
 //   terrain      what the ground of each biome is made of: every material with % and count
 //   decoration   natural, on the ground rather than of it (trees, plants, boulders,
 //                fossils): count + nearest
-//   resources    ores: count + nearest
+//   resources    ores: count + every visible one, nearest first
 //   unnatural    not natural here: a structure, a portal or a player's work. Count, nearest,
 //                and how far the farthest one is. Places recognize.js made of them are
 //                reported beside this (recognize.js formatStructures), not instead of it.
@@ -35,8 +35,8 @@ function summarizeSight({ eye, dimension, blocks }) {
   const note = (map, name, b) => {
     const dx = b.x + 0.5 - eye.x, dy = b.y + 0.5 - eye.y, dz = b.z + 0.5 - eye.z, d2 = dx * dx + dy * dy + dz * dz
     const e = map.get(name)
-    if (!e) map.set(name, { n: 1, d2, at: b, far2: d2 })
-    else { e.n++; if (d2 < e.d2) { e.d2 = d2; e.at = b } if (d2 > e.far2) e.far2 = d2 }
+    if (!e) map.set(name, { n: 1, d2, at: b, far2: d2, spots: [{ b, d2 }] })
+    else { e.n++; e.spots.push({ b, d2 }); if (d2 < e.d2) { e.d2 = d2; e.at = b } if (d2 > e.far2) e.far2 = d2 }
   }
   for (const b of blocks) {
     let bm = biomes.get(b.biome)
@@ -50,9 +50,11 @@ function summarizeSight({ eye, dimension, blocks }) {
 
   const total = blocks.length || 1
   const biomeList = [...biomes].filter(([, v]) => v.n / total >= BIOME_MIN).sort((a, b) => b[1].n - a[1].n)
-  const listOf = (map) => [...map].map(([name, e]) => ({
-    name, count: e.n, dist: Math.round(Math.sqrt(e.d2)), far: Math.round(Math.sqrt(e.far2)),
-    dir: compass(e.at.x + 0.5 - eye.x, e.at.z + 0.5 - eye.z), at: { x: e.at.x, y: e.at.y, z: e.at.z },
+  const spot = (b, d2) => ({ dist: Math.round(Math.sqrt(d2)), dir: compass(b.x + 0.5 - eye.x, b.z + 0.5 - eye.z), at: { x: b.x, y: b.y, z: b.z } })
+  // all: every block's spot, nearest first (only the resources layer lists them all).
+  const listOf = (map, all = false) => [...map].map(([name, e]) => ({
+    name, count: e.n, far: Math.round(Math.sqrt(e.far2)), ...spot(e.at, e.d2),
+    ...(all && { spots: e.spots.sort((a, b) => a.d2 - b.d2).map(s => spot(s.b, s.d2)) }),
   })).sort((a, b) => b.count - a.count || a.dist - b.dist).slice(0, LIST_MAX)
   return {
     seen: blocks.length,
@@ -63,7 +65,7 @@ function summarizeSight({ eye, dimension, blocks }) {
         .filter(([, c]) => c / n >= TERRAIN_MIN).map(([m, c]) => ({ name: m, count: c, share: c / n })) }
     }).filter(t => t.top.length),
     decoration: listOf(found.decoration),
-    resources: listOf(found.resource),
+    resources: listOf(found.resource, true),
     unnatural: listOf(found.unnatural),
   }
 }
@@ -72,7 +74,8 @@ const pct = (x) => `${Math.round(100 * x)}%`
 
 // The context lines — data only; how to read them belongs in the system prompt. An empty
 // layer is left out. Entries: NAME×COUNT nearest DIST DIR@X,Y,Z, and for unnatural blocks
-// "(to FARm)" when there are several.
+// "(to FARm)" when there are several. Resources list every spot instead of the nearest:
+// NAME×COUNT: DIST DIR@X,Y,Z; DIST DIR@X,Y,Z… with " | " between kinds (coords hold commas).
 // dark: lookAround's dark (castRays' near, or null): DARK= is left out when almost nothing near is dark.
 function formatSight(s, dark = null) {
   const item = (e) => `${e.name}×${e.count} nearest ${e.dist}m ${e.dir}@${e.at.x},${e.at.y},${e.at.z}`
@@ -81,7 +84,8 @@ function formatSight(s, dark = null) {
   if (s.biomes.length) lines.push(`BIOMES=[${s.biomes.map(b => `${b.name} ${pct(b.share)}`).join(', ')}]`)
   if (s.terrain.length) lines.push(`TERRAIN=[${s.terrain.map(t => `${t.biome}: ${t.top.map(m => `${m.name} ${pct(m.share)} (${m.count})`).join(', ')}`).join(' | ')}]`)
   if (s.decoration.length) lines.push(`DECOR=[${s.decoration.map(item).join(', ')}]`)
-  if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(item).join(', ')}]`)
+  const spots = (e) => `${e.name}×${e.count}: ${e.spots.map(p => `${p.dist}m ${p.dir}@${p.at.x},${p.at.y},${p.at.z}`).join('; ')}`
+  if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(spots).join(' | ')}]`)
   if (s.unnatural.length) lines.push(`UNNATURAL=[${s.unnatural.map(spread).join(', ')}]`)
   if (dark && dark.share >= DARK_MIN) {
     const where = (lo, hi) => dark.dirs.filter(([, f]) => f >= lo && f < hi).map(([d]) => DIR_WORDS[d]).join(', ')

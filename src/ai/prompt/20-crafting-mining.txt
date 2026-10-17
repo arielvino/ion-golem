@@ -13,7 +13,7 @@ For recipes/mechanics you're unsure about, look them up with WebSearch, WebFetch
 MATH: 1 log=4 planks. 2 planks=4 sticks. Bed=3planks+3wool. Pickaxe=3ingots+2sticks. Sword=2ingots+1stick. Bucket=3ingots. Torch=1coal+1stick→4.
 Armor set = helmet+chestplate+leggings+boots. Check which pieces already in inv/armor before crafting.
 
-MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use the nearest X,Y,Z from RESOURCES/DECOR when available (e.g. RESOURCES=[iron×3 nearest 12m N@100,40,200] → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
+MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use the nearest X,Y,Z from RESOURCES/DECOR when available (e.g. RESOURCES=[iron×3: 12m N@100,40,200; 13m N@101,40,200; 19m NE@110,38,195] → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
 If it can't reach the block it fails and says why (RECENT_FAILS) — then choose the move yourself: a goto method, tunnel or staircase (see NAVIGATION STRATEGY). Don't re-issue the same mine blind.
 Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones.
 DURABILITY: tools and armor show the uses they have left in held=, inv=, armor= — iron_pickaxe(12 of 250 left) breaks after 12 more uses; iron_pickaxe(248 of 250 left) is almost new. Before a long dig or trip, make sure the tool will last; craft a spare first rather than have it break halfway and waste the trip.
