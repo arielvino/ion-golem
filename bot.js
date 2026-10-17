@@ -438,7 +438,8 @@ function createBot() {
     // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.
     if (state.debugMode && message.startsWith('!ai ')) { state.aiPaused = message.slice(4).trim() === 'off'; console.log(`  [DEBUG] aiPaused=${state.aiPaused}`); return }
     if (state.debugMode && message.startsWith('!act ')) {
-      state.actionQueue.push({ actionStr: message.slice(5).trim(), username })
+      const entry = { actionStr: message.slice(5).trim(), username }
+      if (!require('./src/engine/interjection').queueInterjection(entry, true)) state.actionQueue.push(entry)
       require('./src/engine/engine').processActionQueue()
       return
     }
