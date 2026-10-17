@@ -1,7 +1,7 @@
 // Bot context builder — assembles real-time state snapshot for AI prompts
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
-const { getLastVisionResult, hasLineOfSight } = require('../perception/vision')
+const { hasLineOfSight } = require('../perception/vision')
 const { recognizeView, formatStructures } = require('../perception/recognize')
 const { lookAround } = require('../perception/sight')
 const { summarizeSight, formatSight } = require('../perception/sightSummary')
@@ -61,22 +61,6 @@ function getBotContext() {
   const hours = Math.floor(((t + 6000) % 24000) / 1000)
   const time = `${hours}:00(${t}t)`
   const onlineStr = state.joinedAt ? ` online=${ago(Date.now() - state.joinedAt)}` : ''
-  // Sky exposure: skyLight=0 means enclosed/underground. Mob spawning at night or underground.
-  let lightStr = ''
-  try {
-    const footBlock = bot.blockAt(pos)
-    if (footBlock) {
-      const sl = footBlock.skyLight
-      const nightTime = t >= 13000 && t < 23000
-      // skyLight=0 means enclosed from above. But under trees skyLight=0 too.
-      // Cross-check with vision skyVisible — if vision sees sky, we're not underground.
-      const visionResult = getLastVisionResult()
-      const underground = sl === 0 && (!visionResult || !visionResult.skyVisible)
-      lightStr = underground ? ' underground' : ''
-      // Nothing hostile spawns on peaceful, so the warning would only be noise there.
-      if ((underground || nightTime) && bot.game.difficulty !== 'peaceful') lightStr += '(mobs_spawn!)'
-    }
-  } catch(e) { console.warn('  [CTX] light detection err:', e.message) }
   const bgInfo = getBackgroundSummary()
   const task = bgInfo ? `bg:${bgInfo}` : (state.currentTask || 'idle')
   let navInfo = state.navigationStatus ? ` nav=${state.navigationStatus}` : ''
@@ -273,7 +257,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20${require('./survivalFields').regenLine(bot)}${require('../perception/effects').contextLine()} held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${require('./survivalFields').timeLine(bot)}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/floatMode').contextLine()}${require('../engine/leadMode').contextLine()}${require('../navigation/terraformGate').contextLine()}${require('../engine/holdMode').contextLine()}${require('../world/strongholdFinder').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20${require('./survivalFields').regenLine(bot)}${require('../perception/effects').contextLine()} held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${require('./survivalFields').timeLine(bot)}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/floatMode').contextLine()}${require('../engine/leadMode').contextLine()}${require('../navigation/terraformGate').contextLine()}${require('../engine/holdMode').contextLine()}${require('../world/strongholdFinder').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }
