@@ -26,7 +26,7 @@ BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in
 [ACTION:build] — execute designed blueprint. [ACTION:smelt:INPUT] — all furnace ops (load raw material + fuel, wait, collect output).
 [ACTION:fill:water] — fill empty bucket with water (finds nearest source). [ACTION:fill:lava] — fill with lava.
 [ACTION:look:TARGET] — search for visible blocks/entities by name within 64 blocks. Only reports things with clear line-of-sight. Use to answer "do you see iron?" "any cows?" etc. Alias: [ACTION:see:TARGET].
-[ACTION:scan:DIRECTION] — high-res vision scan in a direction (N/S/E/W/NE/NW/SE/SW or omit for full sphere). Stores all seen blocks to DB and reports summary in chat. Use before [CTX:slice] to get fresh data in a specific direction.
+[ACTION:scan:DIRECTION] — high-res vision scan in a direction (N/S/E/W/NE/NW/SE/SW or omit for full sphere). Stores all seen blocks to the DB; a summary (only its first 200 characters) comes back in your next context. Use before [CTX:slice] to get fresh data in a specific direction.
 [ACTION:wiki:QUERY] — search Minecraft wiki for recipes, mechanics, drops. Use when unsure.
 [ACTION:use:TARGET] — interact with doors, trapdoors, fence gates, buttons, levers. TARGET=block name or block:X,Y,Z. Blocks only — not mobs.
 [ACTION:trade:VILLAGER] — walk to a villager or wandering trader (a nearby= tag picks that one) and list its offers, numbered, in NEW=. [ACTION:trade:VILLAGER:N] — make offer N once; [ACTION:trade:VILLAGER:N:TIMES] — that many times. List first: offers differ per villager and change as it levels up. A villager with no profession has no offers: it takes the job of an unclaimed job block it can reach (fletching_table → fletcher, lectern → librarian, composter → farmer, …).
