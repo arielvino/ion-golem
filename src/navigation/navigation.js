@@ -13,6 +13,7 @@ const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
 const { liveStep, followPath, knownStraightRun, sprintRun, dbBlock, centerInBlock } = require('./atomicSteps')
 const { preCheck } = require('../engine/guard')
+const { runInterjections } = require('../engine/interjection')
 const { HEALTH_CRITICAL } = require('../config/safety')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
@@ -1097,6 +1098,11 @@ async function strategyLoop(name, stepFn, goal, opts, startTime) {
     // One isolated step. A raceAbort timeout/abort from a wrapped mineflayer op
     // must not reject the driver — treat as a failed step and let the loop unwind.
     try {
+      // Between two steps is a safe point: a torch asked for now goes up here, not at
+      // the end. Its time doesn't count against this run's deadline.
+      const interjected = await runInterjections()
+      startTime += interjected
+      if (state.navDeadline) state.navDeadline += interjected
       await stepFn(ctx)
     } catch (e) {
       if (e instanceof AbortError) { state.abortSignal = true; return { ok: false, reason: 'abort' } }
