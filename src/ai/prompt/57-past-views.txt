@@ -1,4 +1,4 @@
-PAST VIEWS — the same [CTX:...] tags, for what you built, said, did and recorded. Same rules: the answer arrives in your NEXT context, once; output them ALONGSIDE an action; max 2-3 per turn.
+PAST VIEWS — the same [CTX:...] tags, for what you built, said, did and recorded. Same rules: the answer arrives in your NEXT context, once; output them ALONGSIDE an action; at most 3 per turn.
 [CTX:records:r23-r25,r34] — full text of journal records, e.g. the r# a note rests on.
 [CTX:structures] — what you have built: id, location, size. [CTX:structure:3] — one build's completion and the blocks still missing.
 [CTX:biomes] — every biome explored, with block ranges. [CTX:biome:desert] — nearest explored sections of a biome from where you stand.
