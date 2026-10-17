@@ -44,7 +44,7 @@ BEFORE choosing tunnel/staircase: CHECK inv= for pickaxes! Mining stone/deepslat
 STRATEGY EXAMPLES:
 - Heading to a cave or mining horizontally underground → goto:X,Y,Z:tunnel
 - Need diamonds at Y=-59, currently at Y=64 → goto:X,Y,Z:staircase (craft pickaxe first!)
-- Player is 50m away on surface → goto:X,Y,Z or goto:X,Y,Z:walk
+- A spot 50m away on the surface → goto:X,Y,Z (a player, though, is reached with come:PLAYER, never goto)
 
 ACTION QUEUE: Multiple [ACTION:...] tags chain into a queue. They run one after another — if one fails, the rest are dropped.
 - queue= shows what's waiting (e.g. queue=equip:iron_pickaxe→mine:diamond_ore). Check it before adding actions.
