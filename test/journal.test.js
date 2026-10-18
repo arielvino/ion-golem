@@ -220,3 +220,52 @@ test('a note written as its goal closes keeps pointing at it, and shows how it e
   assert.deepStrictEqual(Agenda.fromJSON(JSON.parse(JSON.stringify(state.agenda))).nodeState(g.id).status, 'done')
   Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
 })
+
+test('a tagged note is shelved: out of NOTES, counted in SHELF=, read back by tag', () => {
+  const j = new Journal()
+  j.record('placed white_bed')
+  j.note('Sargon: speak Hebrew')
+  j.note('my bed at -76,71,507 [r1]', 'g2', ['bed', 'home'])
+  j.note('stash chest at -70,70,500', null, ['home', 'stash'])
+  assert.strictEqual(j.renderNotes(20, j.notes[0].ts), 'NOTES (1):\nn1 (0s ago) Sargon: speak Hebrew')
+  assert.strictEqual(j.renderShelf(), 'SHELF=[2 notes | home:2 bed:1 stash:1]')
+  const now = j.notes[1].ts
+  assert.deepStrictEqual(j.shelved(['bed'], now), ['n2 {bed,home} @g2 (0s ago) my bed at -76,71,507 [r1]'])
+  assert.deepStrictEqual(j.shelved(['home'], now).map(l => l.split(' ')[0]), ['n2', 'n3'])
+  assert.deepStrictEqual(j.shelved([], now).length, 2)
+  assert.deepStrictEqual(j.shelved(['nether'], now), [])
+})
+
+test('compacting shelved notes keeps their tags unless new ones are given; {} unshelves', () => {
+  const j = new Journal()
+  j.note('bed at 1,2,3', null, ['bed'])
+  j.note('chest at 1,2,4', null, ['stash'])
+  const { note } = j.compact('n1-n2', 'base: bed 1,2,3, chest 1,2,4')
+  assert.deepStrictEqual(note.tags, ['bed', 'stash'])
+  assert.deepStrictEqual(j.compact(note.id, 'base moved', null, ['home']).note.tags, ['home'])
+  j.compact('n4', 'base matters now', null, [])
+  assert.match(j.renderNotes(), /base matters now/)
+  assert.strictEqual(j.renderShelf(), '')
+})
+
+test('splitTags reads a leading {…}, normalized; none and {} differ', () => {
+  const { splitTags } = require('../src/world/journal')
+  assert.deepStrictEqual(splitTags('{Bed, #home base,bed} my bed'), { tags: ['bed', 'home_base'], text: 'my bed' })
+  assert.deepStrictEqual(splitTags('my bed {bed}'), { tags: undefined, text: 'my bed {bed}' })
+  assert.deepStrictEqual(splitTags('{} back on view'), { tags: [], text: 'back on view' })
+})
+
+test('[NOTE:{tags} ...] shelves, before or after an @node; old notes without tags still show', () => {
+  const state = require('../src/core/state')
+  const { applyNoteTags, renderNotesBlock } = require('../src/world/journalStore')
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.WORLD_DATA_DIR }
+  state.WORLD_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jtags-'))
+  state.journal = Journal.fromJSON({ notes: [{ id: 'n1', ts: Date.now(), text: 'from before tags', cites: [], sources: [] }], nseq: 1 })
+  state.agenda = { tree: { nodes: new Map([['g1', {}]]), activePath: () => [{ id: 'g1' }] }, focus: () => ({ id: 'g1' }) }
+  assert.deepStrictEqual(applyNoteTags('[NOTE:{bed,home} my bed at 1,2,3] [NOTE:@g1 {portal} portal at 9,9,9] [NOTE:replace:n2:my bed at 4,5,6]'),
+    ['n2 {bed,home}', 'n3 {portal}', 'n4 {bed,home} ← n2'])
+  const [, portal] = state.journal.notes.slice(1)
+  assert.deepStrictEqual([portal.node, portal.text], ['g1', 'portal at 9,9,9'])
+  assert.strictEqual(renderNotesBlock().replace(/\(\d+s ago\)/, '(…)'), 'NOTES (1):\nn1 (…) from before tags\nSHELF=[2 notes | bed:1 home:1 portal:1]')
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
+})
