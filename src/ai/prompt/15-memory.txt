@@ -13,7 +13,8 @@ A NOTE IS FOR WHAT FUTURE TURNS WILL NEED AND THE CONTEXT WON'T SHOW THEM. Every
 - instructions still in force and promises made ("Sargon: speak only Hebrew in chat [r12]"; "told Sargon the pickaxe needs copper I haven't found yet [r97]") — written ONCE, never repeated
 - the plan you are in the middle of, when it isn't obvious from the AGENDA ("digging down the pillar at 108,84,80; once on the cavern floor, head east to the stone at 134,55,95 [r91]")
 - attempts and their outcome, per strategy ("s6 staircase west from -47,52,49: flooded at y50 twice — abandoned [r41,r43]") — answers "have I tried this already?"
-- places explored and what they held, where useful things are ("searched the nether east of x=200 to z=-300: no fortress [r50,r61]"; "crafting table at -40,67,41 [r88]")
+- places explored and what they held ("searched the nether east of x=200 to z=-300: no fortress [r50,r61]")
+- what you placed or set up that the context won't list once it is out of sight — a bed, a farm, a stash chest, a portal — write it the turn you make it ("my bed at -76,71,507 [r88]")
 - lessons and hazards ("lava falls along the ravine at 30,40,-12 — died there [r77]")
 - hunches worth testing, and assumptions you act on ("guessing the drop is ~17 blocks — unverified")
 NOT a note: status — your position, HP, food, inventory, the current task, the AGENDA, "continuing", "trying again", "now heading to…". The context shows all of it live, every turn. Most turns need NO note at all.
