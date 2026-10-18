@@ -35,6 +35,7 @@ module.exports = {
   journal: null,      // episodic memory: records + model notes (world/journal.js)
   journalShownUpTo: 0,
   noteErrors: [],     // [NOTE:...] failures, shown to the model next turn
+  talk: null,         // the recent conversation with players, shown as TALK= (ai/talk.js)
   lastFailures: [],
   pickupPausedUntil: 0,  // auto-pickup holds off until then (after a give)
   joinedAt: 0,           // when this session spawned in the world, for online=

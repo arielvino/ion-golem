@@ -13,6 +13,7 @@ const { logChatDB } = require('../world/memory')
 const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
 const { isProvider, providerNames } = require('./ctxProviders')
 const { queueInterjection } = require('../engine/interjection')
+const { Talk } = require('./talk')
 
 // --- Chat logging ---
 const CHAT_LOG_DIR = () => path.join(state.BOT_DATA_DIR, 'chat-logs')
@@ -131,12 +132,16 @@ async function handleMessages(batch) {
   // stale), the turn's actions wait for the end of the reply, and goal work runs
   // only if the gap is closed by then. A player's turn is theirs to direct.
   const gapAtStart = player ? null : unplannedFocus()
+  // TALK= shows the conversation from before this turn; this turn's lines are its `just said`.
+  if (!state.talk) state.talk = new Talk()
+  const turnStart = Date.now()
   // A player's message becomes its record BEFORE the context is built, so it sits
   // in this turn's NEW= with its own r# and the line below points at it. Recorded
   // after, it showed up unnumbered now and again as a record next turn — and a
   // repeated "come here" read as the old one echoed back.
   const lines = batch.map(m => {
     const said = isPlayer(m.username) ? state.journal?.record(`${m.username}: "${m.message}"`) : null
+    if (isPlayer(m.username)) state.talk.heard(m.username, m.message)
     return `${said ? `${m.username} just said (${said.id})` : m.username}: ${m.message}`
   })
   // Tips are advice, not state, so they join the input here rather than inside getBotContext.
@@ -146,9 +151,10 @@ async function handleMessages(batch) {
   const trigger = turnTrigger(batch, isPlayer)
   const turnLine = `TURN=${turn}${state.prevTurn ? ` PREV=[${state.prevTurn}]` : ''}`
   state.prevTurn = formatPrevTurn({ turn, trigger, outcome: 'no reply (cut off)' })
-  const input = `${context}\n${turnLine}\n${lines.join('\n')}`
+  const input = [context, state.talk.render(Date.now(), turnStart), turnLine, ...lines].filter(Boolean).join('\n')
   for (const m of batch) logChat({ type: 'user', username: m.username, message: m.message, context })
 
+  let turnNotes = []
   function processTags(rawReply) {
     // [PLAN:op:...] — agenda and goal-tree edits (engine/planOps.js). Ownership
     // follows the speaker: a player's turn acts as that player, anything else as 'self'.
@@ -158,6 +164,7 @@ async function handleMessages(batch) {
 
     // [NOTE:...] — the model's running story (world/journal.js).
     const notesApplied = applyNoteTags(rawReply, nodeBefore)
+    turnNotes = notesApplied
     if (notesApplied.length) console.log(color(c.magenta, `  [NOTE] ${notesApplied.join('; ')}`))
     markShown()
 
@@ -396,6 +403,10 @@ async function handleMessages(batch) {
       actions: pendingActions,
       views: [...fullText.matchAll(/\[CTX:([^\]]+)\]/g)].map(m => m[1].trim()),
       why: logWhy(fullText),
+    })
+    state.talk.answered({
+      said: chatText && !/^[.\s…]+$/.test(chatText) ? chatText : '',
+      actions: [...pendingActions], plan: planApplied, notes: turnNotes,
     })
   }
 
