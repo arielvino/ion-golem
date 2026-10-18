@@ -76,3 +76,17 @@ test('RESOURCES: a spot under water says so', () => {
   assert.strictEqual(layer(view, 'RESOURCES'),
     'RESOURCES=[iron×2: 11m S@0,60,10 underwater; 21m S@0,60,20]')
 })
+
+// A bed is two blocks (head and foot); seen whole it is one bed, not white_bed×2. Same for
+// a door's two halves.
+test('two-cell things count once: one bed, one door', () => {
+  const at = (name, props, x) => ({ id: stateId(name, props), name, x, y: 64, z: 5, biome: 'plains' })
+  const view = [
+    at('white_bed', { part: 'foot', facing: 'north', occupied: false }, 10),
+    at('white_bed', { part: 'head', facing: 'north', occupied: false }, 11),
+    at('oak_door', { half: 'lower', facing: 'north', hinge: 'left', open: false, powered: false }, 13),
+    at('oak_door', { half: 'upper', facing: 'north', hinge: 'left', open: false, powered: false }, 14),
+  ]
+  assert.match(layer(view, 'UNNATURAL'), /white_bed×1 /)
+  assert.match(layer(view, 'UNNATURAL'), /oak_door×1 /)
+})
