@@ -61,3 +61,13 @@ test('bad arguments come back as CTX_ERR through the normal channel', () => {
   assert.match(out, /CTX_ERR: container failed: give coords/)
   assert.match(out, /structures \(newest first\):\nnone built yet/)
 })
+
+test('notes: shelved notes by tag, or the whole shelf', () => {
+  state.journal = new Journal()
+  state.journal.note('my bed at -76,71,507', null, ['bed', 'home'])
+  state.journal.note('portal at 9,9,9', null, ['portal'])
+  state.journal.note('not shelved')
+  assert.match(view('notes', 'BED'), /^shelved notes tagged bed:\nn1 \{bed,home\} \(\d+s ago\) my bed at -76,71,507$/)
+  assert.strictEqual(view('notes').split('\n').length, 3)
+  assert.match(view('notes', 'nether'), /none — SHELF= lists/)
+})
