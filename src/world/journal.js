@@ -13,6 +13,9 @@
 //   [NOTE:replace:n5:...]) and deleted with [NOTE:drop:n3,n7]. A compacted note
 //   inherits every citation of the notes it replaces, so the story can shrink
 //   without losing its grounding. An uncited note is visibly an inference.
+//   A note with tags ("{bed,home} my bed at …") is SHELVED: not shown every turn,
+//   only its tags in the SHELF= index, and read back on demand by tag — so the
+//   bot can remember a lot without paying for all of it on every turn.
 //
 // Records nobody cites fall out of the context after one showing but stay here
 // (up to MAX_RECORDS) and in the event DB — suppressed, not discarded. Cited
@@ -24,6 +27,7 @@ const MAX_RECORDS = 500
 const NEW_SHOWN = 25   // most recent new records shown per turn; older ones summarized
 const MAX_LOOKUP = 50
 const BASIS_SHOWN = 6    // basis items shown per note; the rest are summarized
+const SHELF_TAGS_SHOWN = 40   // tags listed in SHELF=; the rest are summarized
 
 // A duration as a person would say it: 40s, 7m, 2h05m, 3d4h.
 function ago(ms) {
@@ -41,7 +45,7 @@ class JournalError extends Error {}
 class Journal {
   constructor() {
     this.records = []   // { id, ts, text }
-    this.notes = []     // { id, ts, text, cites: [r#], sources: [other basis], node }
+    this.notes = []     // { id, ts, text, cites: [r#], sources: [other basis], node, tags: [] }
     this.rseq = 0
     this.nseq = 0
     this.cursor = 0     // records with number <= cursor have been shown
@@ -65,10 +69,11 @@ class Journal {
 
   // ---- notes (model) ----
 
-  note(text, node) {
+  // tags: the shelf tags (see splitTags); none means the note is shown every turn.
+  note(text, node, tags = []) {
     const { body, cites, sources } = this._parseCites(text)
     if (!body) throw new JournalError('empty note')
-    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites, sources: this._liveSources(sources), node: node || null }
+    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites, sources: this._liveSources(sources), node: node || null, tags }
     this.notes.push(n)
     return n
   }
@@ -76,8 +81,9 @@ class Journal {
   // Replace notes (by id: "n5", a range "n3-n9", or a list "n3,n7,n10-n12") with
   // a single note, placed where the first of them stood. Citations of the
   // replaced notes carry over automatically. One id is a plain update: the old
-  // version goes, the new one takes its place under a new id.
-  compact(spec, text, node) {
+  // version goes, the new one takes its place under a new id. With tags undefined
+  // the new note keeps every tag of the notes it replaces; [] takes it off the shelf.
+  compact(spec, text, node, tags) {
     const ids = parseIds(spec)
     const i = this.notes.findIndex(n => ids.has(num(n.id)))
     const run = this.notes.filter(n => ids.has(num(n.id)))
@@ -89,7 +95,8 @@ class Journal {
     const allSources = [...new Set([...run.flatMap(n => n.sources || []), ...sources])]
     this.notes = this.notes.filter(x => !run.includes(x))
     // A merged note absorbs the notes it replaces, so references to them go too.
-    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, sources: this._liveSources(allSources), node: node || null }
+    const allTags = tags ?? [...new Set(run.flatMap(n => n.tags || []))]
+    const n = { id: `n${++this.nseq}`, ts: Date.now(), text: body, cites: all, sources: this._liveSources(allSources), node: node || null, tags: allTags }
     this.notes.splice(i, 0, n)
     return { note: n, replaced: run.map(x => x.id) }
   }
@@ -141,19 +148,43 @@ class Journal {
 
   // Multi-line NOTES block, or '' with no notes.
   // nodeLabel turns a note's node id into its shown form (e.g. 'g2(done 1m ago)').
+  // Shelved notes are left out; renderShelf lists their tags instead.
   renderNotes(compactHint = 20, now = Date.now(), nodeLabel = id => id) {
-    if (this.notes.length === 0) return ''
-    const lines = [`NOTES (${this.notes.length})${this.notes.length >= compactHint ? ' ← long: drop or merge what future turns no longer need' : ''}:`]
-    for (const n of this.notes) {
-      const at = n.node ? ` @${nodeLabel(n.node)}` : ''
-      // The full basis stays stored (cited records stay protected); the view
-      // shows the first few so one long-compacted note can't flood every turn.
-      const basis = [...n.cites, ...(n.sources || [])]
-      const shown = basis.length > BASIS_SHOWN ? `${basis.slice(0, BASIS_SHOWN).join(',')} +${basis.length - BASIS_SHOWN} more` : basis.join(',')
-      const cite = basis.length ? ` [${shown}]` : ''
-      lines.push(`${n.id}${at} (${ago(now - n.ts)} ago) ${n.text}${cite}`)
-    }
+    const live = this.notes.filter(n => !n.tags?.length)
+    if (live.length === 0) return ''
+    const lines = [`NOTES (${live.length})${live.length >= compactHint ? ' ← long: drop or merge what future turns no longer need' : ''}:`]
+    for (const n of live) lines.push(this._noteLine(n, now, nodeLabel))
     return lines.join('\n')
+  }
+
+  // One-line SHELF= index of the shelved notes' tags, most used first, or ''.
+  renderShelf() {
+    const count = new Map()
+    for (const n of this.notes) for (const t of n.tags || []) count.set(t, (count.get(t) || 0) + 1)
+    if (count.size === 0) return ''
+    const tags = [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    const shown = tags.slice(0, SHELF_TAGS_SHOWN).map(([t, k]) => `${t}:${k}`).join(' ')
+    const more = tags.length > SHELF_TAGS_SHOWN ? ` +${tags.length - SHELF_TAGS_SHOWN} more tags` : ''
+    return `SHELF=[${this.notes.filter(n => n.tags?.length).length} notes | ${shown}${more}]`
+  }
+
+  // Shelved notes carrying any of `tags` (all shelved notes when empty), as lines.
+  shelved(tags = [], now = Date.now(), nodeLabel = id => id) {
+    const want = new Set(tags)
+    return this.notes
+      .filter(n => n.tags?.length && (want.size === 0 || n.tags.some(t => want.has(t))))
+      .map(n => this._noteLine(n, now, nodeLabel))
+  }
+
+  _noteLine(n, now, nodeLabel) {
+    const tags = n.tags?.length ? ` {${n.tags.join(',')}}` : ''
+    const at = n.node ? ` @${nodeLabel(n.node)}` : ''
+    // The full basis stays stored (cited records stay protected); the view
+    // shows the first few so one long-compacted note can't flood every turn.
+    const basis = [...n.cites, ...(n.sources || [])]
+    const shown = basis.length > BASIS_SHOWN ? `${basis.slice(0, BASIS_SHOWN).join(',')} +${basis.length - BASIS_SHOWN} more` : basis.join(',')
+    const cite = basis.length ? ` [${shown}]` : ''
+    return `${n.id}${tags}${at} (${ago(now - n.ts)} ago) ${n.text}${cite}`
   }
 
   // ---- persistence ----
@@ -230,6 +261,17 @@ class Journal {
 
 function num(id) { return Number(String(id).slice(1)) }
 
+// A leading "{bed,home base}" → { tags: ['bed', 'home_base'], text: rest }.
+// tags is undefined when the text has no braces, and [] for an empty "{}".
+function splitTags(text) {
+  const m = /^\s*\{([^{}]*)\}\s*/.exec(String(text || ''))
+  if (!m) return { tags: undefined, text: String(text || '') }
+  const tags = [...new Set(m[1].split(',')
+    .map(t => t.trim().toLowerCase().replace(/^#/, '').replace(/[\s:]+/g, '_'))
+    .filter(Boolean))]
+  return { tags, text: String(text).slice(m[0].length) }
+}
+
 // "n5", "n3-n9", "n3,n7,n10-n12" → the set of note numbers.
 function parseIds(spec) {
   const ids = new Set()
@@ -243,4 +285,4 @@ function parseIds(spec) {
   return ids
 }
 
-module.exports = { Journal, JournalError, MAX_RECORDS, ago }
+module.exports = { Journal, JournalError, MAX_RECORDS, ago, splitTags }

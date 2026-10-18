@@ -13,6 +13,7 @@ const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
 const { liveStep, followPath, knownStraightRun, sprintRun, dbBlock, centerInBlock } = require('./atomicSteps')
 const { preCheck } = require('../engine/guard')
+const { runInterjections } = require('../engine/interjection')
 const { HEALTH_CRITICAL } = require('../config/safety')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat } = require('../core/utils')
@@ -94,7 +95,7 @@ async function digBlock(pos, opts = {}) {
   }
 
   // Protect path blocks (staircases, tunnels) from being destroyed
-  if (!opts.ignorePathBlocks && isPathBlock(pos.x, pos.y, pos.z)) {
+  if (!opts.ignorePathBlocks && isPathBlock(pos.x, pos.y, pos.z, b.name)) {
     console.log(`  digBlock: path block at ${pos.x},${pos.y},${pos.z}, skipping`)
     return { ok: false, reason: 'path' }
   }
@@ -157,7 +158,10 @@ async function digBlock(pos, opts = {}) {
     const eye = bot.entity.position.offset(0, bot.entity.eyeHeight ?? 1.62, 0).floored()
     const inside = eye.x === pos.x && eye.y === pos.y && eye.z === pos.z
     try {
-      await raceAbort(bot.dig(b, true, inside ? 'auto' : 'raycast'), 30000)
+      // A running strategy's deadline caps the dig too: its timeout is only checked
+      // between steps, and one step can hold several slow digs.
+      const budget = state.navDeadline ? Math.max(1000, state.navDeadline - Date.now()) : 30000
+      await raceAbort(bot.dig(b, true, inside ? 'auto' : 'raycast'), Math.min(30000, budget))
     } catch (e) {
       // raceAbort only stops waiting: mineflayer's dig runs on and breaks the block when
       // its timer ends, after the stop. Cancel it on the server too.
@@ -1050,17 +1054,27 @@ async function cardinalWalk(tx, ty, tz, maxSteps = 15, range = 2) {
 // decides done/failed. Cross-step memory (committed direction/pattern, cached
 // path, advance counter) lives on ctx, born and discarded with this call. ctx.goal
 // is set so the step can read its committed plan. Returns { ok, reason }.
+// The deadline is published for digBlock: the loop checks it only between steps, and a
+// step that starts just before it could otherwise run several 30 s digs past it (#35).
 async function runStrategy(name, stepFn, goal, opts = {}) {
+  const startTime = Date.now()
+  state.navDeadline = startTime + (opts.timeout || 45000)
+  try {
+    return await strategyLoop(name, stepFn, goal, opts, startTime)
+  } finally {
+    state.navDeadline = null
+  }
+}
+
+async function strategyLoop(name, stepFn, goal, opts, startTime) {
   const bot = state.bot
   const timeout = opts.timeout || 45000
   const stuckLimit = opts.stuckLimit || 4
-  const startTime = Date.now()
   const ctx = { goal, advanced: 0 }   // fresh, opaque, per-run — owned by this driver
   let stuck = 0
   let best = goal.progress(ctx)
   const startedHurt = bot.health <= HEALTH_CRITICAL
   console.log(`\n  runStrategy[${name}]: ${goal.desc} (timeout=${Math.round(timeout / 1000)}s)`)
-
   while (true) {
     if (state.abortSignal) return { ok: false, reason: 'abort' }
     if (Date.now() - startTime > timeout) {
@@ -1084,6 +1098,11 @@ async function runStrategy(name, stepFn, goal, opts = {}) {
     // One isolated step. A raceAbort timeout/abort from a wrapped mineflayer op
     // must not reject the driver — treat as a failed step and let the loop unwind.
     try {
+      // Between two steps is a safe point: a torch asked for now goes up here, not at
+      // the end. Its time doesn't count against this run's deadline.
+      const interjected = await runInterjections()
+      startTime += interjected
+      if (state.navDeadline) state.navDeadline += interjected
       await stepFn(ctx)
     } catch (e) {
       if (e instanceof AbortError) { state.abortSignal = true; return { ok: false, reason: 'abort' } }

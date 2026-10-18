@@ -66,7 +66,11 @@ function launchBackground(actionStr, username, executeFn) {
         // logged `${action} failed` to the journal. Only add a note for multi-alternative
         // chains, where "every fallback failed" is information the handler can't give.
         if (task.totalAlts > 1) recordFailure(`${task.actionStr} - all ${task.totalAlts} alternatives failed`)
-        state.actionQueue = []  // drop remaining queue on failure
+        // Drop the rest of the model's chain on failure. Not when a reflex's own action
+        // (a counterattack the retreat cut short) fails: what waits in the queue is the
+        // model's, a flee for one, and doesn't hang on it (#82). An interjection
+        // doesn't hang on the task it cut into either.
+        if (task.username !== 'auto') state.actionQueue = state.actionQueue.filter(a => a.interject)
       }
     })
     .finally(() => {

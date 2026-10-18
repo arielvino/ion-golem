@@ -82,6 +82,17 @@ function records(args) {
     : `${r.id} ${new Date(r.ts).toISOString().slice(0, 16).replace('T', ' ')} ${r.text}`), '')
 }
 
+// Shelved notes ([NOTE:{tag,...} ...]) by tag; no tag lists the whole shelf.
+function notes(args) {
+  if (!state.journal) throw new Error('journal not loaded')
+  const { nodeLabel } = require('../world/journalStore')
+  const { splitTags } = require('../world/journal')
+  const tags = splitTags(`{${args.join(',')}}`).tags
+  const rows = state.journal.shelved(tags, Date.now(), nodeLabel)
+  const title = tags.length ? `shelved notes tagged ${tags.join(' or ')}:` : 'shelved notes:'
+  return block(title, rows.slice(-MAX_ROWS), tags.length ? `none — SHELF= lists the tags in use` : 'none')
+}
+
 // ── builds ───────────────────────────────────────────────────────────────
 function structures() {
   const rows = stmt(`SELECT s.id, s.name, s.blueprint IS NOT NULL AS bp, s.origin_x, s.origin_y, s.origin_z,
@@ -232,6 +243,7 @@ function tasks(args) {
 
 const PAST_PROVIDERS = {
   records:     { usage: 'records:<ids>             full text of journal records, e.g. records:r23-r25,r34', render: records },
+  notes:       { usage: 'notes[:<tag>,<tag>]       shelved notes with any of these tags (SHELF= lists them)', render: notes },
   structures:  { usage: 'structures                what you have built: id, location, size', render: structures },
   structure:   { usage: 'structure:<id>            one build: completion % and the blocks still missing', render: structure },
   biomes:      { usage: 'biomes                    every biome explored, with its block ranges', render: biomes },

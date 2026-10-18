@@ -21,7 +21,7 @@ const SAMPLE = parseInt(process.argv[2] || '4000', 10)
 const HOST = process.env.MC_HOST || 'localhost'
 const PORT = parseInt(process.env.MC_PORT || '25565', 10)
 const VERSION = process.env.MC_VERSION || '26.1'
-const BOT = process.env.AUDIT_BOT || 'BroDev'
+const BOT = process.env.AUDIT_BOT || 'Bro'
 
 const Database = require('better-sqlite3')
 const { resolveDataBase, worldKey, worldDirOf } = require('../src/core/dataDir')

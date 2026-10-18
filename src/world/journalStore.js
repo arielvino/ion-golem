@@ -7,7 +7,7 @@
 const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
-const { Journal, ago } = require('./journal')
+const { Journal, ago, splitTags } = require('./journal')
 
 const JOURNAL_FILE = () => path.join(state.WORLD_DATA_DIR, 'journal.json')
 
@@ -53,12 +53,14 @@ function nodeLabel(id, now = Date.now()) {
   return `${id}(${st.root !== id ? st.root + ' ' : ''}${st.status}${when})`
 }
 
-// Multi-line block (NOTES + NOTE_ERR) that hangs outside the blob.
+// Multi-line block (NOTES + SHELF= + NOTE_ERR) that hangs outside the blob.
 function renderNotesBlock() {
   if (!state.journal) return ''
   const out = []
   const notes = state.journal.renderNotes(undefined, undefined, nodeLabel)
   if (notes) out.push(notes)
+  const shelf = state.journal.renderShelf()
+  if (shelf) out.push(shelf)
   if (state.noteErrors.length) {
     out.push(`NOTE_ERR=[${state.noteErrors.join(' | ')}]`)
     state.noteErrors = []
@@ -68,20 +70,25 @@ function renderNotesBlock() {
 
 // Notes render as `n3 @g1 text`, so the model tends to open its own notes with
 // `@g1` too — which then showed twice. A leading @node is read as the model's
-// choice of where the note belongs and taken out of the text.
+// choice of where the note belongs and taken out of the text. Shelf tags ({bed})
+// may come before or after it; tags is undefined when there are none.
 function splitNode(text, fallback = null) {
+  let { tags, text: rest } = splitTags(text)
   let node = null
-  const body = text.replace(/^(?:@([gs]\d+)\s+)+/, (lead) => {
+  let body = rest.replace(/^(?:@([gs]\d+)\s+)+/, (lead) => {
     for (const [, id] of lead.matchAll(/@([gs]\d+)/g)) if (!node && (state.agenda?.tree?.nodes.has(id) || state.agenda?.closed?.[id])) node = id
     return ''
   })
-  return { body, node: node || currentNode() || fallback }
+  if (tags === undefined) ({ tags, text: body } = splitTags(body))
+  return { body, node: node || currentNode() || fallback, tags }
 }
 
 // `[NOTE:text [r1,r2]]`, `[NOTE:compact:n3-n9:text [r4]]` (`replace:` is the same
 // op, named for updating one note) and `[NOTE:drop:n3,n7]`. The body may itself
 // contain one level of [...] (the citations), so a plain [^\]]+ would cut it short.
 const NOTE_TAG = /\[NOTE:((?:[^[\]]|\[[^[\]]*\])*)\]/g
+
+const shelfMark = (n) => n.tags?.length ? ` {${n.tags.join(',')}}` : ''
 
 // Apply every [NOTE:...] in a reply.
 // nodeBefore: the node in focus when the turn began. Plan tags apply first, so a
@@ -99,11 +106,12 @@ function applyNoteTags(rawReply, nodeBefore = null) {
         applied.push(`dropped ${state.journal.drop(dm[1]).join(',')}`)
       } else if (cm) {
         const t = splitNode(cm[2], nodeBefore)
-        const { note, replaced } = state.journal.compact(cm[1], t.body, t.node)
-        applied.push(`${note.id} ← ${replaced.join(',')}`)
+        const { note, replaced } = state.journal.compact(cm[1], t.body, t.node, t.tags)
+        applied.push(`${note.id}${shelfMark(note)} ← ${replaced.join(',')}`)
       } else {
         const t = splitNode(body, nodeBefore)
-        applied.push(state.journal.note(t.body, t.node).id)
+        const note = state.journal.note(t.body, t.node, t.tags || [])
+        applied.push(`${note.id}${shelfMark(note)}`)
       }
     } catch (e) {
       state.noteErrors.push(`${body.slice(0, 60)} → ${e.message}`)

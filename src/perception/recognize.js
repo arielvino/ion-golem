@@ -375,25 +375,22 @@ function formatRecognition(r) {
 }
 
 // The per-turn context line — data only, how to read it lives in the system prompt.
-// A confident guess is just kind + where; an unsure one adds its share, the runner-up
-// and the unseen cues that would settle it. Unrecognized groups are left out: noise
-// at this resolution (the debug `places` action shows them).
-const SURE = 0.9, ALT = 0.15, MAX_PLACES = 4
-function formatPlacesContext(r) {
+// Each guess: its share, any runner-up, where it is, the cue blocks that hinted it, and the
+// cues not seen yet that would settle it. Unrecognized groups are left out: their blocks
+// are in UNNATURAL= already (the debug `places` action shows the groups).
+const ALT = 0.15, MAX_PLACES = 4
+function formatStructures(r) {
   if (!r?.places.length) return ''
   const label = (h) => h.variant ? `${h.kind}(${h.variant})` : h.kind
   const items = r.places.slice(0, MAX_PLACES).map(p => {
     const [top, ...rest] = p.hyps
-    let s = `${label(top)}@${p.at.x},${p.at.y},${p.at.z} ${p.dist}m ${p.dir}`
-    if (top.share < SURE) {
-      s += ` ${top.share.toFixed(2)}`
-      const alts = rest.filter(h => h.share >= ALT).map(h => `${label(h)} ${h.share.toFixed(2)}`)
-      if (alts.length) s += ` or ${alts.join(', ')}`
-      if (top.missing.length) s += ` confirm:${top.missing.slice(0, 2).join(',')}`
-    }
-    return s
+    const alts = rest.filter(h => h.share >= ALT).map(h => `${label(h)} ${h.share.toFixed(2)}`)
+    const hints = [...p.counts].sort((a, b) => b[1] - a[1]).map(([n, k]) => `${n}×${k}`).join(' ')
+    return `${label(top)} ${top.share.toFixed(2)}${alts.length ? ` (or ${alts.join(', ')})` : ''}` +
+      ` @${p.at.x},${p.at.y},${p.at.z} ${p.dist}m ${p.dir} hinted by: ${hints}` +
+      (top.missing.length ? ` | not seen: ${top.missing.slice(0, 3).join(',')}` : '')
   })
-  return ` PLACES=[${items.join(' | ')}]`
+  return ` STRUCTURES=[${items.join(' || ')}]`
 }
 
-module.exports = { recognize, recognizeView, recognizeCues, cueNames, VISIBLE_CAP, formatRecognition, formatPlacesContext, compile, cluster, guess }
+module.exports = { recognize, recognizeView, recognizeCues, cueNames, VISIBLE_CAP, formatRecognition, formatStructures, compile, cluster, guess }

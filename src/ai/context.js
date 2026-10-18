@@ -1,9 +1,8 @@
 // Bot context builder — assembles real-time state snapshot for AI prompts
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
-const { getLastVisionResult, formatVision, hasLineOfSight } = require('../perception/vision')
-const { getLastSurvey } = require('../perception/visibility')
-const { recognizeView, formatPlacesContext } = require('../perception/recognize')
+const { hasLineOfSight } = require('../perception/vision')
+const { recognizeView, formatStructures } = require('../perception/recognize')
 const { lookAround } = require('../perception/sight')
 const { summarizeSight, formatSight } = require('../perception/sightSummary')
 const ranges = require('../config/ranges')
@@ -18,6 +17,7 @@ const { providerNames, renderPending, around } = require('./ctxProviders')
 const { snapshot, renderDelta } = require('./delta')
 const { renderNearby, equipOf } = require('./nearby')
 const { blockLabel } = require('../world/blockLabel')
+const { isCookable } = require('../actions/smelting')
 
 // Item name with remaining durability for damageable items: iron_pickaxe(212 of 250 left).
 // Spelled out: a bare 130/131 was read as used/max ("one swing from retirement").
@@ -28,6 +28,12 @@ function itemLabel(item, withCount = false) {
   return withCount ? `${item.name}x${item.count}` : item.name
 }
 
+// Raw food (beef, potato, …): it shows in inv= with a hint, so the bot thinks of the
+// furnace or campfire before eating it raw.
+function rawFoodHint(name) {
+  return isCookable(name) ? '(hint: can I cook it?)' : ''
+}
+
 // --- Main context builder ---
 function getBotContext() {
   const bot = state.bot
@@ -36,7 +42,7 @@ function getBotContext() {
   // every swing doesn't read as a held/armor change.
   const held = bot.heldItem ? bot.heldItem.name : 'nothing'
   const offhand = bot.inventory.slots[45]?.name || 'nothing'
-  const inv = bot.inventory.items().map(i => itemLabel(i, true)).join(', ') || 'empty'
+  const inv = bot.inventory.items().map(i => itemLabel(i, true) + rawFoodHint(i.name)).join(', ') || 'empty'
   const armorItems = [
     bot.inventory.slots[5], bot.inventory.slots[6],
     bot.inventory.slots[7], bot.inventory.slots[8]
@@ -62,22 +68,6 @@ function getBotContext() {
   const hours = Math.floor(((t + 6000) % 24000) / 1000)
   const time = `${hours}:00(${t}t)`
   const onlineStr = state.joinedAt ? ` online=${ago(Date.now() - state.joinedAt)}` : ''
-  // Sky exposure: skyLight=0 means enclosed/underground. Mob spawning at night or underground.
-  let lightStr = ''
-  try {
-    const footBlock = bot.blockAt(pos)
-    if (footBlock) {
-      const sl = footBlock.skyLight
-      const nightTime = t >= 13000 && t < 23000
-      // skyLight=0 means enclosed from above. But under trees skyLight=0 too.
-      // Cross-check with vision skyVisible — if vision sees sky, we're not underground.
-      const visionResult = getLastVisionResult()
-      const underground = sl === 0 && (!visionResult || !visionResult.skyVisible)
-      lightStr = underground ? ' underground' : ''
-      // Nothing hostile spawns on peaceful, so the warning would only be noise there.
-      if ((underground || nightTime) && bot.game.difficulty !== 'peaceful') lightStr += '(mobs_spawn!)'
-    }
-  } catch(e) { console.warn('  [CTX] light detection err:', e.message) }
   const bgInfo = getBackgroundSummary()
   const task = bgInfo ? `bg:${bgInfo}` : (state.currentTask || 'idle')
   let navInfo = state.navigationStatus ? ` nav=${state.navigationStatus}` : ''
@@ -219,9 +209,6 @@ function getBotContext() {
   const others = Object.keys(bot.players).filter(n => n !== bot.username).sort()
   const playerPosStr = ` PLAYERS=[${others.map(describePlayer).join(', ') || 'none online'}]`
 
-  // Context "see=" comes purely from the find+LOS survey (the new view) — no ray vision.
-  const visionInfo = formatVision(null, { survey: getLastSurvey() })
-
   let biomeStr = ''
   try {
     const footBlock = bot.blockAt(bot.entity.position.offset(0, -1, 0))
@@ -231,15 +218,15 @@ function getBotContext() {
     }
   } catch(e) { console.warn('  [CTX] biome detection err:', e.message) }
 
-  // One all-round ray view feeds both the place guesses and the material layers
-  // (BIOMES / TERRAIN / RESOURCES / UNEXPLAINED), so they always agree on what is seen.
+  // One all-round ray view feeds both the structure guesses and the material layers
+  // (BIOMES / TERRAIN / DECOR / RESOURCES / UNNATURAL), so they always agree on what is seen.
   let placesInfo = '', sightInfo = ''
   try {
     const t0 = Date.now()
     const view = lookAround(bot, ranges.sight.viewBlocks)
     const r = recognizeView(view, { maxDistance: ranges.sight.placesBlocks })
-    placesInfo = formatPlacesContext(r)
-    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, places: r?.places || [] })
+    placesInfo = formatStructures(r)
+    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks })
     sightInfo = ' ' + formatSight(summary, view.dark).split('\n').join(' ')
     const ms = Date.now() - t0
     if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
@@ -277,7 +264,7 @@ function getBotContext() {
   state.prevSnapshot = snap
   const deltaInfo = delta ? ` DELTA=[${delta}]` : ''
 
-  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20${require('./survivalFields').regenLine(bot)}${require('../perception/effects').contextLine()} held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${require('./survivalFields').timeLine(bot)}${lightStr}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${visionInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/floatMode').contextLine()}${require('../engine/leadMode').contextLine()}${require('../navigation/terraformGate').contextLine()}${require('../engine/holdMode').contextLine()}${require('../world/strongholdFinder').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
+  const blob = `[pos=${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)} dim=${currentDim()} name=${bot.username} facing=${facing}${bodyStr} HP=${Math.round(bot.health)}/20 food=${Math.round(bot.food)}/20${require('./survivalFields').regenLine(bot)}${require('../perception/effects').contextLine()} held=${itemLabel(bot.heldItem)} offhand=${itemLabel(bot.inventory.slots[45])} time=${time}${require('./survivalFields').timeLine(bot)}${onlineStr} task=${task}${navInfo} queue=${queueStr} nearby=${nearby} inv=${inv}${armorStr}${vehicleStr}${playerPosStr}${utilInfo}${containerInfo}${structInfo}${calcInfo}${biomeStr}${sightInfo}${placesInfo}${require('../engine/breakPermission').contextLine()}${require('../engine/defendMode').contextLine()}${require('../engine/floatMode').contextLine()}${require('../engine/leadMode').contextLine()}${require('../navigation/terraformGate').contextLine()}${require('../engine/holdMode').contextLine()}${require('../world/strongholdFinder').contextLine()}${pathInfo}${subsInfo}${obsInfo}${deltaInfo}${newInfo}${failInfo}${ctxAvail}]`
 
   let aroundView = ''
   try { aroundView = around() } catch (e) { console.warn('  [CTX] around err:', e.message) }

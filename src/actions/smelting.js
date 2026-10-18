@@ -11,15 +11,21 @@ const { getFurnaceState } = require('./containers')
 
 // Items that can be smelted in a furnace (driven by config/smeltable.json)
 const smeltableExact = new Set(smeltableData.exact)
+const cookable = new Set(smeltableData.food)
 const gearRegex = new RegExp(`^(${smeltableData.gearPatterns.join('|')})_(${smeltableData.gearTypes.join('|')})$`)
 
 function isSmeltable(itemName) {
-  if (smeltableExact.has(itemName)) return true
+  if (smeltableExact.has(itemName) || cookable.has(itemName)) return true
   for (const p of smeltableData.prefixes) { if (itemName.startsWith(p)) return true }
   for (const s of smeltableData.suffixes) { if (itemName.endsWith(s)) return true }
   for (const c of smeltableData.contains) { if (itemName.includes(c)) return true }
   if (gearRegex.test(itemName)) return true
   return false
+}
+
+// Raw food a furnace turns into better food: beef → cooked_beef, potato → baked_potato.
+function isCookable(itemName) {
+  return cookable.has(itemName)
 }
 
 async function doSmelt(targetName) {
@@ -232,4 +238,4 @@ async function doSmelt(targetName) {
   return smeltOk
 }
 
-module.exports = { doSmelt, isSmeltable }
+module.exports = { doSmelt, isSmeltable, isCookable }

@@ -28,7 +28,7 @@ if (process.argv.includes('--no-ai')) state.aiPaused = true
 // --no-chat: never speak in game (a quiet test bot); what it would say is printed instead.
 if (process.argv.includes('--no-chat')) state.chatMuted = true
 const nameArg = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null
-const BOT_NAME = nameArg || process.env.MC_USERNAME || (DEBUG_MODE ? 'BroDev' : 'Bro')
+const BOT_NAME = nameArg || process.env.MC_USERNAME || 'Bro'
 state.debugMode = DEBUG_MODE
 
 // Connection target — defaults to a local offline server on localhost:25565.
@@ -438,7 +438,8 @@ function createBot() {
     // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.
     if (state.debugMode && message.startsWith('!ai ')) { state.aiPaused = message.slice(4).trim() === 'off'; console.log(`  [DEBUG] aiPaused=${state.aiPaused}`); return }
     if (state.debugMode && message.startsWith('!act ')) {
-      state.actionQueue.push({ actionStr: message.slice(5).trim(), username })
+      const entry = { actionStr: message.slice(5).trim(), username }
+      if (!require('./src/engine/interjection').queueInterjection(entry, true)) state.actionQueue.push(entry)
       require('./src/engine/engine').processActionQueue()
       return
     }

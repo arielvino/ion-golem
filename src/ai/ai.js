@@ -12,6 +12,7 @@ const { createProvider } = require('./ai-provider')
 const { logChatDB } = require('../world/memory')
 const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
 const { isProvider, providerNames } = require('./ctxProviders')
+const { queueInterjection } = require('../engine/interjection')
 
 // --- Chat logging ---
 const CHAT_LOG_DIR = () => path.join(state.BOT_DATA_DIR, 'chat-logs')
@@ -58,6 +59,9 @@ const PROMPT_ORDER = [
   '30-navigation.txt',
   '40-autonomous.txt',
   '50-actions.txt',
+  // eval runs arbitrary JS in the bot process — never advertise it outside --debug.
+  // Keyed off process.argv for the same reason as DBG_PERSONALITY below.
+  ...(process.argv.includes('--debug') ? ['51-debug-actions.txt'] : []),
   '55-views.txt',
   '57-past-views.txt',
   '60-building.txt',
@@ -249,7 +253,10 @@ async function handleMessages(batch) {
     function dispatchAction(actionStr) {
       const engine = require('../engine/engine')
       state.actionOpCount++
-      if (!queueReplaced) { state.lastFailures = []; state.actionQueue = []; queueReplaced = true }
+      // A light placed while a task runs cuts into it (engine/interjection.js) and
+      // leaves the queue alone; the reply's later actions keep it when they replace it.
+      if (queueInterjection({ actionStr, username }, !queueReplaced)) return
+      if (!queueReplaced) { state.lastFailures = []; state.actionQueue = state.actionQueue.filter(a => a.interject); queueReplaced = true }
       const verb = actionStr.split(':')[0]
       const holdMode = require('../engine/holdMode')
       if (verb === 'stop' || verb === 'hold') {

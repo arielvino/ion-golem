@@ -167,10 +167,10 @@ async function executeAction(actionStr, username, opts = {}) {
         // Only report what the bot can actually see — no x-ray
         const visible = found.filter(f => f.visible)
         const lookMsg = visible.length === 0
-          ? `look "${target}": none visible within ${LOOK_RANGE} blocks`
+          ? `look "${target}": I can't see any from here (line of sight only, up to ${LOOK_RANGE} blocks)`
           : `look "${target}": ${visible.map(f => `${f.name}@${f.x},${f.y},${f.z}(${f.dist}m)`).join(', ')}`
         state.lastObservation = { ts: Date.now(), text: lookMsg }
-        debugChat(`[look] ${visible.length === 0 ? `No "${target}" visible within ${LOOK_RANGE} blocks.` : `SEE: ${visible.map(f => `${f.name}@${f.x},${f.y},${f.z}(${f.dist}m)`).join(', ')}`}`)
+        debugChat(`[look] ${visible.length === 0 ? `I can't see any "${target}" from here.` : `SEE: ${visible.map(f => `${f.name}@${f.x},${f.y},${f.z}(${f.dist}m)`).join(', ')}`}`)
         break
       }
       case 'scan': {

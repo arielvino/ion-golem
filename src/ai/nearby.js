@@ -5,6 +5,22 @@
 // one count per kind, like the fish and bats always were. Pure: entities in.
 const { entityClass } = require('../perception/entityClass')
 const { entityTag } = require('../perception/entityTag')
+const state = require('../core/state')
+
+// Wool colours by the low 4 bits of a sheep's `wool` metadata byte; bit 0x10 = sheared.
+const WOOL_COLOURS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray',
+  'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
+
+// A sheep's colour, ',sheared' after it when it has no wool: a bed needs 3 of one colour.
+function woolOf(e) {
+  if (e.name !== 'sheep') return ''
+  const idx = state.bot.registry.entitiesByName.sheep?.metadataKeys?.indexOf('wool')
+  if (!(idx >= 0)) return ''
+  // The server sends only metadata that differs from the default, so a plain white
+  // sheep (0) arrives with no wool value at all.
+  const v = e.metadata?.[idx] ?? 0
+  return `,${WOOL_COLOURS[v & 15]}${v & 16 ? ',sheared' : ''}`
+}
 
 // Equipment for players and armed mobs (zombies, skeletons, piglins, etc.)
 function equipOf(e) {
@@ -32,8 +48,12 @@ function renderNearby(visible, pos, ranges) {
   const farGroups = new Map()
   const background = new Map()  // fish, squid, bats: never tagged, whatever the distance
   const count = (map, e, d) => {
-    if (!map.has(e.name)) map.set(e.name, { n: 0, near: Math.round(d) })
-    map.get(e.name).n++
+    // Far sheep are counted per colour (white_sheep×3): which colour has three is the
+    // question. A sheared one has no wool to give, whatever its colour.
+    const [, colour, sheared] = woolOf(e).split(',')
+    const key = sheared ? 'sheared_sheep' : colour ? `${colour}_sheep` : e.name
+    if (!map.has(key)) map.set(key, { n: 0, near: Math.round(d) })
+    map.get(key).n++
   }
 
   const tagged = []
@@ -57,7 +77,7 @@ function renderNearby(visible, pos, ranges) {
       try { drops[tag] = e.getDroppedItem().count; n = `,x${drops[tag]}` } catch (_) { /* no drop data */ }
     }
     seen.push(tag)
-    return `${tag}@${Math.floor(ep.x)},${Math.floor(ep.y)},${Math.floor(ep.z)}(${Math.round(d)}m${n}${equipOf(e)})`
+    return `${tag}@${Math.floor(ep.x)},${Math.floor(ep.y)},${Math.floor(ep.z)}(${Math.round(d)}m${n}${woolOf(e)}${equipOf(e)})`
   })
   const summary = (name, b) => `${name}×${b.n}(${b.near}m+)`
   for (const [name, b] of background) {

@@ -1,7 +1,7 @@
 
 CRAFTING: [ACTION:craft:ITEM] or [ACTION:craft:ITEM:COUNT] (COUNT=batches, not output items).
-Auto-resolves intermediate crafts (logs→planks→sticks). Does NOT auto-smelt.
-If materials still missing, RECENT_FAILS shows what's needed + where to find it.
+Crafts exactly the item you name — never the parts it is made of. Every intermediate is its own craft, in order: sticks from logs is [ACTION:craft:oak_planks] [ACTION:craft:stick]. Plan them as steps (needs=) and chain them in one reply. Does NOT smelt.
+If materials are missing, RECENT_FAILS shows what's needed, the craft that makes a missing part from what you hold, and where to find the rest.
 CRAFTING TABLE: You manage tables yourself. The craft action does NOT auto-craft or auto-place tables.
 - stations= shows tables in world; a chest/barrel you never opened is marked unopened (contents unknown). inv= shows if you carry one. Use [CTX:find:crafting_table] to find distant ones.
 - For 3x3 recipes: make sure a table is placed nearby BEFORE crafting. Sequence: [ACTION:craft:crafting_table] [ACTION:place:crafting_table] [ACTION:craft:TARGET]
@@ -13,14 +13,9 @@ For recipes/mechanics you're unsure about, look them up with WebSearch, WebFetch
 MATH: 1 log=4 planks. 2 planks=4 sticks. Bed=3planks+3wool. Pickaxe=3ingots+2sticks. Sword=2ingots+1stick. Bucket=3ingots. Torch=1coal+1stick→4.
 Armor set = helmet+chestplate+leggings+boots. Check which pieces already in inv/armor before crafting.
 
-MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use coords from VISION see= when available (e.g. see iron_ore@100,40,200 → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
-Auto-tunnels on pathfind failure — keep issuing mine actions. goto:X,Y,Z handles digging/staircases automatically.
+MINING: mine:BLOCK or mine:BLOCK:X,Y,Z. Use the nearest X,Y,Z from RESOURCES/DECOR when available (e.g. RESOURCES=[iron×3: 12m N@100,40,200; 13m N@101,40,200; 19m NE@110,38,195] → mine:iron_ore:100,40,200). Auto-pathfinds, equips tool, digs, collects drops.
+If it can't reach the block it fails and says why (RECENT_FAILS) — then choose the move yourself: a goto method, tunnel or staircase (see NAVIGATION STRATEGY). Don't re-issue the same mine blind.
 Tool tier checked automatically — if wrong tool, RECENT_FAILS lists valid ones.
 DURABILITY: tools and armor show the uses they have left in held=, inv=, armor= — iron_pickaxe(12 of 250 left) breaks after 12 more uses; iron_pickaxe(248 of 250 left) is almost new. Before a long dig or trip, make sure the tool will last; craft a spare first rather than have it break halfway and waste the trip.
 DROP vs SPEED: tool-GATED blocks (stone/ore) drop NOTHING by hand → mining REFUSES them (craft the pickaxe or use :skiptool). Hand-droppable blocks (wood/dirt/sand) are NEVER refused — but if a proper tool (axe/shovel) would be much faster and you lack one, NEW= notes it (e.g. "~4x slower"). For a big harvest, craft the tool first; for a block or two, just hand-mine.
 SMELTING: [ACTION:smelt:INPUT] for ALL furnace ops. Cannot craft ingots — smelt them! Never place:coal/raw_iron.
-BOATS: place:boat → mount:boat → sail:DIRECTION/COORDS. Use sail not goto in boats. dismount to exit. Only the driver steers: SEAT=driver (seat 1, also when you ride alone) means the boat goes nowhere unless YOU sail, whoever says they're rowing; SEAT=passenger means someone else steers and your sail does nothing.
-EMERGENCY: "run"/"flee"/"escape" → [ACTION:flee] IMMEDIATELY. No prep, no tasks. Just run.
-
-TIME AND HEALTH: time= is followed by night_in=4m10s (real time until hostiles spawn in the open) or, at night, night_now day_in=… . regen=off after food= means your HP will not come back until food is 18 or more: eat.
-LIGHTING: in the dark you see nothing — no ore, no drop, no mob (DARK=) — and hostile mobs can spawn around you ((mobs_spawn!) after time= or underground; it never shows on peaceful). Light your way like a player: craft torches as soon as you have coal and sticks (1 coal + 1 stick = 4 torches) and keep some on you; when DARK= shows dark around you, [ACTION:place:torch] there and every ~8 blocks as you go through tunnels and caves. Darkness around a running task (a staircase, a tunnel) is a problem to act on even while the task runs: [ACTION:stop], light it, then go on. Don't count on another player's torch.
