@@ -101,7 +101,7 @@ test('a mixed basis keeps its record ids as citations and the rest as sources', 
   // Real note n20 from the 2026-09-26 run: r36 was silently dropped.
   const n = j.note('trying north instead of west [r36,slice]')
   assert.deepStrictEqual([n.text, n.cites, n.sources], ['trying north instead of west', ['r36'], ['slice']])
-  assert.deepStrictEqual(j.note('pivoting [pos, biome, n1, n8]').sources, ['pos', 'biome', 'n1'])
+  assert.deepStrictEqual(j.note('pivoting [slice, biome, n1, n8]').sources, ['slice', 'biome', 'n1'])
   assert.throws(() => j.note('made up [r99,VISION]'), /unknown record\(s\) r99/)
   assert.strictEqual(j.renderNotes().split('\n')[1], 'n1 (0s ago) trying north instead of west [r36,slice]')
 })
@@ -110,8 +110,8 @@ test('compaction inherits sources as well as citations', () => {
   const j = new Journal()
   j.record('x')
   j.note('a [r1,slice]'); j.note('b [VISION]')
-  const { note } = j.compact('n1-n2', 'a and b [inv]')
-  assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'inv']])
+  const { note } = j.compact('n1-n2', 'a and b [DECOR]')
+  assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'DECOR']])
 })
 
 test('lookup resolves ids and ranges, and says which records are gone', () => {
@@ -140,8 +140,8 @@ test('compaction does not carry references to the notes it merges away', () => {
   const j = new Journal()
   j.record('x')
   j.note('a [r1,slice]'); j.note('b [n1,VISION]'); j.note('c [n2]')
-  const { note } = j.compact('n1-n3', 'merged [inv]')
-  assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'inv']])
+  const { note } = j.compact('n1-n3', 'merged [DECOR]')
+  assert.deepStrictEqual([note.cites, note.sources], [['r1'], ['slice', 'VISION', 'DECOR']])
   assert.deepStrictEqual(j.note('d [n4,n1,n2-n3]').sources, ['n4'])
 })
 
@@ -268,4 +268,25 @@ test('[NOTE:{tags} ...] shelves, before or after an @node; old notes without tag
   assert.deepStrictEqual([portal.node, portal.text], ['g1', 'portal at 9,9,9'])
   assert.strictEqual(renderNotesBlock().replace(/\(\d+s ago\)/, '(…)'), 'NOTES (1):\nn1 (…) from before tags\nSHELF=[2 notes | bed:1 home:1 portal:1]')
   Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir })
+})
+
+test('a note resting on live status keeps no such basis, and the model is told to cut it', () => {
+  const state = require('../src/core/state')
+  const { applyNoteTags } = require('../src/world/journalStore')
+  const saved = { journal: state.journal, agenda: state.agenda, dir: state.WORLD_DATA_DIR, errs: state.noteErrors }
+  state.WORLD_DATA_DIR = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jstatus-'))
+  state.journal = new Journal()
+  state.journal.record('x')
+  // Old notes stored before the rule: their status basis is not inherited either.
+  state.journal.notes.push({ id: 'n1', ts: 0, text: 'old', cites: [], sources: ['armor', 'stations'] })
+  state.journal.nseq = 1
+  state.agenda = null
+  state.noteErrors = []
+  // Real note n14 from the 2026-10-18 run, written while the pickaxe was already gone.
+  applyNoteTags('[NOTE:replace:n1:Full iron armor worn, no pickaxe in inv now. Iron at 26,16,482 mined out. [r1,inv,armor,PLAYERS]] [NOTE:{iron} iron at 1,2,3 [r1,RESOURCES]]')
+  const [n2, n3] = state.journal.notes
+  assert.deepStrictEqual([n2.cites, n2.sources, n3.sources], [['r1'], ['stations'], ['RESOURCES']])
+  assert.strictEqual(state.noteErrors.length, 1)
+  assert.match(state.noteErrors[0], /^n2 rests on inv,armor,PLAYERS: live status.*\[NOTE:replace:n2:…\]/)
+  Object.assign(state, { journal: saved.journal, agenda: saved.agenda, WORLD_DATA_DIR: saved.dir, noteErrors: saved.errs })
 })
