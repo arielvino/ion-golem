@@ -12,6 +12,7 @@ const { c, color } = require('./src/lib/colors')
 const { initDB } = require('./src/world/memory')
 const { resolveDataBase, worldKey, openWorldDir, oldLayoutFiles } = require('./src/core/dataDir')
 const { loadAgenda, agendaTitles } = require('./src/engine/tasks')
+const { ago } = require('./src/world/journal')
 const { updateBlockMemoryReach, clearOldPathBlocks, updateChunkBiomes, logChatDB, logGameEvent, upsertVisionChunked } = require('./src/world/memory')
 const { initChatLogs, initAI } = require('./src/ai/ai')
 const { setupAutonomous } = require('./src/engine/autonomous')
@@ -149,6 +150,7 @@ initAI()
 let shuttingDown = false
 let reconnectTimer = null
 let reconnectAttempts = 0
+let disconnectedAt = 0   // when the connection last dropped; 0 until it first does
 const MAX_RECONNECT_ATTEMPTS = 5
 
 // --- World memory ---
@@ -242,7 +244,8 @@ function createBot() {
 
   bot.once('spawn', () => {
     reconnectAttempts = 0
-    state.joinedAt = Date.now()
+    // A reconnect is the same session: online= keeps counting from the first join.
+    if (!state.joinedAt) state.joinedAt = Date.now()
     console.log('Bot has joined')
 
     require('./src/world/memory').checkStateVersion(bot.version)
@@ -402,9 +405,13 @@ function createBot() {
 
     // Say something on join
     logChatDB('event', bot.username, `${bot.username} joined the game`)
+    // Only the first join is a start-up. A rejoin after a dropped connection told
+    // as [BOOT] had the model announce a fresh start mid-session.
     state.messageQueue.push({
       username: 'event',
-      message: `[GAME EVENT] [BOOT] You (${bot.username}) just started up and joined the server.`
+      message: disconnectedAt
+        ? `[GAME EVENT] [RECONNECT] Your connection to the server dropped and you rejoined ${ago(Date.now() - disconnectedAt)} later; the task you were running was stopped. Same session, same memory: carry on.`
+        : `[GAME EVENT] [BOOT] You (${bot.username}) just started up and joined the server.`
     })
 
     if (state.agenda.entries.length > 0) {
@@ -557,6 +564,7 @@ function createBot() {
     require('./src/core/utils').clearChatQueue()
     if (shuttingDown) return
     stopEngine()
+    disconnectedAt = Date.now()
     reconnectAttempts++
     if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
       console.log(`Disconnected. Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up.`)
