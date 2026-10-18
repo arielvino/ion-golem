@@ -7,7 +7,7 @@
 const fs = require('fs')
 const path = require('path')
 const state = require('../core/state')
-const { Journal, ago, splitTags } = require('./journal')
+const { Journal, ago, splitTags, statusBasis } = require('./journal')
 
 const JOURNAL_FILE = () => path.join(state.WORLD_DATA_DIR, 'journal.json')
 
@@ -108,10 +108,12 @@ function applyNoteTags(rawReply, nodeBefore = null) {
         const t = splitNode(cm[2], nodeBefore)
         const { note, replaced } = state.journal.compact(cm[1], t.body, t.node, t.tags)
         applied.push(`${note.id}${shelfMark(note)} ← ${replaced.join(',')}`)
+        warnStatus(note.id, body)
       } else {
         const t = splitNode(body, nodeBefore)
         const note = state.journal.note(t.body, t.node, t.tags || [])
         applied.push(`${note.id}${shelfMark(note)}`)
+        warnStatus(note.id, body)
       }
     } catch (e) {
       state.noteErrors.push(`${body.slice(0, 60)} → ${e.message}`)
@@ -119,6 +121,15 @@ function applyNoteTags(rawReply, nodeBefore = null) {
   }
   if (applied.length) saveJournal()
   return applied
+}
+
+// A note resting on a live field (inv, armor, PLAYERS…) is status, which the
+// context shows every turn: it is kept, minus that basis, and the model is told
+// to cut the status out of it.
+function warnStatus(id, body) {
+  const live = statusBasis(body)
+  if (!live.length) return
+  state.noteErrors.push(`${id} rests on ${live.join(',')}: live status, which the context shows every turn and which goes stale within minutes. Cut it from the note ([NOTE:replace:${id}:…]), or drop the note if nothing else is left`)
 }
 
 // One record per reply: what the bot said, what it set in motion and why. Its

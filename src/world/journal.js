@@ -28,6 +28,16 @@ const NEW_SHOWN = 25   // most recent new records shown per turn; older ones sum
 const MAX_LOOKUP = 50
 const BASIS_SHOWN = 6    // basis items shown per note; the rest are summarized
 const SHELF_TAGS_SHOWN = 40   // tags listed in SHELF=; the rest are summarized
+// Context fields that show live status every turn. A note resting on one is
+// status — it goes stale within minutes — so it is not kept as a source.
+const STATUS_SOURCES = new Set(['inv', 'armor', 'held', 'offhand', 'pos', 'hp', 'food', 'task', 'nav', 'queue', 'nearby', 'players'])
+const isStatusSource = (src) => STATUS_SOURCES.has(String(src).replace(/=$/, '').toLowerCase())
+
+// The live-status fields a note's trailing basis names ("… [r41,inv,armor]" → inv,armor).
+function statusBasis(text) {
+  const m = /\[([^[\]]+)\]\s*$/.exec(String(text || ''))
+  return m ? m[1].split(',').map(s => s.trim()).filter(isStatusSource) : []
+}
 
 // A duration as a person would say it: 40s, 7m, 2h05m, 3d4h.
 function ago(ms) {
@@ -231,10 +241,12 @@ class Journal {
     return { body, cites, sources }
   }
 
-  // Drop references to notes that no longer exist ("n8", "n3-n9"); keep the rest.
+  // Drop references to notes that no longer exist ("n8", "n3-n9") and live-status
+  // fields (see STATUS_SOURCES); keep the rest.
   _liveSources(sources) {
     const live = new Set(this.notes.map(n => num(n.id)))
     return sources.filter(src => {
+      if (isStatusSource(src)) return false
       const m = /^n(\d+)(?:-n?(\d+))?$/.exec(src)
       if (!m) return true
       const a = Number(m[1]), b = m[2] ? Number(m[2]) : a
@@ -285,4 +297,4 @@ function parseIds(spec) {
   return ids
 }
 
-module.exports = { Journal, JournalError, MAX_RECORDS, ago, splitTags }
+module.exports = { Journal, JournalError, MAX_RECORDS, ago, splitTags, statusBasis }
