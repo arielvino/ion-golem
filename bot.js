@@ -440,6 +440,16 @@ function createBot() {
     if (require('./src/engine/floatMode').onPlayerChat(username, message)) return
     if (require('./src/engine/leadMode').onPlayerChat(username, message)) return
     if (require('./src/navigation/terraformGate').onPlayerChat(username, message)) return
+    // `!chat on|off` toggles what --no-chat sets: whether the bot's lines reach the game or only the console.
+    const chatCmd = message.trim().match(/^!chat(?:\s+(on|off))?\s*$/i)
+    if (chatCmd) {
+      const { sendChat } = require('./src/core/utils')
+      const on = chatCmd[1] ? chatCmd[1].toLowerCase() === 'on' : !state.chatMuted
+      if (!on) sendChat('[chat] OFF: what I would say goes to my console only.')
+      state.chatMuted = !on
+      if (on) sendChat('[chat] ON: I talk in game.')
+      return
+    }
     // Debug-only repro hooks: `!act <action>` runs an action with no model in the loop,
     // `!ai off|on` pauses/resumes model calls so the AI can't steer a staged scenario.
     // Pair with server-console setblock/fill/tp to reproduce a bug deterministically.
