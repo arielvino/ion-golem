@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Builds a reusable, sealed test world from a slice of an existing world.
 //
-// Copies 5x5 chunk columns x 5 chunk sections (80x80x80 blocks) out of a source world into a
-// fresh void world. The vertical slice is chosen so the surface sits in the middle section.
+// Copies 5x5 chunk columns x 5+ chunk sections (80x80x80+ blocks) out of a source world into a
+// fresh void world. The slice starts two sections below the median surface's section and runs
+// at least two above it, more if needed to leave HEADROOM air over the tallest block.
 // The cube is then sealed with a one-block barrier shell just outside it, written straight
 // into the chunk data (the ring of chunks around the 5x5 holds only the walls). Leaves are
 // made persistent (their logs may lie outside the slice), and time, weather and mob spawning
@@ -28,8 +29,9 @@ const TESTSERVER = path.join(PROJECT, 'testserver')
 const TEMPLATES = path.join(PROJECT, 'test-worlds')
 const OVERWORLD = 'dimensions/minecraft/overworld'
 const MIN_Y = -64
-const SIZE = 5 // chunks per side, and sections tall
+const SIZE = 5 // chunks per side
 const SEED = 20261018 // fixed so the bot's world key is the same on every run
+const HEADROOM = 16 // at least this much air between the tallest block (trees too) and the ceiling
 
 function parseArgs () {
   const a = { src: path.join(SERVER, 'world'), name: null, center: null }
@@ -294,16 +296,18 @@ async function main () {
       if (!tree) throw new Error(`chunk ${cx},${cz} is not generated in ${args.src}`)
       if (tree.value.Status.value !== 'minecraft:full') throw new Error(`chunk ${cx},${cz} is not fully generated`)
       const entities = await readChunk(path.join(args.src, OVERWORLD, 'entities'), cx, cz)
-      cols.push({ cx, cz, tree, entities, surface: heightmap(tree, 'MOTION_BLOCKING_NO_LEAVES') })
+      cols.push({ cx, cz, tree, entities, surface: heightmap(tree, 'MOTION_BLOCKING_NO_LEAVES'), top: heightmap(tree, 'MOTION_BLOCKING') })
     }
   }
   const surfaceY = median(cols.flatMap(c => c.surface)) - 1 // top surface block
   const syMid = Math.floor(surfaceY / 16)
   const syLo = syMid - 2
-  const syHi = syMid + 2
+  // Sections are added on top until the tallest column clears the ceiling by HEADROOM.
+  const topY = Math.max(...cols.flatMap(c => c.top)) - 1
+  const syHi = Math.max(syMid + 2, Math.ceil((topY + HEADROOM + 1) / 16) - 1)
   const yLo = syLo * 16
   const yHi = syHi * 16 + 15
-  console.log(`[testworld] cube x ${X0}..${X1}, z ${Z0}..${Z1}, y ${yLo}..${yHi} (median surface y=${surfaceY})`)
+  console.log(`[testworld] cube x ${X0}..${X1}, z ${Z0}..${Z1}, y ${yLo}..${yHi} (median surface y=${surfaceY}, tallest block y=${topY})`)
 
   const column = (x, z, field) => {
     const c = cols.find(c => c.cx === x >> 4 && c.cz === z >> 4)
