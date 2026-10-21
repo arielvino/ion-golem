@@ -19,6 +19,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const net = require('net')
 const { spawn } = require('child_process')
 const nbt = require('prismarine-nbt')
 const { readChunk, writeChunks } = require('./anvil')
@@ -32,6 +33,7 @@ const MIN_Y = -64
 const SIZE = 5 // chunks per side
 const SEED = 20261018 // fixed so the bot's world key is the same on every run
 const HEADROOM = 16 // at least this much air between the tallest block (trees too) and the ceiling
+const PORT = 25566 // testserver/server.properties
 
 function parseArgs () {
   const a = { src: path.join(SERVER, 'world'), name: null, center: null }
@@ -44,6 +46,16 @@ function parseArgs () {
   }
   if (!a.name || !/^[\w-]+$/.test(a.name)) throw new Error('--name <word> is required')
   return a
+}
+
+// The build runs its own servers in testserver/ and replaces testserver/world, so a test
+// server still running there would have its world swapped out underneath it.
+function portFree (port) {
+  return new Promise(resolve => {
+    const srv = net.createServer()
+    srv.once('error', () => resolve(false))
+    srv.listen(port, () => srv.close(() => resolve(true)))
+  })
 }
 
 async function readNbtFile (file) {
@@ -277,6 +289,7 @@ function prepareServerDir () {
 
 async function main () {
   const args = parseArgs()
+  if (!await portFree(PORT)) throw new Error(`port ${PORT} is in use; stop the test server first (tools/testworld/testserver.sh stop)`)
   const level = await readNbtFile(path.join(args.src, 'level.dat'))
   const [sx, , sz] = args.center ? [args.center[0], 0, args.center[1]] : level.Data.spawn.pos
   const cx0 = (sx >> 4) - 2
