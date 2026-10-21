@@ -10,7 +10,7 @@ const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
 const T = require('../config/timings')
-const { closeIn } = require('./pickup')
+const { closeIn, dropGoal } = require('./pickup')
 
 // Thin plant cover that hangs on a block's faces. The crosshair stops on it, so a log
 // wrapped in vines can't be clicked until they're gone; a player just breaks them first.
@@ -273,13 +273,14 @@ async function doCollect() {
     recordFailure('collect - no dropped items within 32 blocks')
     return false
   }
-  // The walk ends within reach of the item as the pathfinder sees it, which is not
-  // always within pickup range, so check each item really came over.
+  // The walk can end short of pickup range (see pickup.js), so check each item
+  // really came over.
   const left = []
   for (const item of items) {
     if (isAborted() || !item.isValid) continue
     try {
-      await navigateTo(item.position.x, item.position.y, item.position.z, 1, 8000, { noReachCheck: true })
+      const g = dropGoal(item)
+      await navigateTo(g.x, g.y, g.z, g.range, 8000, { noReachCheck: true })
       await closeIn(item, { aborted: isAborted })
     } catch (e) {
       if (e instanceof AbortError) throw e
