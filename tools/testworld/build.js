@@ -3,8 +3,8 @@
 //
 // Copies 5x5 chunk columns x 5 chunk sections (80x80x80 blocks) out of a source world into a
 // fresh void world. The vertical slice is chosen so the surface sits in the middle section.
-// The cube is then sealed with a one-block shell just outside it: bedrock floor, barrier
-// ceiling, and walls that are bedrock below the local ground and barrier above it. Leaves are
+// The cube is then sealed with a one-block barrier shell just outside it, written straight
+// into the chunk data (the ring of chunks around the 5x5 holds only the walls). Leaves are
 // made persistent (their logs may lie outside the slice), and time, weather and mob spawning
 // are frozen, so every run starts from the same state.
 //
@@ -113,6 +113,69 @@ function trimEntities (tree, yLo, yHi) {
     return y >= yLo && y < yHi + 1
   })
   return tree
+}
+
+// Encodes 4096 palette indices (index (y * 16 + z) * 16 + x) as a 26.x block_states compound
+// with a string palette: 4+ bits per entry, entries never span two longs.
+function encodeStates (palette, idx) {
+  const states = { palette: { type: 'list', value: { type: 'string', value: palette } } }
+  if (palette.length === 1) return states
+  const bits = Math.max(4, Math.ceil(Math.log2(palette.length)))
+  const per = Math.floor(64 / bits)
+  const longs = []
+  for (let i = 0; i < idx.length; i += per) {
+    let v = 0n
+    for (let k = Math.min(per, idx.length - i) - 1; k >= 0; k--) v = (v << BigInt(bits)) | BigInt(idx[i + k])
+    longs.push([Number(BigInt.asIntN(32, v >> 32n)), Number(BigInt.asIntN(32, v & 0xffffffffn))])
+  }
+  states.data = { type: 'longArray', value: longs }
+  return states
+}
+
+// An empty (all-air) chunk at cx, cz, shaped like a trimmed source chunk so the server takes
+// it as fully generated.
+function emptyChunk (like, cx, cz) {
+  const tree = structuredClone(like)
+  const v = tree.value
+  v.xPos.value = cx
+  v.zPos.value = cz
+  for (const sec of v.sections.value.value) {
+    sec.block_states.value = encodeStates(['minecraft:air'])
+  }
+  for (const key of ['block_entities', 'block_ticks', 'fluid_ticks']) v[key].value.value = []
+  v.PostProcessing.value.value = v.PostProcessing.value.value.map(list => ({ ...list, value: [] }))
+  return tree
+}
+
+// Writes the barrier shell one block outside the cube into the chunk data: the floor and
+// ceiling layers over the 5x5 (sections the trim left as air), and the walls in a ring of
+// otherwise empty chunks around it. Returns the 5x5 plus that ring.
+function sealCube (chunks, { X0, X1, Z0, Z1, yLo, yHi, syLo, syHi }) {
+  const inShell = (x, y, z) => x >= X0 - 1 && x <= X1 + 1 && z >= Z0 - 1 && z <= Z1 + 1 && y >= yLo - 1 && y <= yHi + 1 &&
+    !(x >= X0 && x <= X1 && z >= Z0 && z <= Z1 && y >= yLo && y <= yHi)
+  const byPos = new Map(chunks.map(c => [`${c.cx},${c.cz}`, c]))
+  const out = []
+  for (let cx = (X0 >> 4) - 1; cx <= (X1 >> 4) + 1; cx++) {
+    for (let cz = (Z0 >> 4) - 1; cz <= (Z1 >> 4) + 1; cz++) {
+      const c = byPos.get(`${cx},${cz}`) || { cx, cz, tree: emptyChunk(chunks[0].tree, cx, cz) }
+      const inside = byPos.has(`${cx},${cz}`)
+      for (const sec of c.tree.value.sections.value.value) {
+        const sy = sec.Y.value
+        if (sy < syLo - 1 || sy > syHi + 1 || (inside && sy >= syLo && sy <= syHi)) continue
+        const idx = new Array(4096).fill(0)
+        let any = false
+        for (let i = 0; i < 4096; i++) {
+          const x = cx * 16 + (i & 15)
+          const z = cz * 16 + ((i >> 4) & 15)
+          const y = sy * 16 + (i >> 8)
+          if (inShell(x, y, z)) { idx[i] = 1; any = true }
+        }
+        if (any) sec.block_states.value = encodeStates(['minecraft:air', 'minecraft:barrier'], idx)
+      }
+      out.push(c)
+    }
+  }
+  return out
 }
 
 // Runs the test server in TESTSERVER until it stops; `script` gets send(cmd) -> output lines.
@@ -231,7 +294,7 @@ async function main () {
       if (!tree) throw new Error(`chunk ${cx},${cz} is not generated in ${args.src}`)
       if (tree.value.Status.value !== 'minecraft:full') throw new Error(`chunk ${cx},${cz} is not fully generated`)
       const entities = await readChunk(path.join(args.src, OVERWORLD, 'entities'), cx, cz)
-      cols.push({ cx, cz, tree, entities, ground: heightmap(tree, 'OCEAN_FLOOR'), surface: heightmap(tree, 'MOTION_BLOCKING_NO_LEAVES') })
+      cols.push({ cx, cz, tree, entities, surface: heightmap(tree, 'MOTION_BLOCKING_NO_LEAVES') })
     }
   }
   const surfaceY = median(cols.flatMap(c => c.surface)) - 1 // top surface block
@@ -247,26 +310,10 @@ async function main () {
     return c[field][(z & 15) * 16 + (x & 15)]
   }
 
-  // Shell commands: walls take the ground height of the inside column next to them.
-  const cmds = [
-    `forceload add ${X0 - 16} ${Z0 - 16} ${X1 + 16} ${Z1 + 16}`,
-    `fill ${X0 - 1} ${yLo - 1} ${Z0 - 1} ${X1 + 1} ${yLo - 1} ${Z1 + 1} minecraft:bedrock`,
-    `fill ${X0 - 1} ${yHi + 1} ${Z0 - 1} ${X1 + 1} ${yHi + 1} ${Z1 + 1} minecraft:barrier`
-  ]
-  const ring = []
-  for (let x = X0 - 1; x <= X1 + 1; x++) ring.push([x, Z0 - 1], [x, Z1 + 1])
-  for (let z = Z0; z <= Z1; z++) ring.push([X0 - 1, z], [X1 + 1, z])
-  for (const [x, z] of ring) {
-    const ix = Math.min(Math.max(x, X0), X1)
-    const iz = Math.min(Math.max(z, Z0), Z1)
-    const ground = Math.min(Math.max(column(ix, iz, 'ground'), yLo), yHi + 1) // first non-solid y
-    if (ground > yLo) cmds.push(`fill ${x} ${yLo} ${z} ${x} ${ground - 1} ${z} minecraft:bedrock`)
-    if (ground <= yHi) cmds.push(`fill ${x} ${ground} ${z} ${x} ${yHi} ${z} minecraft:barrier`)
-  }
   const midX = X0 + 40
   const midZ = Z0 + 40
   const spawnY = Math.min(column(midX, midZ, 'surface'), yHi)
-  cmds.push(
+  const cmds = [
     `setworldspawn ${midX} ${spawnY} ${midZ}`,
     'gamerule minecraft:advance_time false',
     'gamerule minecraft:advance_weather false',
@@ -278,9 +325,8 @@ async function main () {
     'gamerule minecraft:spawn_wardens false',
     'gamerule minecraft:respawn_radius 0',
     'time set 6000',
-    'weather clear',
-    'forceload remove all'
-  )
+    'weather clear'
+  ]
 
   // 1. Fresh void world, so level.dat and the data files come from the server itself.
   prepareServerDir()
@@ -291,17 +337,17 @@ async function main () {
 
   // 2. Drop in the trimmed chunks; everything else regenerates as void.
   for (const d of ['region', 'entities', 'poi']) fs.rmSync(path.join(world, OVERWORLD, d), { recursive: true, force: true })
-  writeChunks(path.join(world, OVERWORLD, 'region'), cols.map(c => ({ cx: c.cx, cz: c.cz, tree: trimChunk(c.tree, syLo, syHi) })))
+  const trimmed = cols.map(c => ({ cx: c.cx, cz: c.cz, tree: trimChunk(c.tree, syLo, syHi) }))
+  const chunks = sealCube(trimmed, { X0, X1, Z0, Z1, yLo, yHi, syLo, syHi })
+  writeChunks(path.join(world, OVERWORLD, 'region'), chunks)
   writeChunks(path.join(world, OVERWORLD, 'entities'), cols.filter(c => c.entities).map(c => ({ cx: c.cx, cz: c.cz, tree: trimEntities(c.entities, yLo, yHi) })))
   writeDatapack(world, [midX + 0.5, spawnY, midZ + 0.5], yHi + 1)
 
-  // 3. Seal the cube and freeze the world state.
-  console.log(`[testworld] sealing (${cmds.length} commands)`)
+  // 3. Freeze the world state.
+  console.log(`[testworld] setting world state (${cmds.length} commands)`)
   const errors = []
   await runServer(async send => {
-    await send(cmds[0])
-    await send('save-all flush', /Saved the game/) // let the forced chunks finish loading first
-    for (const cmd of cmds.slice(1)) {
+    for (const cmd of cmds) {
       const out = await send(cmd)
       const bad = out.filter(l => /\[Server thread\//.test(l) && /Could not|not loaded|Unknown|Incorrect|Invalid|Too many|No blocks/i.test(l))
       if (bad.length) errors.push(`${cmd}\n    ${bad.join('\n    ')}`)
