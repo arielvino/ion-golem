@@ -12,8 +12,8 @@
 // Usage (from bot/):
 //   node tools/testworld/build.js --name spawn [--src ../server/world] [--center X,Z]
 //
-// --center is a block position (default: the source world's spawn); its chunk becomes the
-// middle of the 5x5. The result is written to <project>/test-worlds/<name>/ and is started with
+// --center is a block position in the source (default: the source world's spawn); its chunk
+// becomes the middle of the 5x5, which is moved to chunks -2..2 so the box spans x,z -32..47. The result is written to <project>/test-worlds/<name>/ and is started with
 // tools/testworld/testserver.sh. Stop or `save-all flush` the source server first, so the
 // region files on disk are current.
 
@@ -126,6 +126,37 @@ function trimEntities (tree, yLo, yHi) {
     const y = e.Pos.value.value[1]
     return y >= yLo && y < yHi + 1
   })
+  return tree
+}
+
+// Moves a chunk by (dcx, dcz) chunks: its position and the block coords it stores.
+function shiftChunk (tree, dcx, dcz) {
+  const v = tree.value
+  v.xPos.value += dcx
+  v.zPos.value += dcz
+  for (const key of ['block_entities', 'block_ticks', 'fluid_ticks']) {
+    for (const e of v[key].value.value || []) { e.x.value += dcx * 16; e.z.value += dcz * 16 }
+  }
+  return tree
+}
+
+// Moves an entity chunk by (dcx, dcz) chunks, including each entity's (and rider's)
+// position and the block it hangs on (paintings, item frames, leash knots).
+function shiftEntities (tree, dcx, dcz) {
+  const dx = dcx * 16
+  const dz = dcz * 16
+  const v = tree.value
+  v.Position.value[0] += dcx
+  v.Position.value[1] += dcz
+  const move = e => {
+    const pos = e.Pos.value.value
+    pos[0] += dx
+    pos[2] += dz
+    if (e.block_pos) { e.block_pos.value[0] += dx; e.block_pos.value[2] += dz }
+    if (e.TileX) { e.TileX.value += dx; e.TileZ.value += dz }
+    for (const p of e.Passengers?.value.value || []) move(p)
+  }
+  for (const e of v.Entities.value.value || []) move(e)
   return tree
 }
 
@@ -292,8 +323,14 @@ async function main () {
   if (!await portFree(PORT)) throw new Error(`port ${PORT} is in use; stop the test server first (tools/testworld/testserver.sh stop)`)
   const level = await readNbtFile(path.join(args.src, 'level.dat'))
   const [sx, , sz] = args.center ? [args.center[0], 0, args.center[1]] : level.Data.spawn.pos
-  const cx0 = (sx >> 4) - 2
-  const cz0 = (sz >> 4) - 2
+  const srcCx0 = (sx >> 4) - 2
+  const srcCz0 = (sz >> 4) - 2
+  // Every box is moved to chunks -2..2, so it is centred on 0,0 whatever part of the
+  // source it comes from.
+  const cx0 = -2
+  const cz0 = -2
+  const dcx = cx0 - srcCx0
+  const dcz = cz0 - srcCz0
   const X0 = cx0 * 16
   const Z0 = cz0 * 16
   const X1 = X0 + SIZE * 16 - 1
@@ -303,13 +340,15 @@ async function main () {
   const cols = []
   for (let dx = 0; dx < SIZE; dx++) {
     for (let dz = 0; dz < SIZE; dz++) {
-      const cx = cx0 + dx
-      const cz = cz0 + dz
-      const tree = await readChunk(path.join(args.src, OVERWORLD, 'region'), cx, cz)
-      if (!tree) throw new Error(`chunk ${cx},${cz} is not generated in ${args.src}`)
-      if (tree.value.Status.value !== 'minecraft:full') throw new Error(`chunk ${cx},${cz} is not fully generated`)
-      const entities = await readChunk(path.join(args.src, OVERWORLD, 'entities'), cx, cz)
-      cols.push({ cx, cz, tree, entities, surface: heightmap(tree, 'MOTION_BLOCKING_NO_LEAVES'), top: heightmap(tree, 'MOTION_BLOCKING') })
+      const scx = srcCx0 + dx
+      const scz = srcCz0 + dz
+      const tree = await readChunk(path.join(args.src, OVERWORLD, 'region'), scx, scz)
+      if (!tree) throw new Error(`chunk ${scx},${scz} is not generated in ${args.src}`)
+      if (tree.value.Status.value !== 'minecraft:full') throw new Error(`chunk ${scx},${scz} is not fully generated`)
+      shiftChunk(tree, dcx, dcz)
+      let entities = await readChunk(path.join(args.src, OVERWORLD, 'entities'), scx, scz)
+      if (entities) entities = shiftEntities(entities, dcx, dcz)
+      cols.push({ cx: cx0 + dx, cz: cz0 + dz, tree, entities, surface: heightmap(tree, 'MOTION_BLOCKING_NO_LEAVES'), top: heightmap(tree, 'MOTION_BLOCKING') })
     }
   }
   const surfaceY = median(cols.flatMap(c => c.surface)) - 1 // top surface block
@@ -384,6 +423,7 @@ async function main () {
     name: args.name,
     source: args.src,
     sourceSpawn: level.Data.spawn.pos,
+    sourceCube: { min: [srcCx0 * 16, srcCz0 * 16], max: [srcCx0 * 16 + SIZE * 16 - 1, srcCz0 * 16 + SIZE * 16 - 1] },
     seed: SEED,
     cube: { min: [X0, yLo, Z0], max: [X1, yHi, Z1] },
     chunks: { min: [cx0, cz0], max: [cx0 + SIZE - 1, cz0 + SIZE - 1] },
