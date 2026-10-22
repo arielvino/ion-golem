@@ -21,6 +21,51 @@ const REACH = 4.5
 // on them. Fluids are not targetable, so a click goes through water and lava.
 const CLICK_THROUGH = new Set(['air', 'cave_air', 'void_air', 'water', 'lava', 'bubble_column', 'light'])
 
+// The crosshair stops on a block's outline, not its whole cell: a click passes over a
+// slab, a path or a carpet. The collision shapes stand in for the outline. Ground covers
+// without collision are boxed at their full outline height, over the whole cell; anything
+// else without collision (grass, flowers, torches) still stops a click anywhere in its cell.
+const FULL_CELL = [[0, 0, 0, 1, 1, 1]]
+const GROUND_COVER = { leaf_litter: 1 / 16, pink_petals: 3 / 16, wildflowers: 3 / 16 }
+
+function clickShapes(b) {
+  if (b.shapes?.length) return b.shapes
+  const h = GROUND_COVER[b.name]
+  return h ? [[0, 0, 0, 1, h, 1]] : FULL_CELL
+}
+
+// Does the segment from → to cross the box [x0,y0,z0,x1,y1,z1] placed at cell (cx,cy,cz)?
+function segmentHitsBox(from, to, s, cx, cy, cz) {
+  let t0 = 0, t1 = 1
+  for (const [a, lo, hi] of [['x', cx + s[0], cx + s[3]], ['y', cy + s[1], cy + s[4]], ['z', cz + s[2], cz + s[5]]]) {
+    const d = to[a] - from[a]
+    if (Math.abs(d) < 1e-9) { if (from[a] <= lo || from[a] >= hi) return false; continue }
+    let ta = (lo - from[a]) / d, tb = (hi - from[a]) / d
+    if (ta > tb) [ta, tb] = [tb, ta]
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb)
+    if (t0 >= t1) return false
+  }
+  return true
+}
+
+// Can a click from `eye` reach point `to` on the target cell's face? Every cell the segment's
+// bounding box covers, other than the target, is tested against its click shapes.
+function clickClear(eye, to, target) {
+  const bot = state.bot
+  for (let x = Math.floor(Math.min(eye.x, to.x)); x <= Math.floor(Math.max(eye.x, to.x)); x++) {
+    for (let y = Math.floor(Math.min(eye.y, to.y)); y <= Math.floor(Math.max(eye.y, to.y)); y++) {
+      for (let z = Math.floor(Math.min(eye.z, to.z)); z <= Math.floor(Math.max(eye.z, to.z)); z++) {
+        if (x === target.x && y === target.y && z === target.z) continue
+        const b = bot.blockAt(new Vec3(x, y, z))
+        if (!b) return false
+        if (CLICK_THROUGH.has(b.name)) continue
+        if (clickShapes(b).some(s => segmentHitsBox(eye, to, s, x, y, z))) return false
+      }
+    }
+  }
+  return true
+}
+
 function eyeOf(bot) {
   return bot.entity.position.offset(0, bot.entity.eyeHeight || 1.62, 0)
 }
@@ -38,7 +83,7 @@ function canTouch(pos) {
   const eye = eyeOf(state.bot)
   const dist = reachDistance(eye, pos.x, pos.y, pos.z)
   if (dist > REACH) return { ok: false, reason: 'out_of_reach', dist }
-  if (!blockVisible(eye, pos.x, pos.y, pos.z, CLICK_THROUGH)) return { ok: false, reason: 'not_visible', dist }
+  if (!blockVisible(eye, pos.x, pos.y, pos.z, null, null, (to) => clickClear(eye, to, pos))) return { ok: false, reason: 'not_visible', dist }
   return { ok: true, dist }
 }
 

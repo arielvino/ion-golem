@@ -52,7 +52,8 @@ function inFov(eye, look, point, cosHalf) {
 // `passSet` overrides which blocks the sightline passes through (default: see-through).
 // `faceLit` (from light.js's faceLit), when given, also needs the face to be lit: it is
 // called with the cell in front of each face, and a dark face doesn't count.
-function blockVisible(eye, bx, by, bz, passSet, faceLit) {
+// `rayTest(point)`, when given, replaces the sightline test to each face's centre.
+function blockVisible(eye, bx, by, bz, passSet, faceLit, rayTest) {
   const faces = []
   if (eye.x > bx + 1) faces.push({ d: eye.x - (bx + 1), p: new Vec3(bx + 1, by + 0.5, bz + 0.5), f: [bx + 1, by, bz] })
   else if (eye.x < bx) faces.push({ d: bx - eye.x, p: new Vec3(bx, by + 0.5, bz + 0.5), f: [bx - 1, by, bz] })
@@ -65,7 +66,7 @@ function blockVisible(eye, bx, by, bz, passSet, faceLit) {
   faces.sort((a, b) => b.d - a.d) // most face-on first → best early-exit odds
   for (const f of faces) {
     if (faceLit && !faceLit(...f.f)) continue
-    if (rayClear(eye, f.p, passSet)) return true
+    if (rayTest ? rayTest(f.p) : rayClear(eye, f.p, passSet)) return true
   }
   return false
 }
