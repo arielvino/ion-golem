@@ -2,15 +2,14 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { tickWait, raceAbort, AbortError, stopAll, isAborted } = require('../core/tick')
-const { navigateTo, digBlock } = require('../navigation/navigation')
+const { digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
 const { approachToTouch, touchFailText, canTouch } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
-const T = require('../config/timings')
-const { closeIn, dropGoal } = require('./pickup')
+const { pickUp } = require('./pickup')
 
 // Thin plant cover that hangs on a block's faces. The crosshair stops on it, so a log
 // wrapped in vines can't be clicked until they're gone; a player just breaks them first.
@@ -229,19 +228,7 @@ async function doMine(targetName, opts = {}) {
           console.log(color(c.yellow, `  hand-mining ${target.name} — a ${tool} would be ~${factor}x faster`))
           logEvent(`hand-mining ${rawName} without a ${tool} (~${factor}x slower than with one) — craft a ${tool} to speed up this batch`)
         }
-        // Walk onto each drop (see pickup.js) and wait for the server to hand it over.
-        // The first walk aims where the drop is while it still falls and bounces; it can
-        // land a block over or a level down. A second walk aims where it came to rest.
-        for (const drop of drops) {
-          for (let trip = 0; trip < 2 && bot.entities[drop.id] && !isAborted(); trip++) {
-            const g = dropGoal(drop)
-            await navigateTo(g.x, g.y, g.z, g.range, T.PICKUP_NAV_TIMEOUT, { noReachCheck: true })
-            await closeIn(drop, { aborted: isAborted })
-            try {
-              for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[drop.id]; t += 50) await tickWait(50)
-            } catch (e) { break }
-          }
-        }
+        for (const drop of drops) await pickUp(drop, { aborted: isAborted })
         if (isAborted()) break
         const left = drops.filter(d => bot.entities[d.id])
         if (left.length) {
@@ -318,18 +305,9 @@ async function doCollect() {
   const left = []
   for (const item of items) {
     if (isAborted() || !item.isValid) continue
-    try {
-      const g = dropGoal(item)
-      await navigateTo(g.x, g.y, g.z, g.range, 8000, { noReachCheck: true })
-      await closeIn(item, { aborted: isAborted })
-    } catch (e) {
-      if (e instanceof AbortError) throw e
-    }
-    // The server hands the item over a tick or more after the hitbox touches it.
-    try {
-      for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[item.id]; t += 50) await tickWait(50)
-    } catch (e) { break }
-    if (bot.entities[item.id]) left.push(item)
+    const gone = await pickUp(item, { timeoutMs: 8000, aborted: isAborted })
+    if (isAborted()) break
+    if (!gone) left.push(item)
   }
   state.currentTask = null
   if (left.length) {

@@ -11,6 +11,7 @@ const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { dbBlock } = require('../navigation/atomicSteps')
 const { PASSABLE } = require('../config/blocks')
+const T = require('../config/timings')
 
 const PLAYER_HALF_WIDTH = 0.3, PLAYER_HEIGHT = 1.8, ITEM_HALF = 0.125, ITEM_HEIGHT = 0.25
 const NOT_FLOOR = new Set(['air', 'cave_air', 'void_air', 'water', 'lava'])
@@ -71,4 +72,25 @@ async function closeIn(item, { maxMs = 1500, aborted = () => false } = {}) {
   }
 }
 
-module.exports = { closeIn, dropGoal, inPickupRange }
+// Walk onto `item` and wait for the server to hand it over; true once it is gone. A drop
+// that is still falling or bouncing can land a block over or a level down, so one still
+// there after a walk gets another, aimed where it now lies: up to `trips` walks.
+async function pickUp(item, { trips = 2, timeoutMs = T.PICKUP_NAV_TIMEOUT, aborted = () => false } = {}) {
+  const bot = state.bot
+  const { navigateTo } = require('../navigation/navigation')
+  const { AbortError, sleep } = require('../core/tick')
+  for (let trip = 0; trip < trips && bot.entities[item.id] && !aborted(); trip++) {
+    const g = dropGoal(item)
+    try {
+      await navigateTo(g.x, g.y, g.z, g.range, timeoutMs)
+      await closeIn(item, { aborted })
+    } catch (e) {
+      if (e instanceof AbortError) throw e
+    }
+    // The server hands the item over a tick or more after the hitboxes touch.
+    for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[item.id] && !aborted(); t += 50) await sleep(50)
+  }
+  return !bot.entities[item.id]
+}
+
+module.exports = { closeIn, dropGoal, inPickupRange, pickUp }
