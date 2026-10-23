@@ -290,15 +290,8 @@ function setupAutonomous(interruptFn) {
       if (near.length > 0) {
         const c = near[0]
         pickupBusy = true
-        const { navigateTo } = require('../navigation/navigation')
-        const { dropGoal, closeIn } = require('../actions/pickup')
-        const g = dropGoal(c)
-        await navigateTo(g.x, g.y, g.z, g.range, T.PICKUP_NAV_TIMEOUT).catch(() => {})
-        // The walk can end short of pickup range (see pickup.js): closeIn takes the last
-        // step. The server hands the item over a tick or more after the hitboxes touch.
-        // Wait for that.
-        await closeIn(c).catch(() => {})
-        for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[c.id]; t += 50) await sleep(50)
+        const { pickUp } = require('../actions/pickup')
+        await pickUp(c, { trips: 1 }).catch(() => {})
         if (bot.entities[c.id]) {
           unreachableDrops.add(c.id)
           console.log(`  [AUTO] pickup: drop #${c.id} still there after one trip, giving up on it`)

@@ -2,15 +2,14 @@
 const { Vec3 } = require('vec3')
 const state = require('../core/state')
 const { tickWait, raceAbort, AbortError, stopAll, isAborted } = require('../core/tick')
-const { navigateTo, digBlock } = require('../navigation/navigation')
+const { digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
 const { approachToTouch, touchFailText, canTouch } = require('../perception/touch')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
-const T = require('../config/timings')
-const { closeIn, dropGoal } = require('./pickup')
+const { pickUp } = require('./pickup')
 
 // Thin plant cover that hangs on a block's faces. The crosshair stops on it, so a log
 // wrapped in vines can't be clicked until they're gone; a player just breaks them first.
@@ -35,6 +34,15 @@ async function clearCover(pos) {
     t = canTouch(pos)
   }
   return t
+}
+
+// 'oak_logx1@12,97,-2' for each dropped-item entity.
+function describeDrops(items) {
+  return items.map(e => {
+    const it = e.getDroppedItem?.()
+    const p = e.position
+    return `${it ? `${it.name}x${it.count}` : 'item'}@${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`
+  })
 }
 
 async function doMine(targetName, opts = {}) {
@@ -81,6 +89,7 @@ async function doMine(targetName, opts = {}) {
 
   let mined = 0
   let speedWarned = false  // harvest speed advisory fires at most once per mine action
+  const dropsLeft = []     // this action's drops the bot walked to and that stayed on the ground
 
   for (let batch = 0; batch < batchCount; batch++) {
   if (isAborted()) break
@@ -191,8 +200,20 @@ async function doMine(targetName, opts = {}) {
       // ignore path/blueprint protection and mine even next to hazards (ore beside
       // lava is common). The atomic handles equip, break-verify, DB + event log.
       const intent = opts.skipTool ? 'clear-no-tool' : 'harvest'
-      const res = await digBlock(bPos, { intent, reason: 'mine_action',
-        ignorePathBlocks: true, ignorePlacedBlocks: true, allowHazards: true })
+      // This dig's own drops: the items that spawn in the block as it breaks. The item
+      // nearest the bot can be an older drop still lying about.
+      const center = bPos.offset(0.5, 0.5, 0.5)
+      const drops = []
+      const onSpawn = (e) => { if (e.name === 'item' && e.position.distanceTo(center) < 1.5) drops.push(e) }
+      bot.on('entitySpawn', onSpawn)
+      let res
+      try {
+        res = await digBlock(bPos, { intent, reason: 'mine_action',
+          ignorePathBlocks: true, ignorePlacedBlocks: true, allowHazards: true })
+        if (res.ok) try { await tickWait(400) } catch(e) {}
+      } finally {
+        bot.removeListener('entitySpawn', onSpawn)
+      }
       // digBlock swallows AbortError (nav's "never throw on abort" contract), so a
       // mid-dig stop returns {ok:false}. Break cleanly instead of logging a failure.
       if (isAborted()) break
@@ -207,13 +228,14 @@ async function doMine(targetName, opts = {}) {
           console.log(color(c.yellow, `  hand-mining ${target.name} — a ${tool} would be ~${factor}x faster`))
           logEvent(`hand-mining ${rawName} without a ${tool} (~${factor}x slower than with one) — craft a ${tool} to speed up this batch`)
         }
-        try { await tickWait(400) } catch(e) {}
-        if (!isAborted()) {
-          const drop = bot.nearestEntity(e => e.name === 'item' && e.position.distanceTo(bPos) < 5)
-          if (drop) {
-            await navigateTo(drop.position.x, drop.position.y, drop.position.z, 1, 3000, { noReachCheck: true })
-            console.log('  collected drop')
-          }
+        for (const drop of drops) await pickUp(drop, { aborted: isAborted })
+        if (isAborted()) break
+        const left = drops.filter(d => bot.entities[d.id])
+        if (left.length) {
+          dropsLeft.push(...left)
+          console.log(color(c.yellow, `  drop left on the ground: ${describeDrops(left).join(', ')}`))
+        } else if (drops.length) {
+          console.log('  collected drop')
         }
       } else if (res.reason === 'need_tool') {
         console.log(color(c.yellow, `  refusing to hand-mine ${target.name} — no ${res.need} (would drop nothing)`))
@@ -245,7 +267,12 @@ async function doMine(targetName, opts = {}) {
   }
   } // end batch loop
 
-  if (batchCount > 1) console.log(color(c.green, `  mining done: ${mined}/${batchCount} ${rawName}`))
+  // Only the ones still there: a later walk may have picked an earlier one up.
+  const stillLeft = dropsLeft.filter(d => bot.entities[d.id])
+  if (stillLeft.length) {
+    logEvent(`mined ${mined} ${rawName}, but ${stillLeft.length} drop${stillLeft.length > 1 ? 's are' : ' is'} still on the ground: ${describeDrops(stillLeft).join(', ')} — [ACTION:collect] picks them up`)
+  }
+  if (batchCount > 1) console.log(color(c.green, `  mining done: ${mined}/${batchCount} ${rawName}${stillLeft.length ? ` (${stillLeft.length} drop${stillLeft.length > 1 ? 's' : ''} left on the ground)` : ''}`))
   state.currentTask = null
   // Success only if at least one block was actually mined. Zero (couldn't see/reach the
   // target, or an entity/unknown name like `oak_boat`) is a real failure, not a "done".
@@ -278,26 +305,13 @@ async function doCollect() {
   const left = []
   for (const item of items) {
     if (isAborted() || !item.isValid) continue
-    try {
-      const g = dropGoal(item)
-      await navigateTo(g.x, g.y, g.z, g.range, 8000, { noReachCheck: true })
-      await closeIn(item, { aborted: isAborted })
-    } catch (e) {
-      if (e instanceof AbortError) throw e
-    }
-    // The server hands the item over a tick or more after the hitbox touches it.
-    try {
-      for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[item.id]; t += 50) await tickWait(50)
-    } catch (e) { break }
-    if (bot.entities[item.id]) left.push(item)
+    const gone = await pickUp(item, { timeoutMs: 8000, aborted: isAborted })
+    if (isAborted()) break
+    if (!gone) left.push(item)
   }
   state.currentTask = null
   if (left.length) {
-    const what = left.map(e => {
-      const it = e.getDroppedItem?.()
-      const p = e.position
-      return `${it ? `${it.name}x${it.count}` : 'item'}@${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`
-    })
+    const what = describeDrops(left)
     console.log(color(c.yellow, `  collect: still on the ground: ${what.join(', ')}`))
     recordFailure(`collect - walked to ${left.length} of ${items.length} items and they are still on the ground: ${what.join(', ')}`)
     return false
