@@ -230,14 +230,17 @@ async function doMine(targetName, opts = {}) {
           logEvent(`hand-mining ${rawName} without a ${tool} (~${factor}x slower than with one) — craft a ${tool} to speed up this batch`)
         }
         // Walk onto each drop (see pickup.js) and wait for the server to hand it over.
+        // The first walk aims where the drop is while it still falls and bounces; it can
+        // land a block over or a level down. A second walk aims where it came to rest.
         for (const drop of drops) {
-          if (isAborted() || !bot.entities[drop.id]) continue
-          const g = dropGoal(drop)
-          await navigateTo(g.x, g.y, g.z, g.range, T.PICKUP_NAV_TIMEOUT, { noReachCheck: true })
-          await closeIn(drop, { aborted: isAborted })
-          try {
-            for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[drop.id]; t += 50) await tickWait(50)
-          } catch (e) { break }
+          for (let trip = 0; trip < 2 && bot.entities[drop.id] && !isAborted(); trip++) {
+            const g = dropGoal(drop)
+            await navigateTo(g.x, g.y, g.z, g.range, T.PICKUP_NAV_TIMEOUT, { noReachCheck: true })
+            await closeIn(drop, { aborted: isAborted })
+            try {
+              for (let t = 0; t < T.PICKUP_SETTLE && bot.entities[drop.id]; t += 50) await tickWait(50)
+            } catch (e) { break }
+          }
         }
         if (isAborted()) break
         const left = drops.filter(d => bot.entities[d.id])
