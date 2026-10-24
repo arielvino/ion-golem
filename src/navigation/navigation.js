@@ -439,9 +439,12 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
     await digBlock(new Vec3(cx + sx, ny, cz + sz))
   } else {
     // Level: dig foot and head ahead
-    const dug = [await digBlock(new Vec3(cx + sx, cy, cz + sz))]
-    dug.push(await digBlock(new Vec3(cx + sx, cy + 1, cz + sz)))
-    noteMaterials(ctx, dug, cy)
+    const cells = [new Vec3(cx + sx, cy, cz + sz), new Vec3(cx + sx, cy + 1, cz + sz)]
+    const seen = aheadMaterials(ctx, cells, cy)
+    if (!seen) return false
+    const dug = [await digBlock(cells[0])]
+    dug.push(await digBlock(cells[1]))
+    noteMaterials(ctx, seen, dug, cy)
   }
 
   // Center on the perpendicular axis before stepping into the freshly-dug tunnel.
@@ -475,18 +478,37 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
   return true
 }
 
-// Remember which materials a staircase or tunnel step cut, and flag the first step that cuts
-// one the step before it didn't (dirt → stone, stone → an ore): the heading driver
-// stops there so the AI rethinks with the new layer in view. A step that cut
-// nothing (an open cave) keeps the previous step's materials.
-function noteMaterials(ctx, results, y) {
-  const now = new Set(results.filter(r => r?.ok).map(r => materialGroup(r.block)))
-  if (!now.size) return
+// The material stop of a directional staircase or tunnel (stopOnChange in movement.js).
+// A step's materials are what it is about to break, as vision last saw those cells
+// (the DB, so an unseen cell doesn't count until it is dug), plus what it really
+// broke. The first step that meets a material the step before didn't (dirt → stone,
+// stone → an ore, air ahead = an opening, water, bedrock) flags ctx.materialChange.
+// A step checks before it digs (aheadMaterials) and stops in front of the new
+// material; what it then breaks unseen is checked after (noteMaterials).
+function seenMaterials(cells) {
+  return new Set(cells.map(p => dbBlock(p.x, p.y, p.z)).filter(n => n !== null).map(materialGroup))
+}
+
+function flagChange(ctx, now, y, ahead) {
   const prev = ctx.materials
-  ctx.materials = now
-  if (!prev || ctx.materialChange) return
+  if (!prev || ctx.materialChange) return false
   const fresh = [...now].filter(g => !prev.has(g))
-  if (fresh.length) ctx.materialChange = { from: [...prev], to: fresh, y }
+  if (fresh.length) ctx.materialChange = { from: [...prev], to: fresh, y, ahead }
+  return fresh.length > 0
+}
+
+// → the step's seen materials, or null when they hold a new one (stop before digging).
+function aheadMaterials(ctx, cells, y) {
+  const seen = seenMaterials(cells)
+  return flagChange(ctx, seen, y, true) ? null : seen
+}
+
+function noteMaterials(ctx, seen, results, y) {
+  const now = new Set(seen)
+  for (const r of results) if (r?.ok) now.add(materialGroup(r.block))
+  if (!now.size) return
+  flagChange(ctx, now, y, false)
+  ctx.materials = now
 }
 
 // Dig staircase: one step up or down toward target Y.
@@ -600,6 +622,11 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
       if (r && !r.ok && r.reason !== 'not_diggable') refused.push({ p, r })
     }
 
+    // What this step breaks: the head room above, and body space ahead one up.
+    const cells = [new Vec3(cx, curY + 2, cz), new Vec3(cx + stepX, curY + 1, cz + stepZ), new Vec3(cx + stepX, curY + 2, cz + stepZ)]
+    const seen = aheadMaterials(ctx, cells, curY)
+    if (!seen) return false
+
     // Ensure current body space is clear (might be stuck in stone)
     await dig(new Vec3(cx, curY, cz))
     await dig(new Vec3(cx, curY + 1, cz))
@@ -635,7 +662,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     await dig(new Vec3(cx + stepX, curY + 1, cz + stepZ))
     // Dig space for head at +2 level ahead
     await dig(new Vec3(cx + stepX, curY + 2, cz + stepZ))
-    noteMaterials(ctx, dug, curY + 1)
+    noteMaterials(ctx, seen, dug, curY + 1)
     if (state.abortSignal) return false
 
     // Reveal the step cells before the STRICT liveStep — an unsurveyed (unknown)
@@ -676,12 +703,15 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     //
     // Top first: each block is in view only once the one above it is open.
     // Dig forward-and-above for head clearance while walking in
-    const dug = [await digBlock(new Vec3(cx + stepX, curY + 1, cz + stepZ))]
+    const cells = [1, 0, -1].map(dy => new Vec3(cx + stepX, curY + dy, cz + stepZ))
+    const seen = aheadMaterials(ctx, cells, curY)
+    if (!seen) return false
+    const dug = [await digBlock(cells[0])]
     // Dig forward at current level (body space to walk into)
-    dug.push(await digBlock(new Vec3(cx + stepX, curY, cz + stepZ)))
+    dug.push(await digBlock(cells[1]))
     // Dig forward-and-below (the new floor level)
-    dug.push(await digBlock(new Vec3(cx + stepX, curY - 1, cz + stepZ)))
-    noteMaterials(ctx, dug, curY - 1)
+    dug.push(await digBlock(cells[2]))
+    noteMaterials(ctx, seen, dug, curY - 1)
 
     if (state.abortSignal) return false
 

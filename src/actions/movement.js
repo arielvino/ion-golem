@@ -479,7 +479,11 @@ function stopOnChange(u) {
   return {
     fn: (ctx) => {
       const m = ctx.materialChange
-      if (m) { why = `at y${m.y}: the dig went from ${m.from.join('/')} into ${m.to.join('/')}`; return true }
+      if (m) {
+        const to = m.to.map(g => g === 'air' ? 'an opening (air)' : g).join(', ')
+        why = `at y${m.y}: ` + (m.ahead ? `${to} ahead, after ${m.from.join('/')}` : `the dig went from ${m.from.join('/')} into ${to}`)
+        return true
+      }
       if (gate) {
         const lit = eyeLit()
         if (lit !== wasLit) {
