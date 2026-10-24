@@ -7,7 +7,7 @@ const { goals } = require('mineflayer-pathfinder')
 const state = require('../core/state')
 const { tickWait, AbortError, sleep, raceAbort } = require('../core/tick')
 const { castVisionRays, TRANSPARENT, PASSABLE, HAZARDS } = require('../perception/vision')
-const { isPlaceable, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
+const { isPlaceable, materialGroup, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { faces } = require('../config/constants')
 const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
@@ -439,8 +439,9 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
     await digBlock(new Vec3(cx + sx, ny, cz + sz))
   } else {
     // Level: dig foot and head ahead
-    await digBlock(new Vec3(cx + sx, cy, cz + sz))
-    await digBlock(new Vec3(cx + sx, cy + 1, cz + sz))
+    const dug = [await digBlock(new Vec3(cx + sx, cy, cz + sz))]
+    dug.push(await digBlock(new Vec3(cx + sx, cy + 1, cz + sz)))
+    noteMaterials(ctx, dug, cy)
   }
 
   // Center on the perpendicular axis before stepping into the freshly-dug tunnel.
@@ -472,6 +473,20 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
   trackPathBlock(fx, fy, fz, 'tunnel')
   if (heading) ctx.advanced = (ctx.advanced || 0) + 1  // heading-goal progress
   return true
+}
+
+// Remember which materials a staircase or tunnel step cut, and flag the first step that cuts
+// one the step before it didn't (dirt → stone, stone → an ore): the heading driver
+// stops there so the AI rethinks with the new layer in view. A step that cut
+// nothing (an open cave) keeps the previous step's materials.
+function noteMaterials(ctx, results, y) {
+  const now = new Set(results.filter(r => r.ok).map(r => materialGroup(r.block)))
+  if (!now.size) return
+  const prev = ctx.materials
+  ctx.materials = now
+  if (!prev || ctx.materialChange) return
+  const fresh = [...now].filter(g => !prev.has(g))
+  if (fresh.length) ctx.materialChange = { from: [...prev], to: fresh, y }
 }
 
 // Dig staircase: one step up or down toward target Y.
@@ -659,11 +674,12 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     //
     // Top first: each block is in view only once the one above it is open.
     // Dig forward-and-above for head clearance while walking in
-    await digBlock(new Vec3(cx + stepX, curY + 1, cz + stepZ))
+    const dug = [await digBlock(new Vec3(cx + stepX, curY + 1, cz + stepZ))]
     // Dig forward at current level (body space to walk into)
-    await digBlock(new Vec3(cx + stepX, curY, cz + stepZ))
+    dug.push(await digBlock(new Vec3(cx + stepX, curY, cz + stepZ)))
     // Dig forward-and-below (the new floor level)
-    await digBlock(new Vec3(cx + stepX, curY - 1, cz + stepZ))
+    dug.push(await digBlock(new Vec3(cx + stepX, curY - 1, cz + stepZ)))
+    noteMaterials(ctx, dug, curY - 1)
 
     if (state.abortSignal) return false
 
