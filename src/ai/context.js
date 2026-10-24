@@ -226,10 +226,10 @@ function getBotContext() {
     const view = lookAround(bot, ranges.sight.viewBlocks)
     const r = recognizeView(view, { maxDistance: ranges.sight.placesBlocks })
     placesInfo = formatStructures(r)
-    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks })
+    const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, caves: view.caves })
     sightInfo = ' ' + formatSight(summary, view.dark).split('\n').join(' ')
     const ms = Date.now() - t0
-    if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
+    if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, caves ${view.ms.caves.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
   } catch (e) { console.warn('  [CTX] sight err:', e.message) }
 
   const pathCount = countNearbyPathBlocks(pos)

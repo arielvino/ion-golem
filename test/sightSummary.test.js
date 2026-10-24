@@ -90,3 +90,15 @@ test('two-cell things count once: one bed, one door', () => {
   assert.match(layer(view, 'UNNATURAL'), /white_bed×1 /)
   assert.match(layer(view, 'UNNATURAL'), /oak_door×1 /)
 })
+
+test('CAVES: up to five suspects, as caves.js ordered them, with size and nearest cell', () => {
+  const caves = [
+    { cells: 369, at: { x: 12, y: 60, z: -5 }, dist: 13 },
+    { cells: 21, at: { x: -3, y: 62, z: 9 }, dist: 9 },
+  ]
+  const s = summarizeSight({ dimension: 'overworld', eye, blocks: [], caves })
+  assert.match(formatSight(s), /^CAVES=\[369 cells: 13m NE@12,60,-5; 21 cells: 9m S@-3,62,9\]$/m)
+  const many = Array.from({ length: 8 }, (_, i) => ({ cells: 20 + i, at: { x: i, y: 64, z: 0 }, dist: i }))
+  assert.strictEqual(summarizeSight({ dimension: 'overworld', eye, blocks: [], caves: many }).caves.length, 5)
+  assert.doesNotMatch(formatSight(summarizeSight({ dimension: 'overworld', eye, blocks: [] })), /CAVES=/)
+})
