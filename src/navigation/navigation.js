@@ -504,6 +504,7 @@ function flagChange(ctx, now, y, where) {
 
 // → the step's seen materials, or null when they hold a new one (stop before digging).
 function aheadMaterials(ctx, cells, y) {
+  if (ctx.goal?.kind !== 'heading') return new Set()   // a goto has a target: no stop
   const p = state.bot.entity.position
   const body = [0, 1].map(dy => new Vec3(Math.floor(p.x), Math.round(p.y) + dy, Math.floor(p.z)))
   const corridor = ctx.corridor || (ctx.corridor = new Set())
@@ -523,6 +524,7 @@ function aheadMaterials(ctx, cells, y) {
 }
 
 function noteMaterials(ctx, seen, results, y) {
+  if (ctx.goal?.kind !== 'heading') return
   const now = new Set(seen)
   for (const r of results) if (r?.ok) now.add(materialGroup(r.block))
   if (!now.size) return
