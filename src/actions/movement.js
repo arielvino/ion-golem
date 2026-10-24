@@ -4,6 +4,7 @@ const state = require('../core/state')
 const { tick, tickWait, raceAbort, AbortError, sleep, stopAll, isAborted } = require('../core/tick')
 const { navigateTo, digHeading, until } = require('../navigation/navigation')
 const { castVisionRays } = require('../perception/vision')
+const { lightGate } = require('../perception/light')
 const { sendChat, recordFailure, logEvent, fuzzyMatch, resolvePlayerName } = require('../core/utils')
 const { logGameEvent, queryBlockMemory } = require('../world/memory')
 const { dbBlock } = require('../navigation/atomicSteps')
@@ -460,6 +461,51 @@ function buildUntil(untilStr, curY) {
   return null
 }
 
+// Wrap an until condition so a dig also stops where the material it cuts changes
+// (dirt → stone, stone → an ore; see noteMaterials) or where it walks from light into
+// darkness or back out of it: the goal was a guess, and a new layer, the dark (no ore,
+// drop or mob seen, mobs spawn) or daylight is the moment to look around and rethink.
+// Both stop on the change only, so a dig re-issued in the dark goes on. report()
+// tells the AI why.
+function stopOnChange(u) {
+  const bot = state.bot
+  const gate = lightGate(bot)   // null outside the overworld: never too dark there
+  const eyeLit = () => {
+    const p = bot.entity.position
+    return gate.lit(Math.floor(p.x), Math.floor(p.y) + 1, Math.floor(p.z))
+  }
+  let wasLit = gate ? eyeLit() : false
+  let why = null
+  return {
+    fn: (ctx) => {
+      const m = ctx.materialChange
+      if (m) {
+        const to = m.to.map(g => g === 'air' ? 'an opening (air)' : g).join(', ')
+        const after = m.from.filter(g => g !== 'air').join('/') || 'open air'
+        why = `at y${m.y}: ` + (m.where === 'ahead' ? `${to} ahead, after ${after}`
+          : m.where === 'around' ? `${to} in the walls around, after ${after}`
+          : `the dig went from ${after} into ${to}`)
+        return true
+      }
+      if (gate) {
+        const lit = eyeLit()
+        if (lit !== wasLit) {
+          why = `at y${Math.round(bot.entity.position.y)}: ` + (lit ? 'came out of the dark into light' : 'it got too dark to see')
+          return true
+        }
+      }
+      return u.fn(ctx)
+    },
+    desc: `${u.desc}, the material or the light changes`,
+    report: (action) => {
+      if (!why) return
+      const msg = `${action} stopped ${why}`
+      console.log(`  ${msg}`)
+      logEvent(msg)
+    },
+  }
+}
+
 function pushFail(msg) {
   recordFailure(msg)
   state.navFailReason = null
@@ -476,11 +522,14 @@ async function doStaircase(arg, opts = {}) {
   // A staircase must go up or down; a bare step-count defaults to descending.
   const pattern = u.pattern || 'down'
   if (pattern === 'flat') { pushFail(`staircase: "${untilStr}" needs a vertical goal — use yN`); return false }
-  state.currentTask = `staircase ${dirName} until ${u.desc}`
+  // The staircase also stops where the material or the light changes.
+  const m = stopOnChange(u)
+  state.currentTask = `staircase ${dirName} until ${m.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
-  const ok = await digHeading('staircase', dir, { pattern, until: u.fn, untilDesc: u.desc }, { intent })
+  const ok = await digHeading('staircase', dir, { pattern, until: m.fn, untilDesc: m.desc }, { intent })
   state.currentTask = null
   if (!ok && !isAborted()) { pushFail(`staircase:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
+  if (ok) m.report(`staircase:${dirName}:${untilStr}`)
 }
 
 async function doMove(arg) {
@@ -511,11 +560,13 @@ async function doTunnel(arg, opts = {}) {
     pushFail(`tunnel: "${untilStr}" is a vertical goal — use staircase:${dirName}:${untilStr} to change Y`)
     return false
   }
-  state.currentTask = `tunnel ${dirName} until ${u.desc}`
+  const m = stopOnChange(u)
+  state.currentTask = `tunnel ${dirName} until ${m.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
-  const ok = await digHeading('tunnel', dir, { pattern: 'flat', until: u.fn, untilDesc: u.desc }, { intent })
+  const ok = await digHeading('tunnel', dir, { pattern: 'flat', until: m.fn, untilDesc: m.desc }, { intent })
   state.currentTask = null
   if (!ok && !isAborted()) { pushFail(`tunnel:${dirName}:${untilStr} failed (${state.navFailReason || 'unknown'})`); return false }
+  if (ok) m.report(`tunnel:${dirName}:${untilStr}`)
 }
 
 const COMPASS_OFFSETS = {

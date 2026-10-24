@@ -7,7 +7,7 @@ const { goals } = require('mineflayer-pathfinder')
 const state = require('../core/state')
 const { tickWait, AbortError, sleep, raceAbort } = require('../core/tick')
 const { castVisionRays, TRANSPARENT, PASSABLE, HAZARDS } = require('../perception/vision')
-const { isPlaceable, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
+const { isPlaceable, materialGroup, WATER_BLOCKS, STRUCTURAL_AIR } = require('../config/blocks')
 const { faces } = require('../config/constants')
 const { surveyForNav } = require('../perception/visibility')
 const { removeBlock, trackPathBlock, isPathBlock, logGameEvent } = require('../world/memory')
@@ -439,8 +439,12 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
     await digBlock(new Vec3(cx + sx, ny, cz + sz))
   } else {
     // Level: dig foot and head ahead
-    await digBlock(new Vec3(cx + sx, cy, cz + sz))
-    await digBlock(new Vec3(cx + sx, cy + 1, cz + sz))
+    const cells = [new Vec3(cx + sx, cy, cz + sz), new Vec3(cx + sx, cy + 1, cz + sz)]
+    const seen = aheadMaterials(ctx, cells, cy)
+    if (!seen) return false
+    const dug = [await digBlock(cells[0])]
+    dug.push(await digBlock(cells[1]))
+    noteMaterials(ctx, seen, dug, cy)
   }
 
   // Center on the perpendicular axis before stepping into the freshly-dug tunnel.
@@ -472,6 +476,60 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
   trackPathBlock(fx, fy, fz, 'tunnel')
   if (heading) ctx.advanced = (ctx.advanced || 0) + 1  // heading-goal progress
   return true
+}
+
+// The material stop of a directional staircase or tunnel (stopOnChange in movement.js).
+// A step's materials are the cells it is about to break and the walls, floor and
+// ceiling around the cells the step before broke (now open and in view), as vision
+// saw them (the DB: an unseen cell doesn't count, so the dark hides it), plus what it
+// really broke (a cell out of view until the ones above it were dug, or in the dark).
+// The first step that meets a material the step before didn't (dirt → stone, coal in
+// the wall, air = an opening, water, bedrock) flags ctx.materialChange. A step checks
+// before it digs (aheadMaterials) and stops in front of the new material; what it
+// then breaks unseen is checked after (noteMaterials).
+const key = (p) => `${p.x},${p.y},${p.z}`
+const NEIGHBOURS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+
+function seenMaterials(cells) {
+  return new Set(cells.map(p => dbBlock(p.x, p.y, p.z)).filter(n => n !== null).map(materialGroup))
+}
+
+function flagChange(ctx, now, y, where) {
+  const prev = ctx.materials
+  if (!prev || ctx.materialChange) return false
+  const fresh = [...now].filter(g => !prev.has(g))
+  if (fresh.length) ctx.materialChange = { from: [...prev], to: fresh, y, where }
+  return fresh.length > 0
+}
+
+// → the step's seen materials, or null when they hold a new one (stop before digging).
+function aheadMaterials(ctx, cells, y) {
+  if (ctx.goal?.kind !== 'heading') return new Set()   // a goto has a target: no stop
+  const p = state.bot.entity.position
+  const body = [0, 1].map(dy => new Vec3(Math.floor(p.x), Math.round(p.y) + dy, Math.floor(p.z)))
+  const corridor = ctx.corridor || (ctx.corridor = new Set())
+  for (const c of [...body, ...cells]) corridor.add(key(c))
+  const walls = []
+  for (const c of ctx.lastCells || body) {
+    for (const [dx, dy, dz] of NEIGHBOURS) {
+      const n = c.offset(dx, dy, dz)
+      if (!corridor.has(key(n))) walls.push(n)
+    }
+  }
+  if ([...cells, ...walls].some(c => dbBlock(c.x, c.y, c.z) === null)) surveyForNav({ maxDistance: 6 })
+  const ahead = seenMaterials(cells), around = seenMaterials(walls)
+  if (flagChange(ctx, ahead, y, 'ahead') || flagChange(ctx, around, y, 'around')) return null
+  ctx.lastCells = cells
+  return new Set([...ahead, ...around])
+}
+
+function noteMaterials(ctx, seen, results, y) {
+  if (ctx.goal?.kind !== 'heading') return
+  const now = new Set(seen)
+  for (const r of results) if (r?.ok) now.add(materialGroup(r.block))
+  if (!now.size) return
+  flagChange(ctx, now, y, 'dug')
+  ctx.materials = now
 }
 
 // Dig staircase: one step up or down toward target Y.
@@ -578,11 +636,17 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     // keep ahead at +0 solid as the step, then jump-walk onto it.
     const beforeY = bot.entity.position.y
     // Digs the climb needed but digBlock refused, so a failed step can say why.
-    const refused = []
+    const refused = [], dug = []
     const dig = async (p) => {
       const r = await digBlock(p)
+      dug.push(r)
       if (r && !r.ok && r.reason !== 'not_diggable') refused.push({ p, r })
     }
+
+    // What this step breaks: the head room above, and body space ahead one up.
+    const cells = [new Vec3(cx, curY + 2, cz), new Vec3(cx + stepX, curY + 1, cz + stepZ), new Vec3(cx + stepX, curY + 2, cz + stepZ)]
+    const seen = aheadMaterials(ctx, cells, curY)
+    if (!seen) return false
 
     // Ensure current body space is clear (might be stuck in stone)
     await dig(new Vec3(cx, curY, cz))
@@ -619,6 +683,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     await dig(new Vec3(cx + stepX, curY + 1, cz + stepZ))
     // Dig space for head at +2 level ahead
     await dig(new Vec3(cx + stepX, curY + 2, cz + stepZ))
+    noteMaterials(ctx, seen, dug, curY + 1)
     if (state.abortSignal) return false
 
     // Reveal the step cells before the STRICT liveStep — an unsurveyed (unknown)
@@ -659,11 +724,15 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     //
     // Top first: each block is in view only once the one above it is open.
     // Dig forward-and-above for head clearance while walking in
-    await digBlock(new Vec3(cx + stepX, curY + 1, cz + stepZ))
+    const cells = [1, 0, -1].map(dy => new Vec3(cx + stepX, curY + dy, cz + stepZ))
+    const seen = aheadMaterials(ctx, cells, curY)
+    if (!seen) return false
+    const dug = [await digBlock(cells[0])]
     // Dig forward at current level (body space to walk into)
-    await digBlock(new Vec3(cx + stepX, curY, cz + stepZ))
+    dug.push(await digBlock(cells[1]))
     // Dig forward-and-below (the new floor level)
-    await digBlock(new Vec3(cx + stepX, curY - 1, cz + stepZ))
+    dug.push(await digBlock(cells[2]))
+    noteMaterials(ctx, seen, dug, curY - 1)
 
     if (state.abortSignal) return false
 
