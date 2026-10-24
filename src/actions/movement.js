@@ -463,9 +463,10 @@ function buildUntil(untilStr, curY) {
 
 // Wrap an until condition so a dig also stops where the material it cuts changes
 // (dirt → stone, stone → an ore; see noteMaterials) or where it walks from light into
-// darkness: the goal was a guess, and a new layer or the dark (no ore, drop or mob
-// seen, mobs spawn) is the moment to look around and rethink. Both stop on the
-// change only, so a dig re-issued in the dark goes on. report() tells the AI why.
+// darkness or back out of it: the goal was a guess, and a new layer, the dark (no ore,
+// drop or mob seen, mobs spawn) or daylight is the moment to look around and rethink.
+// Both stop on the change only, so a dig re-issued in the dark goes on. report()
+// tells the AI why.
 function stopOnChange(u) {
   const bot = state.bot
   const gate = lightGate(bot)   // null outside the overworld: never too dark there
@@ -481,12 +482,14 @@ function stopOnChange(u) {
       if (m) { why = `at y${m.y}: the dig went from ${m.from.join('/')} into ${m.to.join('/')}`; return true }
       if (gate) {
         const lit = eyeLit()
-        if (wasLit && !lit) { why = `at y${Math.round(bot.entity.position.y)}: too dark to see here — light it (torch) or turn back`; return true }
-        wasLit = lit
+        if (lit !== wasLit) {
+          why = `at y${Math.round(bot.entity.position.y)}: ` + (lit ? 'came out of the dark into light' : 'too dark to see here — light it (torch) or turn back')
+          return true
+        }
       }
       return u.fn(ctx)
     },
-    desc: `${u.desc}, the material changes or it gets dark`,
+    desc: `${u.desc}, the material or the light changes`,
     report: (action) => {
       if (!why) return
       const msg = `${action} stopped ${why}`
@@ -512,8 +515,8 @@ async function doStaircase(arg, opts = {}) {
   // A staircase must go up or down; a bare step-count defaults to descending.
   const pattern = u.pattern || 'down'
   if (pattern === 'flat') { pushFail(`staircase: "${untilStr}" needs a vertical goal — use yN`); return false }
-  // Going down, the staircase also stops where the material changes or it gets dark.
-  const m = pattern === 'down' ? stopOnChange(u) : { fn: u.fn, desc: u.desc, report: () => {} }
+  // The staircase also stops where the material or the light changes.
+  const m = stopOnChange(u)
   state.currentTask = `staircase ${dirName} until ${m.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
   const ok = await digHeading('staircase', dir, { pattern, until: m.fn, untilDesc: m.desc }, { intent })

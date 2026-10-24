@@ -480,7 +480,7 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
 // stops there so the AI rethinks with the new layer in view. A step that cut
 // nothing (an open cave) keeps the previous step's materials.
 function noteMaterials(ctx, results, y) {
-  const now = new Set(results.filter(r => r.ok).map(r => materialGroup(r.block)))
+  const now = new Set(results.filter(r => r?.ok).map(r => materialGroup(r.block)))
   if (!now.size) return
   const prev = ctx.materials
   ctx.materials = now
@@ -593,9 +593,10 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     // keep ahead at +0 solid as the step, then jump-walk onto it.
     const beforeY = bot.entity.position.y
     // Digs the climb needed but digBlock refused, so a failed step can say why.
-    const refused = []
+    const refused = [], dug = []
     const dig = async (p) => {
       const r = await digBlock(p)
+      dug.push(r)
       if (r && !r.ok && r.reason !== 'not_diggable') refused.push({ p, r })
     }
 
@@ -634,6 +635,7 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     await dig(new Vec3(cx + stepX, curY + 1, cz + stepZ))
     // Dig space for head at +2 level ahead
     await dig(new Vec3(cx + stepX, curY + 2, cz + stepZ))
+    noteMaterials(ctx, dug, curY + 1)
     if (state.abortSignal) return false
 
     // Reveal the step cells before the STRICT liveStep — an unsurveyed (unknown)
