@@ -47,31 +47,34 @@ function coverTable(registry, opaque) {
 // dist }] nearest first; [] when the bot is not under open sky.
 function suspectCaves(registry, { snap, side, x0, y0, z0, ox, oy, oz }, seen, dry, opaque) {
   const cover = coverTable(registry, opaque)
-  const seenTop = new Int16Array(side * side).fill(-1)     // per column: highest seen terrain block
-  for (let i = 0; i < seen.length; i++) {
-    if (!seen[i] || !cover[snap[i]]) continue
-    const x = i % side, z = Math.floor(i / side) % side, y = Math.floor(i / (side * side))
-    const k = z * side + x
-    if (y > seenTop[k]) seenTop[k] = y
+  const plane = side * side
+  const seenTop = new Int16Array(plane).fill(-1)            // per column (z * side + x): highest seen terrain block
+  for (let y = 0, i = 0; y < side; y++) for (let k = 0; k < plane; k++, i++) {
+    if (seen[i] && cover[snap[i]]) seenTop[k] = y
   }
   const ex = Math.floor(ox), ey = Math.floor(oy), ez = Math.floor(oz)
   if (seenTop[ez * side + ex] > ey) return []                // underground or under an overhang
 
+  // Per column, the pit rim: along x and along z, the lower of the nearest seen column within RIM
+  // on each side; the higher of the two axes. -1: no rim.
   const top = (x, z) => (x < 0 || z < 0 || x >= side || z >= side) ? -1 : seenTop[z * side + x]
-  const rim = (x, z, dx, dz) => {
+  const rimAxis = (x, z, dx, dz) => {
     let p = -1, q = -1
     for (let k = 1; k <= RIM && p < 0; k++) p = top(x + dx * k, z + dz * k)
     for (let k = 1; k <= RIM && q < 0; k++) q = top(x - dx * k, z - dz * k)
     return p < 0 || q < 0 ? -1 : Math.min(p, q)
   }
+  const rim = new Int16Array(plane)
+  for (let z = 0; z < side; z++) for (let x = 0; x < side; x++) rim[z * side + x] = Math.max(rimAxis(x, z, 1, 0), rimAxis(x, z, 0, 1))
+
   const cue = new Uint8Array(dry.length)
-  for (let i = 0; i < dry.length; i++) {
+  for (let y = 0, i = 0; y < side; y++) for (let z = 0; z < side; z++) for (let x = 0; x < side; x++, i++) {
     if (!dry[i]) continue
-    const x = i % side, z = Math.floor(i / side) % side, y = Math.floor(i / (side * side))
+    const k = z * side + x
+    if (!(seenTop[k] > y || (rim[k] >= 0 && rim[k] - y >= PIT_DEPTH))) continue
     if (Math.hypot(x + 0.5 - ox, y + 0.5 - oy, z + 0.5 - oz) <= NEAR_EYE) continue
-    if (dug.has(`${x0 + x},${y0 + y},${z0 + z}`)) continue
-    const r = Math.max(rim(x, z, 1, 0), rim(x, z, 0, 1))
-    if (top(x, z) > y || (r >= 0 && r - y >= PIT_DEPTH)) cue[i] = 1
+    if (dug.size && dug.has(`${x0 + x},${y0 + y},${z0 + z}`)) continue
+    cue[i] = 1
   }
 
   const out = []
