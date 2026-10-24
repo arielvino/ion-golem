@@ -9,9 +9,11 @@
 // terrain roofs a cave (natural-blocks.js): a house or a tree is not one. Cells the bot dug
 // itself are not a cave either (noteDug). Sightlines stop at water: nothing seen through it.
 //
-// Measured on the real server (2026-10-24, daylight, 5 known + 5 new random land patches, 800
-// surface spots, ground truth from the whole world): 97% of reports were real caves, and 93-97%
-// of the caves a spot could see 3+ blocks into were reported.
+// Measured on the real server (2026-10-24, daylight, 40 random land patches it was not tuned on,
+// 998 surface spots, ground truth from the whole world): of 58 caves some spot could see 3+ blocks
+// into, 54 were reported (93%; each miss was seen from one spot only); of the distinct places
+// reported, 121 were real caves and 16 natural ledges or hollows under 30 cells (88%).
+// MIN_CELLS 30 would give 86% / 94%.
 //
 // Surface only: underground, everything around is "covered", so no report there.
 const { roleOf } = require('../config/natural-blocks')
