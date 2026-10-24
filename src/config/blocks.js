@@ -158,7 +158,7 @@ function isOpenable(name) {
 
 // Blocks a dig treats as one material: a staircase or tunnel stops where the material
 // it cuts changes, and these changes don't count. Anything unlisted is its own group.
-const MATERIAL_GROUPS = { grass_block: 'dirt', cave_air: 'air', void_air: 'air' }
+const MATERIAL_GROUPS = { grass_block: 'dirt', dirt_path: 'dirt', cave_air: 'air', void_air: 'air' }
 const materialGroup = (name) => MATERIAL_GROUPS[name] || name
 
 module.exports = { materialGroup, TRANSPARENT, NOTABLE_TRANSPARENT, PASSABLE, SURFACE, HAZARDS, RESOURCES, WATER_BLOCKS, FIRE_BLOCKS, STRUCTURAL_AIR, isPlaceable, isOpenable }
