@@ -490,7 +490,7 @@ function stopOnChange(u) {
       if (gate) {
         const lit = eyeLit()
         if (lit !== wasLit) {
-          why = `at y${Math.round(bot.entity.position.y)}: ` + (lit ? 'came out of the dark into light' : 'too dark to see here — light it (torch) or turn back')
+          why = `at y${Math.round(bot.entity.position.y)}: ` + (lit ? 'came out of the dark into light' : 'it got too dark to see')
           return true
         }
       }
