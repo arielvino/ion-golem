@@ -6,6 +6,7 @@ const { digBlock } = require('../navigation/navigation')
 const { removeBlock, queryBlockMemory, logGameEvent } = require('../world/memory')
 const { castVisionRays, hasLineOfSight } = require('../perception/vision')
 const { approachToTouch, touchFailText, canTouch } = require('../perception/touch')
+const { DECORATION } = require('../config/natural-blocks')
 const { c, color } = require('../lib/colors')
 const { sendChat, debugChat, logEvent, normalizeItemName, recordFailure, fuzzyMatch, parseCoordTarget } = require('../core/utils')
 const { labelOf } = require('../world/blockLabel')
@@ -14,6 +15,11 @@ const { pickUp } = require('./pickup')
 // Thin plant cover that hangs on a block's faces. The crosshair stops on it, so a log
 // wrapped in vines can't be clicked until they're gone; a player just breaks them first.
 const COVER = new Set(['vine', 'glow_lichen'])
+// So does a plant in the way of the click (grass, a fern, a flower): the crosshair
+// stops on it, and a player breaks it in one hit first. Natural, no collision,
+// instant to break, so a placed torch is never one.
+const isCover = (b) => !!b && (COVER.has(b.name) ||
+  (DECORATION.has(b.name) && b.hardness === 0 && !b.shapes?.length))
 const SIDES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
 
 // Break the cover on `pos` that the bot can touch, nearest first, until `pos` itself
@@ -22,7 +28,7 @@ async function clearCover(pos) {
   const bot = state.bot
   const here = bot.entity.position
   const covers = SIDES.map(([dx, dy, dz]) => pos.offset(dx, dy, dz))
-    .filter(p => COVER.has(bot.blockAt(p)?.name))
+    .filter(p => isCover(bot.blockAt(p)))
     .sort((a, b) => here.distanceTo(a) - here.distanceTo(b))
   let t = canTouch(pos)
   for (const p of covers) {
