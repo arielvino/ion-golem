@@ -8,7 +8,7 @@
 //   - light sources always show.
 // Effective light = max(block light, sky light - night darkening). Overworld only: the
 // Nether and the End are dimly lit everywhere.
-const { skyDarken, emitTable, opaqueTable, MIN_LIGHT } = require('./sight')
+const { skyDarken, emitTable, opaqueTable, skyLightSection, MIN_LIGHT } = require('./sight')
 
 // → null outside the overworld (nothing is too dark to see there), else
 //   { lit(x, y, z): is the cell's light enough to see by,
@@ -22,15 +22,15 @@ function lightGate(bot) {
   const darken = skyDarken(bot.time?.timeOfDay ?? 6000, bot.rainState || 0, bot.thunderState || 0)
   const emits = emitTable(bot.registry), opaque = opaqueTable(bot.registry)
   const minY = bot.game.minY
-  let lcx = NaN, lcz = NaN, col = null
+  let lcx = NaN, lcz = NaN, col = null, sky = []
   function level(x, y, z) {
     const cx = x >> 4, cz = z >> 4
-    if (cx !== lcx || cz !== lcz) { col = bot.world.getColumn(cx, cz); lcx = cx; lcz = cz }
+    if (cx !== lcx || cz !== lcz) { col = bot.world.getColumn(cx, cz); lcx = cx; lcz = cz; sky = [] }
     if (!col) return 0
     const ry = y - minY
     // Light sections run one below the block sections: index sy + 1.
     const s = (ry >> 4) + 1, i = ((ry & 15) << 8) | ((z & 15) << 4) | (x & 15)
-    const bl = col.blockLightSections?.[s], sl = col.skyLightSections?.[s]
+    const bl = col.blockLightSections?.[s], sl = sky[s] === undefined ? (sky[s] = skyLightSection(col, s)) : sky[s]
     return Math.max(bl ? bl.get(i) : 0, (sl ? sl.get(i) : 0) - darken)
   }
   const lit = (x, y, z) => level(x, y, z) >= MIN_LIGHT

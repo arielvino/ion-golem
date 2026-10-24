@@ -52,3 +52,24 @@ test('faceLit: a solid block goes by the face cell, a see-through one by its own
   assert.equal(g.faceLit(sid('glowstone'), 0, 0, 0), null)
   assert.equal(g.faceLit(sid('torch'), 0, 0, 0), null)
 })
+
+// The server sends no sky light for the all-air sections high above the terrain (#209).
+test('a sky light section the server did not send reads as vanilla does', () => {
+  const { snapshot } = require('../src/perception/sight')
+  // Light index 6 (y 16..31) was sent: sky 9, but 4 on its bottom row. Below it 5 (y 0..15) was
+  // not, nor anything above it; indexes up to 4 were sent as dark.
+  const skyLightSections = Array.from({ length: 26 }, (_, s) =>
+    s <= 4 ? { get: () => 0 } : s === 6 ? { get: (i) => (i >> 8 === 0 ? 4 : 9) } : undefined)
+  const column = { sections: Array.from({ length: 24 }, () => ({ data: { value: 0 } })), blockLightSections: [], skyLightSections }
+  const bot = { ...makeBot(dark), world: { getColumn: () => column } }
+  const g = lightGate(bot)
+  assert.ok(g.lit(0, 40, 0))                      // above every sent section: full sky
+  assert.ok(g.lit(0, 300, 0))
+  assert.ok(g.lit(0, 5, 0))                       // a gap: the bottom row of the sent one above
+  assert.ok(!g.lit(0, -10, 0))                    // sent as dark stays dark
+  const lightAt = (y) => snapshot(bot, { x: 0.5, y: y + 0.5, z: 0.5 }, 0, 0).light[0]
+  assert.equal(lightAt(40), 15)
+  assert.equal(lightAt(5), 4)
+  assert.equal(lightAt(20), 9)
+  assert.equal(lightAt(-10), 0)
+})
