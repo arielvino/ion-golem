@@ -64,6 +64,21 @@ function opaqueTable(registry) {
   return t
 }
 
+// A column's sky light section s (light sections run one below the block sections). The server
+// sends none for the all-air sections high above the terrain; vanilla reads such a section as the
+// bottom row of the nearest section above it that has data, or as full sky (15) when none has.
+const FULL_SKY = { get: () => 15 }
+function skyLightSection(col, s) {
+  const sl = col.skyLightSections
+  if (!sl) return null
+  if (sl[s]) return sl[s]
+  for (let u = s + 1; u < sl.length; u++) {
+    const up = sl[u]
+    if (up) return { get: (i) => up.get(i & 255) }
+  }
+  return FULL_SKY
+}
+
 // Copy the cube [eye-R, eye+R] into a Uint16Array of state ids, via section palettes.
 // darken (a number) also copies each cell's effective light into `light`; null skips it.
 function snapshot(bot, eye, R, darken = null) {
@@ -80,7 +95,7 @@ function snapshot(bot, eye, R, darken = null) {
         const single = d.value !== undefined && !d.palette ? d.value : -1
         const pal = d.palette, bits = d.data
         // Light sections run one below the block sections: index sy + 1.
-        const bl = light && col.blockLightSections?.[sy + 1], sl = light && col.skyLightSections?.[sy + 1]
+        const bl = light && col.blockLightSections?.[sy + 1], sl = light && skyLightSection(col, sy + 1)
         for (let ly = 0; ly < 16; ly++) {
           const y = by + ly - y0; if (y < 0 || y >= side) continue
           for (let lz = 0; lz < 16; lz++) {
@@ -200,4 +215,4 @@ function lookAround(bot, R = 64) {
   return { eye, radius: R, blocks, dark: darkness, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks } }
 }
 
-module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, skyDarken, MIN_LIGHT, NEAR, AIR }
+module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, skyDarken, skyLightSection, MIN_LIGHT, NEAR, AIR }

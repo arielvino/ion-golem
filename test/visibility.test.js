@@ -53,7 +53,8 @@ function makeBot(worldMap, { pos = new Vec3(0.5, 0.5, 0.5), yaw = 0, pitch = 0, 
       col.blockLightSections = Array.from({ length: NUM_SECTIONS + 2 }, (_, s) => ({
         get: (i) => light(cx * 16 + (i & 15), MIN_Y + (s - 1) * 16 + (i >> 8), cz * 16 + ((i >> 4) & 15)),
       }))
-      col.skyLightSections = []
+      // Sent, and dark: a section the server didn't send would read as open sky (#209).
+      col.skyLightSections = Array.from({ length: NUM_SECTIONS + 2 }, () => ({ get: () => 0 }))
     }
     return col
   }
