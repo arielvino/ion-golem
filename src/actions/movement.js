@@ -481,7 +481,10 @@ function stopOnChange(u) {
       const m = ctx.materialChange
       if (m) {
         const to = m.to.map(g => g === 'air' ? 'an opening (air)' : g).join(', ')
-        why = `at y${m.y}: ` + (m.ahead ? `${to} ahead, after ${m.from.join('/')}` : `the dig went from ${m.from.join('/')} into ${to}`)
+        const after = m.from.filter(g => g !== 'air').join('/') || 'open air'
+        why = `at y${m.y}: ` + (m.where === 'ahead' ? `${to} ahead, after ${after}`
+          : m.where === 'around' ? `${to} in the walls around, after ${after}`
+          : `the dig went from ${after} into ${to}`)
         return true
       }
       if (gate) {

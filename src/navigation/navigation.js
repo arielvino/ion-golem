@@ -479,35 +479,54 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
 }
 
 // The material stop of a directional staircase or tunnel (stopOnChange in movement.js).
-// A step's materials are what it is about to break, as vision last saw those cells
-// (the DB, so an unseen cell doesn't count until it is dug), plus what it really
-// broke. The first step that meets a material the step before didn't (dirt → stone,
-// stone → an ore, air ahead = an opening, water, bedrock) flags ctx.materialChange.
-// A step checks before it digs (aheadMaterials) and stops in front of the new
-// material; what it then breaks unseen is checked after (noteMaterials).
+// A step's materials are the cells it is about to break and the walls, floor and
+// ceiling around the cells the step before broke (now open and in view), as vision
+// saw them (the DB: an unseen cell doesn't count, so the dark hides it), plus what it
+// really broke (a cell out of view until the ones above it were dug, or in the dark).
+// The first step that meets a material the step before didn't (dirt → stone, coal in
+// the wall, air = an opening, water, bedrock) flags ctx.materialChange. A step checks
+// before it digs (aheadMaterials) and stops in front of the new material; what it
+// then breaks unseen is checked after (noteMaterials).
+const key = (p) => `${p.x},${p.y},${p.z}`
+const NEIGHBOURS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+
 function seenMaterials(cells) {
   return new Set(cells.map(p => dbBlock(p.x, p.y, p.z)).filter(n => n !== null).map(materialGroup))
 }
 
-function flagChange(ctx, now, y, ahead) {
+function flagChange(ctx, now, y, where) {
   const prev = ctx.materials
   if (!prev || ctx.materialChange) return false
   const fresh = [...now].filter(g => !prev.has(g))
-  if (fresh.length) ctx.materialChange = { from: [...prev], to: fresh, y, ahead }
+  if (fresh.length) ctx.materialChange = { from: [...prev], to: fresh, y, where }
   return fresh.length > 0
 }
 
 // → the step's seen materials, or null when they hold a new one (stop before digging).
 function aheadMaterials(ctx, cells, y) {
-  const seen = seenMaterials(cells)
-  return flagChange(ctx, seen, y, true) ? null : seen
+  const p = state.bot.entity.position
+  const body = [0, 1].map(dy => new Vec3(Math.floor(p.x), Math.round(p.y) + dy, Math.floor(p.z)))
+  const corridor = ctx.corridor || (ctx.corridor = new Set())
+  for (const c of [...body, ...cells]) corridor.add(key(c))
+  const walls = []
+  for (const c of ctx.lastCells || body) {
+    for (const [dx, dy, dz] of NEIGHBOURS) {
+      const n = c.offset(dx, dy, dz)
+      if (!corridor.has(key(n))) walls.push(n)
+    }
+  }
+  if ([...cells, ...walls].some(c => dbBlock(c.x, c.y, c.z) === null)) surveyForNav({ maxDistance: 6 })
+  const ahead = seenMaterials(cells), around = seenMaterials(walls)
+  if (flagChange(ctx, ahead, y, 'ahead') || flagChange(ctx, around, y, 'around')) return null
+  ctx.lastCells = cells
+  return new Set([...ahead, ...around])
 }
 
 function noteMaterials(ctx, seen, results, y) {
   const now = new Set(seen)
   for (const r of results) if (r?.ok) now.add(materialGroup(r.block))
   if (!now.size) return
-  flagChange(ctx, now, y, false)
+  flagChange(ctx, now, y, 'dug')
   ctx.materials = now
 }
 
