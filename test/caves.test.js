@@ -53,12 +53,14 @@ test('a cave seen only through water is not reported', () => {
   assert.deepStrictEqual(view((set) => hillCave(set, 'water')), [])
 })
 
-test('a roof of planks or leaves is no cave', () => {
+test('a roof of planks, leaves or ice is no cave; terracotta is one', () => {
   const roofed = (roof) => view((set) => {
     for (let x = R + 4; x <= R + 9; x++) for (let z = R - 3; z <= R + 3; z++) set(x, GROUND + 4, z, roof)
   })
   assert.deepStrictEqual(roofed('oak_planks'), [])
   assert.deepStrictEqual(roofed('oak_leaves'), [])
+  assert.deepStrictEqual(roofed('packed_ice'), [])
+  assert.strictEqual(roofed('terracotta').length, 1)
 })
 
 test('cells the bot dug itself are no cave', () => {

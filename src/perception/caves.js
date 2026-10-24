@@ -29,14 +29,21 @@ function noteDug(pos) {
   dug.add(`${pos.x},${pos.y},${pos.z}`)
 }
 
-// stateId -> 1 if the block is natural terrain or ore (what a cave is cut into). One per registry.
+// Natural, but no cave roof: ice spikes lean over open air (8 of 11 false places on the real
+// server were under them), and snow lies on top of things.
+const NOT_ROOF = new Set(['ice', 'packed_ice', 'blue_ice', 'snow_block', 'powder_snow'])
+const ROCK = new Set(['terrain', 'resource'])
+
+// stateId -> 1 if the block is natural terrain or ore (what a cave is cut into), in any overworld
+// biome (badlands terracotta too). One per registry.
 const _cover = new WeakMap()
 function coverTable(registry, opaque) {
   let t = _cover.get(registry)
   if (t) return t
   t = new Uint8Array(1 << 16)
   for (const b of Object.values(registry.blocksByStateId)) {
-    if (!['terrain', 'resource'].includes(roleOf(b.name, 'overworld', ''))) continue
+    if (NOT_ROOF.has(b.name)) continue
+    if (!ROCK.has(roleOf(b.name, 'overworld', '')) && !ROCK.has(roleOf(b.name, 'overworld', 'badlands'))) continue
     for (let s = b.minStateId; s <= b.maxStateId; s++) if (opaque[s]) t[s] = 1
   }
   _cover.set(registry, t)
