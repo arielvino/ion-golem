@@ -63,6 +63,17 @@ test('a 2-block bank is no cliff', () => {
   assert.strictEqual(landforms(ground((x) => x < 15 ? 66 : 64), eye).cliffs.length, 0)
 })
 
+test('a cliff whose foot is hidden under its brow is still found; a slope bending away is not', () => {
+  // 10-high step at x=15, the 2 columns below it unseen: 10 down over 3 columns, so one step is 3+.
+  const lf = landforms(ground((x) => x === 15 || x === 16 ? null : x < 15 ? 74 : 64), eye)
+  assert.strictEqual(lf.cliffs.length, 1)
+  assert.strictEqual(lf.cliffs[0].faces, 'E')
+  assert.ok(lf.cliffs[0].height >= 10, `height ${lf.cliffs[0].height}`)
+  // 2 per column down, 2 columns unseen: 6 over 3 columns could be any 2-2-2.
+  const slope = (x) => x < 15 ? 74 : 74 - 2 * (x - 14)
+  assert.strictEqual(landforms(ground((x) => x === 15 || x === 16 ? null : Math.max(50, slope(x))), eye).cliffs.length, 0)
+})
+
 test('a hill whose far side is unseen is open; unseen columns get no form', () => {
   const b = ground((x, z) => x > 22 ? null : 64 + Math.max(0, 16 - Math.hypot(x - 20, z)))
   assert.strictEqual(formAt(b, -25, 0), 'flat')

@@ -105,29 +105,37 @@ function geomorphons({ w, h, top }) {
   return out
 }
 
-// Cliffs: columns with a steep step down to a 4-neighbour, joined 8-connected. (Not where the
-// next column is unseen: a slope bending away out of sight hides the ground beyond its brow the
-// same way, and measured that way 3 in 10 reported cliffs were none.) Height: the drop
-// followed down the face while the steps stay steep-ish (2+), from the top of the run.
+// Cliffs: columns with a steep step down to a 4-neighbour, joined 8-connected. Unseen columns
+// between are bridged, not guessed: k columns on, ground CLIFF_STEP*k or more lower means one of
+// the k steps is steep, wherever it is (a slope bending away out of sight never drops that fast).
+// Height: the drop followed down the face while the steps stay steep-ish (2+ each, bridged the
+// same way), from the top of the run.
+const GAP = 3             // unseen columns bridged at most
 function findCliffs(g, eye) {
   const { x0, z0, w, h, top } = g
+  // The next seen column along (dx,dz) from x,z within GAP+1: [k, top] or null.
+  const next = (x, z, dx, dz) => {
+    for (let k = 1; k <= GAP + 1; k++) {
+      const xx = x + dx * k, zz = z + dz * k
+      if (xx < 0 || zz < 0 || xx >= w || zz >= h) return null
+      const t = top[zz * w + xx]
+      if (!Number.isNaN(t)) return [k, t]
+    }
+    return null
+  }
   const edge = new Map()   // i -> { drop, dx, dz }
   for (let z = 0; z < h; z++) for (let x = 0; x < w; x++) {
     const i = z * w + x, h0 = top[i]
     if (Number.isNaN(h0)) continue
     let best = null
     for (const [dx, dz] of DIRS4) {
-      const xx = x + dx, zz = z + dz
-      if (xx < 0 || zz < 0 || xx >= w || zz >= h) continue
-      const n = top[zz * w + xx]
-      if (Number.isNaN(n) || h0 - n < CLIFF_STEP) continue
-      let foot = n
-      for (let k = 2; k <= 16; k++) {
-        const x2 = x + dx * k, z2 = z + dz * k
-        if (x2 < 0 || z2 < 0 || x2 >= w || z2 >= h) break
-        const m = top[z2 * w + x2]
-        if (Number.isNaN(m) || foot - m < 2) break
-        foot = m
+      const n = next(x, z, dx, dz)
+      if (!n || h0 - n[1] < CLIFF_STEP * n[0]) continue
+      let at = n[0], foot = n[1]
+      while (at <= 16) {
+        const m = next(x + dx * at, z + dz * at, dx, dz)
+        if (!m || foot - m[1] < 2 * m[0]) break
+        at += m[0]; foot = m[1]
       }
       const drop = h0 - foot
       if (!best || drop > best.drop) best = { drop, dx, dz }
@@ -228,7 +236,11 @@ function regions(g, forms, kind, want, eye, core = null) {
 // cliffs, hills, valleys, flats } each nearest first; null when no ground is in view.
 function landforms(blocks, eye) {
   const g = groundMap(blocks)
-  if (!g) return null
+  return g && landformsOf(g, eye)
+}
+
+// The same from a ground map (groundMap's).
+function landformsOf(g, eye) {
   const forms = geomorphons(g)
   const near = (a, b) => a.dist - b.dist
   return {
@@ -256,4 +268,4 @@ function formatLand(lf, eye) {
   return parts.length ? `LAND=[${parts.join('; ')}]` : null
 }
 
-module.exports = { landforms, formatLand, groundMap, geomorphons, FORMS, L, FLAT }
+module.exports = { landforms, landformsOf, formatLand, groundMap, geomorphons, FORMS, L, FLAT }
