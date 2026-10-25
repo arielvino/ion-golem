@@ -25,6 +25,8 @@ const { suspectCaves } = require('./caves')
 const AIR = new Set(['air', 'cave_air', 'void_air'])
 // Water, and the blocks that only exist in it (a kelp or seagrass cell is water too).
 const WATER = new Set(['water', 'bubble_column', 'kelp', 'kelp_plant', 'seagrass', 'tall_seagrass'])
+// See-through ice: a ray passes it like water.
+const ICE = new Set(['ice', 'frosted_ice'])
 
 const MIN_LIGHT = 1          // below this a block is too dark to see
 
@@ -80,14 +82,15 @@ function skyLightSection(col, s) {
   return FULL_SKY
 }
 
-// stateId -> 1 for water and the blocks that only exist in it. One table per registry.
+// stateId -> 1 for water and the blocks that only exist in it, 2 for see-through ice. One table per registry.
 const _water = new WeakMap()
 function waterTable(registry) {
   let t = _water.get(registry)
   if (t) return t
   t = new Uint8Array(1 << 16)
   for (const b of Object.values(registry.blocksByStateId)) {
-    if (WATER.has(b.name)) for (let s = b.minStateId; s <= b.maxStateId; s++) t[s] = 1
+    const v = WATER.has(b.name) ? 1 : ICE.has(b.name) ? 2 : 0
+    if (v) for (let s = b.minStateId; s <= b.maxStateId; s++) t[s] = v
   }
   _water.set(registry, t)
   return t
@@ -141,12 +144,15 @@ const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']   // +x east, +z so
 // light the block's face is seen by. Shell rays crowd toward the cube's corners, so each counts by
 // the slice of view it covers (∝ 1/|offset|³), which makes every direction weigh the same.
 // With a water table, dry marks every see-through cell a ray passes before it first enters water
-// (lit or not): the open space in view on dry sightlines, which caves.js reads shapes from.
-// Returns the seen cells, how many rays ran their full length unblocked, and near:
+// (lit or not): the open space in view on dry sightlines, which caves.js reads shapes from; and
+// clear marks every seen cell some ray reached before passing any water or ice (the first water
+// or ice cell included): a seen cell that is not clear was only seen through water.
+// Returns the seen cells, dry, clear, how many rays ran their full length unblocked, and near:
 // { here (light at the eye), share (of the view), dirs: [[dir, share of that direction]] (8
 // compass points, or up / down when mostly vertical), darkest first } — null without light data.
 function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, water = null) {
   const seen = new Uint8Array(side * side * side), dry = water ? new Uint8Array(side * side * side) : null
+  const clear = water ? new Uint8Array(side * side * side) : null
   const lit = (idx, face) => !light || light[face] >= MIN_LIGHT || (emits && emits[snap[idx]])
   const ex = Math.floor(ox), ey = Math.floor(oy), ez = Math.floor(oz)
   const here = light ? light[(ey * side + ez) * side + ex] : null
@@ -156,7 +162,7 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
     let dx = ex + a + 0.5 - ox, dy = ey + b + 0.5 - oy, dz = ez + c + 0.5 - oz
     const L = Math.hypot(dx, dy, dz); dx /= L; dy /= L; dz /= L
     rays++
-    let x = ex, y = ey, z = ez, prev = (ey * side + ez) * side + ex, dark = here !== null && here < MIN_LIGHT, wet = false
+    let x = ex, y = ey, z = ez, prev = (ey * side + ez) * side + ex, dark = here !== null && here < MIN_LIGHT, wet = false, veiled = false
     const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1
     const tdx = Math.abs(1 / dx), tdy = Math.abs(1 / dy), tdz = Math.abs(1 / dz)
     let tx = (dx > 0 ? x + 1 - ox : ox - x) * tdx, ty = (dy > 0 ? y + 1 - oy : oy - y) * tdy, tz = (dz > 0 ? z + 1 - oz : oz - z) * tdz
@@ -165,9 +171,10 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
       if (tx < ty && tx < tz) { x += sx; t = tx; tx += tdx } else if (ty < tz) { y += sy; t = ty; ty += tdy } else { z += sz; t = tz; tz += tdz }
       if (t > R) { open++; break }
       const idx = (y * side + z) * side + x
-      if (opaque[snap[idx]]) { if (lit(idx, prev)) seen[idx] = 1; break }
-      if (lit(idx, idx)) seen[idx] = 1
-      if (dry && !wet) { if (water[snap[idx]]) wet = true; else dry[idx] = 1 }
+      if (opaque[snap[idx]]) { if (lit(idx, prev)) { seen[idx] = 1; if (clear && !veiled) clear[idx] = 1 } break }
+      if (lit(idx, idx)) { seen[idx] = 1; if (clear && !veiled) clear[idx] = 1 }
+      if (dry && !wet) { if (water[snap[idx]] === 1) wet = true; else dry[idx] = 1 }
+      if (clear && water[snap[idx]]) veiled = true
       if (t <= NEAR && light && light[idx] < MIN_LIGHT) dark = true
       prev = idx
     }
@@ -190,12 +197,13 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
     near = { here, share: darkW / allW,
       dirs: [...per].map(([d, [n, total]]) => [d, n / total]).sort((a, b) => b[1] - a[1]) }
   }
-  return { seen, dry, rays, open, near }
+  return { seen, dry, clear, rays, open, near }
 }
 
 // Every seen non-air cell as { id, name, x, y, z, biome }, the biome being that of the cell
 // itself (not of where the bot stands). Biomes are stored per 4x4x4 cell: one lookup each.
-function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen) {
+// With clear, a cell only seen through water or ice also gets sunk: true.
+function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen, clear = null) {
   const nameOf = (s) => bot.registry.blocksByStateId[s]?.name || `state#${s}`
   const biomeCache = new Map(), out = [], p = new Vec3(0, 0, 0)
   for (let i = 0; i < seen.length; i++) {
@@ -208,12 +216,14 @@ function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen) {
     // Under water: the block above is water the bot saw too (no guessing past what is seen).
     const up = i + side * side
     const underwater = y < y0 + side - 1 && seen[up] && WATER.has(nameOf(snap[up]))
-    out.push(underwater ? { id: snap[i], name, x, y, z, biome, underwater } : { id: snap[i], name, x, y, z, biome })
+    const b = underwater ? { id: snap[i], name, x, y, z, biome, underwater } : { id: snap[i], name, x, y, z, biome }
+    if (clear && !clear[i]) b.sunk = true
+    out.push(b)
   }
   return out
 }
 
-// → { eye, radius, blocks: [{ id, name, x, y, z, biome, underwater? }] (no air), dark (castRays' near, null
+// → { eye, radius, blocks: [{ id, name, x, y, z, biome, underwater?, sunk? }] (no air), dark (castRays' near, null
 //   outside the overworld), caves (caves.js suspects; overworld only, else []), rays, open (rays that
 //   reached R unblocked), ms: { snapshot, rays, blocks, caves } }
 function lookAround(bot, R = 64) {
@@ -226,10 +236,10 @@ function lookAround(bot, R = 64) {
   const tSnap = now() - t
   t = now()
   const opaque = opaqueTable(bot.registry)
-  const { seen, dry, rays, open, near: darkness } = castRays(cube, opaque, R, dark ? emitTable(bot.registry) : null, waterTable(bot.registry))
+  const { seen, dry, clear, rays, open, near: darkness } = castRays(cube, opaque, R, dark ? emitTable(bot.registry) : null, waterTable(bot.registry))
   const tRays = now() - t
   t = now()
-  const blocks = seenBlocks(bot, cube, seen)
+  const blocks = seenBlocks(bot, cube, seen, clear)
   const tBlocks = now() - t
   t = now()
   const caves = dark ? suspectCaves(bot.registry, cube, seen, dry, opaque) : []

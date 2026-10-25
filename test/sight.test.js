@@ -108,3 +108,12 @@ test('seenBlocks: underwater only under seen water', () => {
   const ores = seenBlocks(bot, { snap, side: s, x0: 0, y0: 0, z0: 0 }, seen).filter(b => names[b.id] === 'iron_ore')
   assert.deepStrictEqual(ores.map(b => [b.x, !!b.underwater]), [[0, true], [2, false]])
 })
+
+test('a cell seen only through water is not clear; the first water cell is', () => {
+  const WATER = 3, water = new Uint8Array(1 << 16); water[WATER] = 1
+  const c = scene({ lightAll: 15 })
+  for (let y = -R; y <= R; y++) for (let z = -R; z <= R; z++) for (const x of [2, 3]) c.snap[idx(x, y, z)] = WATER
+  const { seen, clear } = castRays(c, opaque, R, emits, water)
+  assert.ok(seen[idx(4, 0, 0)] && !clear[idx(4, 0, 0)])   // the wall behind the water
+  assert.ok(clear[idx(2, 0, 0)] && !clear[idx(3, 0, 0)])
+})

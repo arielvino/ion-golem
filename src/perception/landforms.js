@@ -46,12 +46,14 @@ const DIRS4 = [[1, 0], [0, 1], [-1, 0], [0, -1]]
 const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] // +x east, +z south
 const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
 
-// Ground height per column from seen blocks. → { x0, z0, w, h, top: Float32Array (NaN = unseen) }
+// Ground height per column from seen blocks; a block only seen through water or ice (sunk) is
+// below a surface the ray crossed in another column, so it is left out.
+// → { x0, z0, w, h, top: Float32Array (NaN = unseen) }
 function groundMap(blocks) {
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
   const ground = []
   for (const b of blocks) {
-    if (AIR.has(b.name) || (b.name !== 'water' && roleOf(b.name, 'overworld', b.biome) !== 'terrain')) continue
+    if (b.sunk || AIR.has(b.name) || (b.name !== 'water' && roleOf(b.name, 'overworld', b.biome) !== 'terrain')) continue
     ground.push(b)
     if (b.x < x0) x0 = b.x; if (b.x > x1) x1 = b.x; if (b.z < z0) z0 = b.z; if (b.z > z1) z1 = b.z
   }

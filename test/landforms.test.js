@@ -72,6 +72,15 @@ test('a hill whose far side is unseen is open; unseen columns get no form', () =
   assert.strictEqual(lf.hills[0].open, true)
 })
 
+test('ground seen only through water or ice (sunk) is left out: no cliff at a frozen shore', () => {
+  // ice at 62 over a sea; the bot saw the ice near it, and further out only water cells deep under it
+  const b = ground((x) => x < 10 ? 62 : null)
+  for (let x = 10; x <= R; x++) for (let z = -R; z <= R; z++) b.push({ name: 'water', x, y: 56, z, biome: 'frozen_ocean', sunk: true })
+  const lf = landforms(b, eye)
+  assert.strictEqual(lf.cliffs.length, 0)
+  assert.strictEqual(formAt(b, 20, 0), 'unknown')
+})
+
 test('trees are not ground', () => {
   const b = ground(() => 64)
   for (let y = 65; y < 72; y++) b.push({ name: 'oak_log', x: 5, y, z: 5, biome: 'plains' })
