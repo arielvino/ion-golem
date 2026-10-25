@@ -6,10 +6,11 @@
 //
 // Each known column gets a geomorphon (Jasiewicz & Stepinski 2013, as GRASS r.geomorphon): along
 // 8 directions out to L blocks, is the horizon higher (+), lower (-) or level (0) beyond FLAT
-// degrees? The count of + and - names the form: peak, ridge, shoulder, spur, slope, hollow,
+// degrees? The count of + and - (scaled to 8 when some directions are unseen) names the form: peak, ridge, shoulder, spur, slope, hollow,
 // footslope, valley, pit or flat. A column with fewer than MIN_DIRS directions seen is unknown.
 //
-// Features are the forms joined (8-connected): hills and ridges (peak/ridge cells), valleys and
+// Features are the forms joined (8-connected): hills and ridges (peak/ridge cells, with the spurs
+// round them: seen from one side, crest and convex flank interleave), valleys and
 // basins (valley/pit), flats; and cliffs: runs of steep steps (CLIFF_STEP+ down to the next
 // column), with their full height and the way they face. A feature whose edge runs into unseen
 // ground is marked open: it may go on out of sight.
@@ -19,9 +20,11 @@ const { AIR } = require('./sight')
 const L = 20              // geomorphon lookup distance, blocks
 const FLAT = 5            // degrees: a horizon within this of level is level
 const MIN_DIRS = 6        // directions with seen ground needed to name a column's form
+const CREST_DIRS = 3      // ... or this many, all lower: a crest seen from one side
 const CLIFF_STEP = 3      // a drop this big to the next column is a steep step
 const CLIFF_MIN = 4       // a cliff is this high at least
 const MIN_CELLS = { hill: 12, valley: 12, flat: 150 }
+const CORE_MIN = 4        // a hill: peak/ridge cells at least, the rest of it may be spur
 const OPEN_MIN = 3        // this many border cells unseen: the feature is open
 
 const FORMS = ['unknown', 'flat', 'peak', 'ridge', 'shoulder', 'spur', 'slope', 'hollow', 'footslope', 'valley', 'pit']
@@ -88,12 +91,20 @@ function geomorphons({ w, h, top }) {
       if (d > tFlat) plus++
       else if (d < -tFlat) minus++
     }
-    out[i] = known < MIN_DIRS ? UN : TABLE[minus][plus]
+    // Seen from one side only, a top shows lower ground all the way round what is seen of it: a
+    // crest (its far side is out of sight).
+    // Unseen directions are not level: the seen ones are scaled up to all 8.
+    if (known >= MIN_DIRS) {
+      const m = Math.round(minus * 8 / known), p = Math.min(8 - m, Math.round(plus * 8 / known))
+      out[i] = TABLE[m][p]
+    } else out[i] = known >= CREST_DIRS && minus === known ? RI : UN
   }
   return out
 }
 
-// Cliffs: columns with a steep step down to a 4-neighbour, joined 8-connected. Height: the drop
+// Cliffs: columns with a steep step down to a 4-neighbour, joined 8-connected. (Not where the
+// next column is unseen: a slope bending away out of sight hides the ground beyond its brow the
+// same way, and measured that way 3 in 10 reported cliffs were none.) Height: the drop
 // followed down the face while the steps stay steep-ish (2+), from the top of the run.
 function findCliffs(g, eye) {
   const { x0, z0, w, h, top } = g
@@ -140,14 +151,17 @@ function findCliffs(g, eye) {
       const d = Math.hypot(x + 0.5 - eye.x, z + 0.5 - eye.z)
       if (d < nd) { nd = d; near = { x, y: top[i], z } }
     }
-    if (height >= CLIFF_MIN) out.push({ kind: 'cliff', height, faces: compass(fx, fz), length: cells.length, at: near, dist: Math.round(nd) })
+    if (height < CLIFF_MIN) continue
+    const c = { kind: 'cliff', height, faces: compass(fx, fz), length: cells.length, at: near, dist: Math.round(nd) }
+    Object.defineProperty(c, 'columns', { value: cells.map(i => [x0 + i % w, z0 + Math.floor(i / w)]) })
+    out.push(c)
   }
   return out
 }
 
 // Regions of the given forms, joined 8-connected: size, extreme point, rise/depth against the
 // ground around (within L), run direction if long, open if its border runs into unseen ground.
-function regions(g, forms, kind, want, eye) {
+function regions(g, forms, kind, want, eye, core = null) {
   const { x0, z0, w, h, top } = g
   const done = new Uint8Array(w * h), out = []
   for (let i0 = 0; i0 < w * h; i0++) {
@@ -168,6 +182,7 @@ function regions(g, forms, kind, want, eye) {
       }
     }
     if (cells.length < MIN_CELLS[kind]) continue
+    if (core && cells.filter(i => core.has(forms[i])).length < CORE_MIN) continue
     // Extreme point: highest for a hill, lowest for a valley; nearest cell for a flat.
     let ext = cells[0], near = cells[0], nd = Infinity, mx = 0, mz = 0
     for (const i of cells) {
@@ -200,6 +215,7 @@ function regions(g, forms, kind, want, eye) {
     const f = { kind, cells: cells.length, at, dist: Math.round(Math.hypot(at.x + 0.5 - eye.x, at.z + 0.5 - eye.z)), open: unseen >= OPEN_MIN }
     if (kind === 'hill') { f.rise = top[ext] - other; f.ridge = runs }
     if (kind === 'valley') { f.depth = other - top[ext]; f.runs = runs }
+    Object.defineProperty(f, 'columns', { value: cells.map(i => [x0 + i % w, z0 + Math.floor(i / w)]) })   // x,z of its cells (not listed)
     out.push(f)
   }
   return out
@@ -215,7 +231,7 @@ function landforms(blocks, eye) {
   return {
     map: g, forms,
     cliffs: findCliffs(g, eye).sort(near),
-    hills: regions(g, forms, 'hill', new Set([PK, RI]), eye).sort(near),
+    hills: regions(g, forms, 'hill', new Set([PK, RI, SP]), eye, new Set([PK, RI])).sort(near),
     valleys: regions(g, forms, 'valley', new Set([VL, PT]), eye).sort(near),
     flats: regions(g, forms, 'flat', new Set([FL]), eye).sort(near),
   }
