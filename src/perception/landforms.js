@@ -20,6 +20,7 @@ const { AIR, WATER } = require('./sight')
 const L = 20              // geomorphon lookup distance, blocks
 const FLAT = 5            // degrees: a horizon within this of level is level
 const MIN_DIRS = 6        // directions with seen ground needed to name a column's form
+const LEVEL_REACH = L / 2 // a direction is level only if seen this far out
 const CREST_DIRS = 3      // ... or this many, all lower: a crest seen from one side
 const CLIFF_STEP = 3      // a drop this big to the next column is a steep step
 const CLIFF_MIN = 4       // a cliff is this high at least
@@ -76,7 +77,7 @@ function geomorphons({ w, h, top }) {
     let plus = 0, minus = 0, known = 0
     for (const [dx, dz] of DIRS8) {
       const step = Math.hypot(dx, dz)
-      let up = -Infinity, down = Infinity, any = false
+      let up = -Infinity, down = Infinity, any = false, reach = 0
       for (let k = 1; k * step <= L; k++) {
         const xx = x + dx * k, zz = z + dz * k
         if (xx < 0 || zz < 0 || xx >= w || zz >= h) break
@@ -85,12 +86,15 @@ function geomorphons({ w, h, top }) {
         const s = (hh - h0) / (k * step)
         if (s > up) up = s
         if (s < down) down = s
-        any = true
+        any = true; reach = k * step
       }
       if (!any) continue
-      known++
       // r.geomorphon: nadir - zenith = (90 + min angle) - (90 - max angle) = max + min
       const d = Math.atan(up) + Math.atan(down)
+      // Level so far, but seen only a little way out: unknown, not level. (The far side of a top
+      // seen from below shows a few blocks of crest, then nothing: it is not level ground.)
+      if (Math.abs(d) <= tFlat && reach < LEVEL_REACH) continue
+      known++
       if (d > tFlat) plus++
       else if (d < -tFlat) minus++
     }

@@ -28,18 +28,29 @@ test('flat ground is one flat, nothing else', () => {
 })
 
 test('a cone hill: its top is a peak, its flank a slope or spur (contours bend round it), listed with its rise', () => {
-  const cone = (x, z) => 64 + Math.max(0, 16 - Math.hypot(x - 20, z))
+  const cone = (x, z) => 64 + Math.max(0, 16 - Math.hypot(x - 12, z))   // its foot well inside the view
   const b = ground(cone)
-  assert.strictEqual(formAt(b, 20, 0), 'peak')
-  assert.ok(['slope', 'spur'].includes(formAt(b, 12, 0)), formAt(b, 12, 0))
+  assert.strictEqual(formAt(b, 12, 0), 'peak')
+  assert.ok(['slope', 'spur'].includes(formAt(b, 4, 0)), formAt(b, 4, 0))
   assert.strictEqual(formAt(b, -30, -30), 'flat')
   assert.strictEqual(formAt(b, 20, -40), 'unknown')   // the edge of the view: too few directions seen
   const lf = landforms(b, eye)
   assert.ok(lf.hills.length >= 1)
   const h = lf.hills[0]
-  assert.deepStrictEqual([h.at.x, h.at.z], [20, 0])
+  assert.deepStrictEqual([h.at.x, h.at.z], [12, 0])
   assert.ok(h.rise >= 14, `rise ${h.rise}`)
   assert.strictEqual(h.open, false)
+})
+
+test('a level direction seen only a few blocks out is unknown, not level: a crest seen from below', () => {
+  // A 12-high mound, flat-topped; the eye is below it to the west, so only its near flank and
+  // the first 3 blocks of the top are seen.
+  const mound = (x, z) => x < 10 ? 64 : x < 16 ? 64 + (x - 9) * 2 : 76
+  const b = ground((x, z) => x > 18 ? null : mound(x, z))
+  // East of the brow: 2 blocks of level top, then unseen. Not 'flat' and not a shoulder of flat
+  // ground: west is lower, east unknown.
+  assert.notStrictEqual(formAt(b, 17, 0), 'flat')
+  assert.notStrictEqual(formAt(b, 17, 0), 'shoulder')
 })
 
 test('a long V valley running north-south is a valley that runs N-S', () => {
