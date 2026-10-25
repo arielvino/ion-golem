@@ -506,6 +506,19 @@ function stopOnChange(u) {
   }
 }
 
+// In the dark a dig sees nothing it cuts into (no ore, no cave, no lava ahead). With no torch
+// to light it, a dig down or sideways refuses to go on; up, toward the light, is the way out.
+const TORCHES = new Set(['torch', 'soul_torch', 'copper_torch'])
+function darkNoTorch(action) {
+  const bot = state.bot
+  const gate = lightGate(bot)
+  const p = bot.entity.position
+  if (!gate || gate.lit(Math.floor(p.x), Math.floor(p.y) + 1, Math.floor(p.z))) return false
+  if (bot.inventory.items().some(i => TORCHES.has(i.name))) return false
+  pushFail(`${action}: too dark here to dig on and no torch to light it — you would dig blind (no ore, cave or lava seen). Get light first: torches = coal or charcoal + stick (charcoal: smelt a log in a furnace); or staircase up toward the light`)
+  return true
+}
+
 function pushFail(msg) {
   recordFailure(msg)
   state.navFailReason = null
@@ -522,6 +535,7 @@ async function doStaircase(arg, opts = {}) {
   // A staircase must go up or down; a bare step-count defaults to descending.
   const pattern = u.pattern || 'down'
   if (pattern === 'flat') { pushFail(`staircase: "${untilStr}" needs a vertical goal — use yN`); return false }
+  if (pattern === 'down' && darkNoTorch(`staircase:${dirName}:${untilStr}`)) return false
   // The staircase also stops where the material or the light changes.
   const m = stopOnChange(u)
   state.currentTask = `staircase ${dirName} until ${m.desc}`
@@ -560,6 +574,7 @@ async function doTunnel(arg, opts = {}) {
     pushFail(`tunnel: "${untilStr}" is a vertical goal — use staircase:${dirName}:${untilStr} to change Y`)
     return false
   }
+  if (darkNoTorch(`tunnel:${dirName}:${untilStr}`)) return false
   const m = stopOnChange(u)
   state.currentTask = `tunnel ${dirName} until ${m.desc}`
   const intent = opts.skipTool ? 'clear-no-tool' : 'clear'
