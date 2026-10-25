@@ -300,6 +300,8 @@ function createBot() {
         pickupBatch.clear()
       }, 2000)
     }
+    // The bot's own tunnels and pits are not caves (perception/caves.js).
+    bot.on('diggingCompleted', (block) => { if (block?.position) require('./src/perception/caves').noteDug(block.position) })
     bot.on('playerCollect', (collector, collected) => {
       if (collector !== bot.entity) return
       if (collected.name === 'experience_orb') return  // its metadata slot 8 is the xp value, not an item

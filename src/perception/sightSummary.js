@@ -11,6 +11,7 @@
 //   unnatural    not natural here: a structure, a portal or a player's work. Count, nearest,
 //                and how far the farthest one is. Places recognize.js made of them are
 //                reported beside this (recognize.js formatStructures), not instead of it.
+//   caves        suspected caves (caves.js): size in cells + the nearest cell, nearest first
 const { roleOf, RESOURCE } = require('../config/natural-blocks')
 const { NEAR } = require('./sight')
 const { stateProps } = require('../world/memory')
@@ -29,6 +30,7 @@ function secondCell(b) {
 const BIOME_MIN = 0.01    // biomes under this share of the view are left out
 const TERRAIN_MIN = 0.005 // terrain materials under this share of their biome are left out
 const LIST_MAX = 20       // decoration / resources / unnatural entries
+const CAVES_MAX = 5       // suspected caves listed
 const DARK_MIN = 0.02     // less of the near space dark than this: no DARK= line
 const DIR_DARK = 0.6      // a direction this dark (share of its rays) reads "dark"
 const DIR_PART = 0.2      // ... and this, "partly dark"
@@ -41,7 +43,8 @@ const compass = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI /
 // blocks: [{ id, name, x, y, z, biome }] (no air; id = state id). Every layer is grouped by
 // block name: it says what the area holds, and a state split (oak_leaves by distance, stairs
 // by facing) would only crowd real kinds out of the list.
-function summarizeSight({ eye, dimension, blocks }) {
+// caves: lookAround's suspects ({ cells, at, dist }).
+function summarizeSight({ eye, dimension, blocks, caves = [] }) {
   const biomes = new Map()     // biome -> { n, terrain: Map(name -> n) }
   const found = { decoration: new Map(), resource: new Map(), unnatural: new Map() }   // name -> { n, d2, at, far2 }
   const note = (map, name, b) => {
@@ -80,6 +83,7 @@ function summarizeSight({ eye, dimension, blocks }) {
     decoration: listOf(found.decoration),
     resources: listOf(found.resource, true),
     unnatural: listOf(found.unnatural),
+    caves: caves.slice(0, CAVES_MAX).map(c => ({ cells: c.cells, dist: c.dist, dir: compass(c.at.x + 0.5 - eye.x, c.at.z + 0.5 - eye.z), at: c.at })),
   }
 }
 
@@ -89,7 +93,7 @@ const pct = (x) => `${Math.round(100 * x)}%`
 // layer is left out. Entries: NAME×COUNT nearest DIST DIR@X,Y,Z, and for unnatural blocks
 // "(to FARm)" when there are several. Resources list every spot instead of the nearest:
 // NAME×COUNT: DIST DIR@X,Y,Z; DIST DIR@X,Y,Z… with " | " between kinds (coords hold commas),
-// a spot under seen water marked " underwater".
+// a spot under seen water marked " underwater". Caves: CELLS cells: DIST DIR@X,Y,Z (the nearest cell).
 // dark: lookAround's dark (castRays' near, or null): DARK= is left out when almost nothing near is dark.
 function formatSight(s, dark = null) {
   const item = (e) => `${e.name}×${e.count} nearest ${e.dist}m ${e.dir}@${e.at.x},${e.at.y},${e.at.z}`
@@ -101,6 +105,7 @@ function formatSight(s, dark = null) {
   const spots = (e) => `${e.name}×${e.count}: ${e.spots.map(p => `${p.dist}m ${p.dir}@${p.at.x},${p.at.y},${p.at.z}${p.underwater ? ' underwater' : ''}`).join('; ')}`
   if (s.resources.length) lines.push(`RESOURCES=[${s.resources.map(spots).join(' | ')}]`)
   if (s.unnatural.length) lines.push(`UNNATURAL=[${s.unnatural.map(spread).join(', ')}]`)
+  if (s.caves?.length) lines.push(`CAVES=[${s.caves.map(c => `${c.cells} cells: ${c.dist}m ${c.dir}@${c.at.x},${c.at.y},${c.at.z}`).join('; ')}]`)
   if (dark && dark.share >= DARK_MIN) {
     const where = (lo, hi) => dark.dirs.filter(([, f]) => f >= lo && f < hi).map(([d]) => DIR_WORDS[d]).join(', ')
     const full = where(DIR_DARK, 2), part = where(DIR_PART, DIR_DARK)

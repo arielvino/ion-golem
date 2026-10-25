@@ -20,6 +20,7 @@
 // navigation and actions knowing blocks the bot never saw).
 const { Vec3 } = require('vec3')
 const { performance } = require('perf_hooks')
+const { suspectCaves } = require('./caves')
 
 const AIR = new Set(['air', 'cave_air', 'void_air'])
 // Water, and the blocks that only exist in it (a kelp or seagrass cell is water too).
@@ -79,6 +80,19 @@ function skyLightSection(col, s) {
   return FULL_SKY
 }
 
+// stateId -> 1 for water and the blocks that only exist in it. One table per registry.
+const _water = new WeakMap()
+function waterTable(registry) {
+  let t = _water.get(registry)
+  if (t) return t
+  t = new Uint8Array(1 << 16)
+  for (const b of Object.values(registry.blocksByStateId)) {
+    if (WATER.has(b.name)) for (let s = b.minStateId; s <= b.maxStateId; s++) t[s] = 1
+  }
+  _water.set(registry, t)
+  return t
+}
+
 // Copy the cube [eye-R, eye+R] into a Uint16Array of state ids, via section palettes.
 // darken (a number) also copies each cell's effective light into `light`; null skips it.
 function snapshot(bot, eye, R, darken = null) {
@@ -126,11 +140,13 @@ const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']   // +x east, +z so
 // within NEAR is unlit — the cell in front of the block it stops at included, since that is the
 // light the block's face is seen by. Shell rays crowd toward the cube's corners, so each counts by
 // the slice of view it covers (∝ 1/|offset|³), which makes every direction weigh the same.
+// With a water table, dry marks every see-through cell a ray passes before it first enters water
+// (lit or not): the open space in view on dry sightlines, which caves.js reads shapes from.
 // Returns the seen cells, how many rays ran their full length unblocked, and near:
 // { here (light at the eye), share (of the view), dirs: [[dir, share of that direction]] (8
 // compass points, or up / down when mostly vertical), darkest first } — null without light data.
-function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
-  const seen = new Uint8Array(side * side * side)
+function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, water = null) {
+  const seen = new Uint8Array(side * side * side), dry = water ? new Uint8Array(side * side * side) : null
   const lit = (idx, face) => !light || light[face] >= MIN_LIGHT || (emits && emits[snap[idx]])
   const ex = Math.floor(ox), ey = Math.floor(oy), ez = Math.floor(oz)
   const here = light ? light[(ey * side + ez) * side + ex] : null
@@ -140,7 +156,7 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
     let dx = ex + a + 0.5 - ox, dy = ey + b + 0.5 - oy, dz = ez + c + 0.5 - oz
     const L = Math.hypot(dx, dy, dz); dx /= L; dy /= L; dz /= L
     rays++
-    let x = ex, y = ey, z = ez, prev = (ey * side + ez) * side + ex, dark = here !== null && here < MIN_LIGHT
+    let x = ex, y = ey, z = ez, prev = (ey * side + ez) * side + ex, dark = here !== null && here < MIN_LIGHT, wet = false
     const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1
     const tdx = Math.abs(1 / dx), tdy = Math.abs(1 / dy), tdz = Math.abs(1 / dz)
     let tx = (dx > 0 ? x + 1 - ox : ox - x) * tdx, ty = (dy > 0 ? y + 1 - oy : oy - y) * tdy, tz = (dz > 0 ? z + 1 - oz : oz - z) * tdz
@@ -151,6 +167,7 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
       const idx = (y * side + z) * side + x
       if (opaque[snap[idx]]) { if (lit(idx, prev)) seen[idx] = 1; break }
       if (lit(idx, idx)) seen[idx] = 1
+      if (dry && !wet) { if (water[snap[idx]]) wet = true; else dry[idx] = 1 }
       if (t <= NEAR && light && light[idx] < MIN_LIGHT) dark = true
       prev = idx
     }
@@ -173,7 +190,7 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null) {
     near = { here, share: darkW / allW,
       dirs: [...per].map(([d, [n, total]]) => [d, n / total]).sort((a, b) => b[1] - a[1]) }
   }
-  return { seen, rays, open, near }
+  return { seen, dry, rays, open, near }
 }
 
 // Every seen non-air cell as { id, name, x, y, z, biome }, the biome being that of the cell
@@ -197,7 +214,8 @@ function seenBlocks(bot, { snap, side, x0, y0, z0 }, seen) {
 }
 
 // → { eye, radius, blocks: [{ id, name, x, y, z, biome, underwater? }] (no air), dark (castRays' near, null
-//   outside the overworld), rays, open (rays that reached R unblocked), ms: { snapshot, rays, blocks } }
+//   outside the overworld), caves (caves.js suspects; overworld only, else []), rays, open (rays that
+//   reached R unblocked), ms: { snapshot, rays, blocks, caves } }
 function lookAround(bot, R = 64) {
   const now = () => performance.now()
   const eye = bot.entity.position.offset(0, 1.62, 0)
@@ -207,12 +225,16 @@ function lookAround(bot, R = 64) {
   const cube = snapshot(bot, eye, R, darken)
   const tSnap = now() - t
   t = now()
-  const { seen, rays, open, near: darkness } = castRays(cube, opaqueTable(bot.registry), R, dark ? emitTable(bot.registry) : null)
+  const opaque = opaqueTable(bot.registry)
+  const { seen, dry, rays, open, near: darkness } = castRays(cube, opaque, R, dark ? emitTable(bot.registry) : null, waterTable(bot.registry))
   const tRays = now() - t
   t = now()
   const blocks = seenBlocks(bot, cube, seen)
   const tBlocks = now() - t
-  return { eye, radius: R, blocks, dark: darkness, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks } }
+  t = now()
+  const caves = dark ? suspectCaves(bot.registry, cube, seen, dry, opaque) : []
+  const tCaves = now() - t
+  return { eye, radius: R, blocks, dark: darkness, caves, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks, caves: tCaves } }
 }
 
-module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, skyDarken, skyLightSection, MIN_LIGHT, NEAR, AIR }
+module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, waterTable, skyDarken, skyLightSection, MIN_LIGHT, NEAR, AIR }
