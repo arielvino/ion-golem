@@ -197,6 +197,27 @@ async function digBlock(pos, opts = {}) {
   }
 }
 
+// Gravel, sand and concrete powder fall into a cell as soon as it opens, and refill a
+// corridor's head or body cell right after it was dug: the next block down then has no face
+// in view, and the step walks into a solid block ("liveStep blocked"). Like a player, dig
+// the cells again until nothing more comes down.
+const FALLS = name => /^(gravel|sand|red_sand|suspicious_sand|suspicious_gravel)$|_concrete_powder$/.test(name)
+const REFILL_ROUNDS = 8
+async function digCells(cells) {
+  const bot = state.bot
+  const dug = []
+  for (const c of cells) dug.push(await digBlock(c))
+  const top = cells.reduce((a, c) => (c.y > a.y ? c : a))
+  for (let round = 0; round < REFILL_ROUNDS && !state.abortSignal; round++) {
+    const coming = FALLS(bot.blockAt(top.offset(0, 1, 0))?.name || '') ||
+      Object.values(bot.entities).some(e => e.name === 'falling_block' && e.position.distanceTo(top) < 4)
+    if (!coming && !cells.some(c => FALLS(bot.blockAt(c)?.name || ''))) break
+    await sleep(250)
+    for (const c of cells) if (bot.blockAt(c)?.boundingBox === 'block') await digBlock(c)
+  }
+  return dug
+}
+
 // Item name → the block name(s) that count as a successful placement of it.
 // Default: the placed block shares the item's name (cobblestone item →
 // cobblestone block), which holds for the overwhelming majority of placeable
@@ -442,8 +463,7 @@ async function tunnelStep(tx, ty, tz, ctx = {}) {
     const cells = [new Vec3(cx + sx, cy, cz + sz), new Vec3(cx + sx, cy + 1, cz + sz)]
     const seen = aheadMaterials(ctx, cells, cy)
     if (!seen) return false
-    const dug = [await digBlock(cells[0])]
-    dug.push(await digBlock(cells[1]))
+    const dug = await digCells(cells)
     noteMaterials(ctx, seen, dug, cy)
   }
 
@@ -722,16 +742,12 @@ async function staircaseStep(tx, ty, tz, ctx = {}) {
     //  ####         #[B]__    <- bot drops 1 block
     //  ####          ####
     //
-    // Top first: each block is in view only once the one above it is open.
-    // Dig forward-and-above for head clearance while walking in
+    // Top first: each block is in view only once the one above it is open: head clearance,
+    // the body space to walk into, then the new floor level.
     const cells = [1, 0, -1].map(dy => new Vec3(cx + stepX, curY + dy, cz + stepZ))
     const seen = aheadMaterials(ctx, cells, curY)
     if (!seen) return false
-    const dug = [await digBlock(cells[0])]
-    // Dig forward at current level (body space to walk into)
-    dug.push(await digBlock(cells[1]))
-    // Dig forward-and-below (the new floor level)
-    dug.push(await digBlock(cells[2]))
+    const dug = await digCells(cells)
     noteMaterials(ctx, seen, dug, curY - 1)
 
     if (state.abortSignal) return false
