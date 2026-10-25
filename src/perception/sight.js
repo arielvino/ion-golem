@@ -150,7 +150,9 @@ const COMPASS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE']   // +x east, +z so
 // Returns the seen cells, dry, clear, how many rays ran their full length unblocked, and near:
 // { here (light at the eye), share (of the view), dirs: [[dir, share of that direction]] (8
 // compass points, or up / down when mostly vertical), darkest first } — null without light data.
-function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, water = null) {
+const GRAZE_H = 1.6       // eye height over the ground it stands on, blocks (grazing rays)
+const GRAZE_MAX = 8       // grazing rays: at most this many per step between the regular ones
+function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, water = null, fine = GRAZE_MAX) {
   const seen = new Uint8Array(side * side * side), dry = water ? new Uint8Array(side * side * side) : null
   const clear = water ? new Uint8Array(side * side * side) : null
   const lit = (idx, face) => !light || light[face] >= MIN_LIGHT || (emits && emits[snap[idx]])
@@ -158,10 +160,10 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
   const here = light ? light[(ey * side + ez) * side + ex] : null
   const per = new Map()   // dir -> [dark weight, total weight]
   let rays = 0, open = 0
-  const ray = (a, b, c) => {
+  const ray = (a, b, c, extra = false) => {
     let dx = ex + a + 0.5 - ox, dy = ey + b + 0.5 - oy, dz = ez + c + 0.5 - oz
     const L = Math.hypot(dx, dy, dz); dx /= L; dy /= L; dz /= L
-    rays++
+    if (!extra) rays++
     let x = ex, y = ey, z = ez, prev = (ey * side + ez) * side + ex, dark = here !== null && here < MIN_LIGHT, wet = false, veiled = false
     const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1
     const tdx = Math.abs(1 / dx), tdy = Math.abs(1 / dy), tdz = Math.abs(1 / dz)
@@ -169,7 +171,7 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
     for (;;) {
       let t
       if (tx < ty && tx < tz) { x += sx; t = tx; tx += tdx } else if (ty < tz) { y += sy; t = ty; ty += tdy } else { z += sz; t = tz; tz += tdz }
-      if (t > R) { open++; break }
+      if (t > R) { if (!extra) open++; break }
       const idx = (y * side + z) * side + x
       if (opaque[snap[idx]]) { if (lit(idx, prev)) { seen[idx] = 1; if (clear && !veiled) clear[idx] = 1 } break }
       if (lit(idx, idx)) { seen[idx] = 1; if (clear && !veiled) clear[idx] = 1 }
@@ -178,7 +180,7 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
       if (t <= NEAR && light && light[idx] < MIN_LIGHT) dark = true
       prev = idx
     }
-    if (here === null) return
+    if (here === null || extra) return
     const d = Math.abs(dy) > Math.hypot(dx, dz) ? (dy > 0 ? 'up' : 'down')
       : COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]
     const w = 1 / (L * L * L)
@@ -189,6 +191,18 @@ function castRays({ snap, light, side, ox, oy, oz }, opaque, R, emits = null, wa
   for (let a = -R; a <= R; a++) for (let b = -R; b <= R; b++) {
     if (Math.abs(a) === R || Math.abs(b) === R) for (let c = -R; c <= R; c++) ray(a, b, c)
     else { ray(a, b, -R); ray(a, b, R) }
+  }
+  // Grazing rays. Level ground d out, seen from h above, spans about h/d² radians per block, less
+  // than the 1/R between rays past ~10 blocks: rows of it fell between rays and the far ground was
+  // seen striped. Just below (and above) level, rays are added between: s per step on the side
+  // faces, s ~ R*GRAZE_H/b² (b: the step from level), at most fine. (Not counted in rays/open/dark.)
+  if (fine > 1) for (let b = -R; b < R; b++) {
+    const lo = Math.min(Math.abs(b), Math.abs(b + 1)), s = Math.min(fine, Math.ceil(R * GRAZE_H / Math.max(1, lo) ** 2))
+    if (s < 2) continue
+    for (let j = 1; j < s; j++) {
+      const bb = b + j / s
+      for (let k = -R; k < R; k++) { ray(k, bb, -R, true); ray(R, bb, k, true); ray(-k, bb, R, true); ray(-R, bb, -k, true) }
+    }
   }
   let near = null
   if (here !== null) {

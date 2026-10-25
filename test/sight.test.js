@@ -117,3 +117,19 @@ test('a cell seen only through water is not clear; the first water cell is', () 
   assert.ok(seen[idx(4, 0, 0)] && !clear[idx(4, 0, 0)])   // the wall behind the water
   assert.ok(clear[idx(2, 0, 0)] && !clear[idx(3, 0, 0)])
 })
+
+test('level ground far out is seen whole, not striped: grazing rays fill in between', () => {
+  // Flat stone floor, its top 1.62 below the eye (standing on it), R = 40.
+  const R = 40, side = 2 * R + 1, snap = new Uint16Array(side ** 3)
+  const at = (x, y, z) => ((y + R) * side + (z + R)) * side + (x + R)
+  for (let x = -R; x <= R; x++) for (let z = -R; z <= R; z++) snap[at(x, -2, z)] = STONE
+  const cube = { snap, light: null, side, ox: R + 0.5, oy: R + 0.62, oz: R + 0.5 }
+  const share = (fine) => {
+    const { seen } = castRays(cube, opaque, R, null, null, fine)
+    let n = 0, s = 0
+    for (let x = 12; x <= 24; x++) for (let z = -3; z <= 3; z++) { n++; if (seen[at(x, -2, z)]) s++ }
+    return s / n
+  }
+  assert.ok(share(1) < 0.9, `regular rays only: ${share(1)}`)   // the stripes the grazing rays fix
+  assert.strictEqual(share(), 1)
+})
