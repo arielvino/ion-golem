@@ -14,6 +14,7 @@
 // column), with their full height and the way they face. A feature whose edge runs into unseen
 // ground is marked open: it may go on out of sight.
 const { roleOf } = require('../config/natural-blocks')
+const { AIR } = require('./sight')
 
 const L = 20              // geomorphon lookup distance, blocks
 const FLAT = 5            // degrees: a horizon within this of level is level
@@ -47,7 +48,7 @@ function groundMap(blocks) {
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
   const ground = []
   for (const b of blocks) {
-    if (b.name !== 'water' && roleOf(b.name, 'overworld', b.biome) !== 'terrain') continue
+    if (AIR.has(b.name) || (b.name !== 'water' && roleOf(b.name, 'overworld', b.biome) !== 'terrain')) continue
     ground.push(b)
     if (b.x < x0) x0 = b.x; if (b.x > x1) x1 = b.x; if (b.z < z0) z0 = b.z; if (b.z > z1) z1 = b.z
   }
@@ -220,4 +221,20 @@ function landforms(blocks, eye) {
   }
 }
 
-module.exports = { landforms, groundMap, geomorphons, FORMS, L, FLAT }
+// The LAND= line: nearest few of each kind, DIST DIR@X,Y,Z from the eye. null: nothing to say.
+const SHOW = { cliffs: 3, hills: 3, valleys: 2 }
+function formatLand(lf, eye) {
+  if (!lf) return null
+  const where = (f) => `${f.dist}m ${compass(f.at.x + 0.5 - eye.x, f.at.z + 0.5 - eye.z)}@${f.at.x},${f.at.y},${f.at.z}`
+  const open = (f) => f.open ? ', far side unseen' : ''
+  const parts = [
+    ...lf.cliffs.slice(0, SHOW.cliffs).map(c => `cliff ${c.height} high facing ${c.faces}, ${c.length} long: ${where(c)}`),
+    ...lf.hills.slice(0, SHOW.hills).map(h => `${h.ridge ? `ridge running ${h.ridge}` : 'hill'} top y${h.at.y}, rises ${h.rise}${open(h)}: ${where(h)}`),
+    ...lf.valleys.slice(0, SHOW.valleys).map(v => `${v.runs ? `valley running ${v.runs}` : 'basin'} floor y${v.at.y}, ${v.depth} deep${open(v)}: ${where(v)}`),
+  ]
+  const flat = [...lf.flats].sort((a, b) => b.cells - a.cells)[0]
+  if (flat) parts.push(`flat ground y${flat.at.y}, ${flat.cells} blocks${open(flat)}: nearest ${where(flat)}`)
+  return parts.length ? `LAND=[${parts.join('; ')}]` : null
+}
+
+module.exports = { landforms, formatLand, groundMap, geomorphons, FORMS, L, FLAT }

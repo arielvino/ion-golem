@@ -5,6 +5,7 @@ const { hasLineOfSight } = require('../perception/vision')
 const { recognizeView, formatStructures } = require('../perception/recognize')
 const { lookAround } = require('../perception/sight')
 const { summarizeSight, formatSight } = require('../perception/sightSummary')
+const { landforms, formatLand } = require('../perception/landforms')
 const ranges = require('../config/ranges')
 const { SEARCH_UTILITY, SEARCH_FAR } = require('../config/search')
 const { currentDim, getStructures, getNearbyContainers, getContainerState, countNearbyPathBlocks, queryUtilityBlocks } = require('../world/memory')
@@ -228,6 +229,10 @@ function getBotContext() {
     placesInfo = formatStructures(r)
     const summary = summarizeSight({ dimension: bot.game.dimension, eye: view.eye, blocks: view.blocks, caves: view.caves })
     sightInfo = ' ' + formatSight(summary, view.dark).split('\n').join(' ')
+    if (/overworld/.test(bot.game.dimension || '')) {
+      const land = formatLand(landforms(view.blocks, view.eye), view.eye)
+      if (land) sightInfo += ' ' + land
+    }
     const ms = Date.now() - t0
     if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, caves ${view.ms.caves.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
   } catch (e) { console.warn('  [CTX] sight err:', e.message) }

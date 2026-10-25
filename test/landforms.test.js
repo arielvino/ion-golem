@@ -77,3 +77,10 @@ test('trees are not ground', () => {
   for (let y = 65; y < 72; y++) b.push({ name: 'oak_log', x: 5, y, z: 5, biome: 'plains' })
   assert.strictEqual(landforms(b, eye).hills.length, 0)
 })
+
+test('LAND= names each feature with how far, which way and where', () => {
+  const b = ground((x) => x < 15 ? 74 : 64)
+  const line = require('../src/perception/landforms').formatLand(landforms(b, eye), eye)
+  assert.match(line, /^LAND=\[cliff 10 high facing E, \d+ long: 14m E@14,74,0;/)
+  assert.match(line, /flat ground y\d+, \d+ blocks/)
+})
