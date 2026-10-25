@@ -2,7 +2,7 @@
 // Builds a reusable, sealed test world from a slice of an existing world.
 //
 // Copies 5x5 chunk columns x 5+ chunk sections (80x80x80+ blocks) out of a source world into a
-// fresh void world. The slice starts two sections below the median surface's section and runs
+// fresh void world. The slice starts two sections (--below) below the median surface's section and runs
 // at least two above it, more if needed to leave HEADROOM air over the tallest block.
 // The cube is then sealed with a one-block barrier shell just outside it, written straight
 // into the chunk data (the ring of chunks around the 5x5 holds only the walls). Leaves are
@@ -10,7 +10,10 @@
 // are frozen, so every run starts from the same state.
 //
 // Usage (from bot/):
-//   node tools/testworld/build.js --name spawn [--src ../server/world] [--center X,Z]
+//   node tools/testworld/build.js --name spawn [--src ../server/world] [--center X,Z] [--below N]
+//
+// --below: sections kept under the surface's section (default 2); a cave box wants more
+// (tools/testworld/findcave.js picks the spot).
 //
 // --center is a block position in the source (default: the source world's spawn); its chunk
 // becomes the middle of the 5x5, which is moved to chunks -2..2 so the box spans x,z -32..47. The result is written to <project>/test-worlds/<name>/ and is started with
@@ -36,12 +39,13 @@ const HEADROOM = 16 // at least this much air between the tallest block (trees t
 const PORT = 25566 // testserver/server.properties
 
 function parseArgs () {
-  const a = { src: path.join(SERVER, 'world'), name: null, center: null }
+  const a = { src: path.join(SERVER, 'world'), name: null, center: null, below: 2 }
   const argv = process.argv.slice(2)
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--src') a.src = path.resolve(argv[++i])
     else if (argv[i] === '--name') a.name = argv[++i]
     else if (argv[i] === '--center') a.center = argv[++i].split(',').map(Number)
+    else if (argv[i] === '--below') a.below = Number(argv[++i])
     else throw new Error(`unknown argument ${argv[i]}`)
   }
   if (!a.name || !/^[\w-]+$/.test(a.name)) throw new Error('--name <word> is required')
@@ -353,7 +357,7 @@ async function main () {
   }
   const surfaceY = median(cols.flatMap(c => c.surface)) - 1 // top surface block
   const syMid = Math.floor(surfaceY / 16)
-  const syLo = syMid - 2
+  const syLo = syMid - args.below
   // Sections are added on top until the tallest column clears the ceiling by HEADROOM.
   const topY = Math.max(...cols.flatMap(c => c.top)) - 1
   const syHi = Math.max(syMid + 2, Math.ceil((topY + HEADROOM + 1) / 16) - 1)
@@ -428,6 +432,7 @@ async function main () {
     cube: { min: [X0, yLo, Z0], max: [X1, yHi, Z1] },
     chunks: { min: [cx0, cz0], max: [cx0 + SIZE - 1, cz0 + SIZE - 1] },
     surfaceY,
+    below: args.below,
     spawn: [midX, spawnY, midZ],
     built: new Date().toISOString()
   }
