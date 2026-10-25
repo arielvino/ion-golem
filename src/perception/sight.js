@@ -247,4 +247,4 @@ function lookAround(bot, R = 64) {
   return { eye, radius: R, blocks, dark: darkness, caves, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks, caves: tCaves } }
 }
 
-module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, waterTable, skyDarken, skyLightSection, MIN_LIGHT, NEAR, AIR }
+module.exports = { lookAround, snapshot, castRays, seenBlocks, opaqueTable, emitTable, waterTable, skyDarken, skyLightSection, MIN_LIGHT, NEAR, AIR, WATER }

@@ -93,3 +93,8 @@ test('LAND= names each feature with how far, which way and where', () => {
   assert.match(line, /^LAND=\[cliff 10 high facing E, \d+ long: 14m E@14,74,0;/)
   assert.match(line, /flat ground y\d+, \d+ blocks/)
 })
+
+test('kelp and seagrass at the surface are water surface, like water', () => {
+  const g = groundMap([{ name: 'water', x: 0, y: 63, z: 0 }, { name: 'kelp_plant', x: 1, y: 63, z: 0 }, { name: 'tall_seagrass', x: 2, y: 63, z: 0 }])
+  assert.deepStrictEqual(Array.from(g.top), [63, 63, 63])
+})
