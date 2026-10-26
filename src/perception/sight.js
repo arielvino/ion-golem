@@ -257,6 +257,8 @@ function lookAround(bot, R = 64) {
   const tBlocks = now() - t
   t = now()
   const caves = dark ? suspectCaves(bot.registry, cube, seen, dry, opaque) : []
+  // Everything seen goes into the session map the ways on are read from (passages.js).
+  require('./passages').noteView(bot.registry, cube, seen, bot.game.minY, bot.game.height, bot.game.dimension)
   const tCaves = now() - t
   return { eye, radius: R, blocks, dark: darkness, caves, rays, open, ms: { snapshot: tSnap, rays: tRays, blocks: tBlocks, caves: tCaves } }
 }
