@@ -251,8 +251,8 @@ function createBot() {
     require('./src/world/memory').checkStateVersion(bot.version)
 
     const mcData = require('minecraft-data')(bot.version)
-    const { makeMovements } = require('./src/navigation/walkMovements')
-    bot.movementsFor = { chase: makeMovements(bot, false), walk: makeMovements(bot, true) }
+    const { makeMovements, makeCaveMovements } = require('./src/navigation/walkMovements')
+    bot.movementsFor = { chase: makeMovements(bot, false), walk: makeMovements(bot, true), cave: makeCaveMovements(bot), caveOut: makeCaveMovements(bot, { out: true }) }
     bot.pathfinder.setMovements(bot.movementsFor.chase)
     if (process.argv.includes('--cardinal')) console.log(color(c.yellow, '[NAV] walk/pathfind use cardinalWalk (--cardinal)'))
 
