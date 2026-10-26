@@ -151,6 +151,20 @@ function setupAutonomous(interruptFn) {
       `${hostile.name || 'Hostile'} spotted, engaging!`)
   })
 
+  // --- SUFFOCATION: dig out of the block the bot is stuck in ---
+  let lastUnbury = 0
+  function unburyReflex(now) {
+    if (now - lastUnbury < T.UNBURY_DEBOUNCE) return
+    if (state.currentTask === 'digging out' || state.actionQueue.some(a => a.actionStr === 'unbury')) return
+    lastUnbury = now
+    console.log(`  [AUTO] SUFFOCATING, HP=${Math.round(bot.health)}, dispatching unbury`)
+    interruptFn({ keepResponse: true, keepFlee: true })
+    setTimeout(() => {
+      state.actionQueue.unshift({ actionStr: 'unbury', username: 'auto' })
+      require('./engine').processActionQueue()
+    }, T.QUEUE_PREPEND_DELAY)
+  }
+
   // --- DAMAGE RESPONSE ---
   let lastEnvDamage = 0
   let lastEnvCause = null, lastEnvJournal = 0
@@ -203,6 +217,9 @@ function setupAutonomous(interruptFn) {
     // suffocating or burning hurts every half second.
     const cause = damageCause(damageType)
     const now = Date.now()
+    // Suffocating inside a block (gravel or sand fallen onto the bot, a cave-in): dig out
+    // now, ahead of whatever runs. It is 1 HP every half second; the model's turn is too late (#196).
+    if (damageType === 'in_wall') unburyReflex(now)
     if (cause !== lastEnvCause || now - lastEnvJournal >= T.ENV_DAMAGE_DEBOUNCE) {
       require('../core/utils').logEvent(`hurt by ${cause}`)
       lastEnvCause = cause

@@ -1441,4 +1441,4 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
 // Returns how many blocks are clear, up to `blocks`.
 // verifyWalkable and visionWalk removed — replaced by cardinalWalk
 
-module.exports = { navigateTo, digHeading, until, digBlock, placeBlockAt, hasWalkableLOS, cardinalWalk, tunnelStep, staircaseStep, pillarUp, isUnderground }
+module.exports = { navigateTo, digHeading, until, digBlock, FALLS, placeBlockAt, hasWalkableLOS, cardinalWalk, tunnelStep, staircaseStep, pillarUp, isUnderground }
