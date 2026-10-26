@@ -52,6 +52,7 @@ function underSky(bot) {
 }
 
 function fail(msg) {
+  console.log(`  ${msg}`)
   recordFailure(msg)
   state.currentTask = null
   return false
@@ -133,7 +134,7 @@ async function doCaveExplore(parts) {
   if (!old || underSky(bot) || Math.hypot(end.x - here.x, end.y - here.y, end.z - here.z) > TRAIL_GAP) trail.start(here)
 
   let heading = o.dir, walked = 0, why = null
-  const failed = new Set(), peeked = new Set()
+  const failed = new Set(), peeked = new Set(), torched = new Set()   // torched: spots a torch went up at
   let seenOres = null, last = bot.entity.position.clone(), first = true   // first: the run's first choice of a way
   const result = await trail.recording(bot, async () => {
     if (o.at) {
@@ -150,15 +151,16 @@ async function doCaveExplore(parts) {
       const view = lookAround(bot, VIEW_R)
       passages.noteBody(feet, bot.game.minY, bot.game.height)
       const w = passages.waysFrom(feet)
-      // Ores already reported in this cave (on the trail) don't stop it again.
-      if (!seenOres) seenOres = new Set([...oresIn(view, o.ore).keys(), ...(trail.get()?.ores || [])])
+      // Ores already reported don't stop it again.
+      if (!seenOres) seenOres = new Set([...oresIn(view, o.ore).keys(), ...trail.reportedOres()])
       const stop = stopReason(bot, w, view, seenOres, o, torches0)
       for (const k of oresIn(view, o.ore).keys()) if (!seenOres.has(k)) trail.noteOre(k)
       if (stop) { why = stop; return true }
       for (const k of oresIn(view, o.ore).keys()) seenOres.add(k)
 
       // Dark here: light it before choosing (the ways on show only in light).
-      if ((view.dark?.here ?? 15) < TORCH_BELOW && count(bot, TORCHES) && !first) {
+      if ((view.dark?.here ?? 15) < TORCH_BELOW && count(bot, TORCHES) && !underSky(bot) && !torched.has(fmt(feet))) {
+        torched.add(fmt(feet))
         if (await placeTorch(bot)) continue
       }
 
@@ -182,6 +184,7 @@ async function doCaveExplore(parts) {
           : w.water && w.water.dist <= 8 && fwd(w.water.at) ? `water ahead (${w.water.dist}m ${w.water.dir})`
           : drop ? `a drop of ${drop.depth} blocks ${drop.dist}m ${drop.dir} — too deep to go down safely${behind}`
           : `a dead end ahead${behind}`
+        console.log(`  [cave] stop: ${w.ways.length} ways (${open.length} open, ${affordable.length} affordable), ${w.reached} cells reached, light ${view.dark?.here}`)
         return true
       }
       // A fork: two ways ahead in different directions. The first leg picks by DIR or goes on.
@@ -193,12 +196,16 @@ async function doCaveExplore(parts) {
       // The way goes over an edge whose bottom isn't seen: go to the edge and look down first.
       if (pick.unknownDrop && pick.into && !peeked.has(fmt(pick.into)) && peeked.size < PEEKS_MAX) {
         peeked.add(fmt(pick.into))
+        first = false
+        const p0 = bot.entity.position.clone()
         if (pick.dist > 0) {
           const a = pick.at
           const r = await pathfinderWalk(a.x, a.y, a.z, 0, Math.max(20000, pick.dist * 2000), reachGoal(a.x, a.y, a.z, 0), bot.movementsFor?.cave)
           if (isAborted() || r.reason === 'abort') return null
           if (!r.ok) { failed.add(fmt(a)); continue }
         }
+        const mv = [pick.into.x + 0.5 - p0.x, pick.into.z + 0.5 - p0.z]
+        if (Math.hypot(...mv) >= 1) heading = mv
         console.log(`  [cave] peeking over the edge at ${fmt(pick.into)}`)
         await peek(bot, pick.into)
         leg--

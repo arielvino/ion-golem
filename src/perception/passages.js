@@ -14,8 +14,9 @@
 // Reads only what vision saw (the no-x-ray rule): the map is filled from the ray view, never
 // from the world.
 const { WATER } = require('./sight')
+const { roleOf } = require('../config/natural-blocks')
 
-const OPEN = 1, SOLID = 2, WET = 3, LAVA = 4
+const OPEN = 1, SOLID = 2, WET = 3, LAVA = 4, BUILT = 5   // BUILT: solid, but no cave roof (leaves, logs, a house)
 const NOTE_R = 32          // cells farther than this from the eye are not added to the map
 const MAX_STEPS = 64       // the walk stops this many steps out
 const SAFE_DROP = 3        // drops up to this are walked; deeper ones are reported
@@ -34,8 +35,9 @@ function kindTable(registry) {
   let t = _kind.get(registry)
   if (t) return t
   t = new Uint8Array(1 << 16)
+  const rock = (n) => ['terrain', 'resource'].includes(roleOf(n, 'overworld', '')) || ['terrain', 'resource'].includes(roleOf(n, 'overworld', 'badlands'))
   for (const b of Object.values(registry.blocksByStateId)) {
-    const k = b.name === 'lava' ? LAVA : WATER.has(b.name) ? WET : b.boundingBox === 'block' ? SOLID : OPEN
+    const k = b.name === 'lava' ? LAVA : WATER.has(b.name) ? WET : b.boundingBox !== 'block' ? OPEN : rock(b.name) ? SOLID : BUILT
     for (let s = b.minStateId; s <= b.maxStateId; s++) t[s] = k
   }
   _kind.set(registry, t)
@@ -106,8 +108,9 @@ function noteBody(feet, minY, height) {
 function waysFrom(feet, m = map) {
   const out = { ways: [], drops: [], water: null, lava: null, reached: 0 }
   if (!m) return out
-  const get = (x, y, z) => m.get(x, y, z)
-  const open = (x, y, z) => get(x, y, z) === OPEN
+  // For walking, solid is solid: leaves and logs hold the bot as rock does. Only the roof test
+  // (a way covered by rock or not) tells them apart.
+  const get = (x, y, z) => { const v = m.get(x, y, z); return v === BUILT ? SOLID : v }
   const key = (x, y, z) => `${x},${y},${z}`
   const seenAt = new Map()          // key -> { dist, back }
   const front = []                  // frontier spots: { x, y, z, dist, back, unknownDrop }
@@ -167,14 +170,14 @@ function waysFrom(feet, m = map) {
   }
   const groups = new Map()
   front.forEach((f, i) => { const r = find(i); (groups.get(r) || groups.set(r, []).get(r)).push(f) })
-  const covered = (x, y, z) => { for (let k = 2; k <= ROOF_SCAN; k++) if (get(x, y + k, z) === SOLID) return true; return false }
+  const covered = (x, y, z) => { for (let k = 2; k <= ROOF_SCAN; k++) if (m.get(x, y + k, z) === SOLID) return true; return false }
   for (const g of groups.values()) {
     const near = g.reduce((a, b) => (b.dist < a.dist ? b : a))
     let sx = 0, sz = 0, sy = 0
     for (const f of g) { sx += f.x; sy += f.y; sz += f.z }
     const cx = sx / g.length + 0.5 - (feet.x + 0.5), cz = sz / g.length + 0.5 - (feet.z + 0.5), cy = sy / g.length - feet.y
     out.ways.push({
-      dir: dirOf(cx, cy, cz), dist: near.dist, at: { x: near.x, y: near.y, z: near.z }, into: near.into, cells: g.length,
+      dir: Math.hypot(cx, cz) < 1.5 ? dirOf(near.x - feet.x, near.y - feet.y, near.z - feet.z) : dirOf(cx, cy, cz), dist: near.dist, at: { x: near.x, y: near.y, z: near.z }, into: near.into, cells: g.length,
       back: Math.min(...g.map(f => f.back)), surface: !g.some(f => covered(f.x, f.y, f.z)), unknownDrop: g.some(f => f.unknownDrop),
     })
   }
@@ -204,4 +207,4 @@ function dirOf(dx, dy, dz) {
   return c || 'here'
 }
 
-module.exports = { noteView, noteBody, waysFrom, forget, theMap, kindTable, OPEN, SOLID, WET, LAVA, SAFE_DROP }
+module.exports = { noteView, noteBody, waysFrom, forget, theMap, kindTable, OPEN, SOLID, WET, LAVA, BUILT, SAFE_DROP }

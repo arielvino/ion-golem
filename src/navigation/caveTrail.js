@@ -13,7 +13,7 @@ const TRAIL_STEP = 1.5      // blocks between recorded points
 const SAMPLE_MS = 250
 const POINTS_MAX = 4000
 
-let trail = null            // { mouth: {x,y,z}, points: [{x,y,z,climb?}], back, ores: [key], startedAt }
+let trail = null            // { mouth: {x,y,z}, points: [{x,y,z,climb?}], back, startedAt }
 let loadedFor = null
 
 function file() { return state.WORLD_DATA_DIR ? path.join(state.WORLD_DATA_DIR, 'cave-trail.json') : null }
@@ -49,13 +49,16 @@ function start(mouth) {
 
 function clear() { get(); trail = null; save() }
 
-// An ore (position key) the bot was stopped for in this cave.
+// Ores (position keys) cave:explore has already stopped for. For the session, not per trail: a
+// shallow cave walked in and out under the sky restarts its trail every time.
+const ores = new Set()
+const ORES_MAX = 4000
 function noteOre(key) {
-  const t = get()
-  if (!t) return
-  if (!t.ores) t.ores = []
-  if (!t.ores.includes(key)) { t.ores.push(key); if (t.ores.length > 2000) t.ores.shift(); save() }
+  if (ores.has(key)) return
+  if (ores.size >= ORES_MAX) ores.delete(ores.values().next().value)
+  ores.add(key)
 }
+function reportedOres() { return ores }
 
 function feetOf(bot) {
   const p = bot.entity.position
@@ -104,4 +107,4 @@ function length(t = get()) {
   return Math.round(n)
 }
 
-module.exports = { get, start, clear, note, noteOre, recording, length, feetOf }
+module.exports = { get, start, clear, note, noteOre, reportedOres, recording, length, feetOf }
