@@ -178,7 +178,10 @@ function waysFrom(feet, m = map) {
     const cx = sx / g.length + 0.5 - (feet.x + 0.5), cz = sz / g.length + 0.5 - (feet.z + 0.5), cy = sy / g.length - feet.y
     out.ways.push({
       dir: Math.hypot(cx, cz) < 1.5 ? dirOf(near.x - feet.x, near.y - feet.y, near.z - feet.z) : dirOf(cx, cy, cz), dist: near.dist, at: { x: near.x, y: near.y, z: near.z }, into: near.into, cells: g.length,
-      back: Math.min(...g.map(f => f.back)), surface: !g.some(f => covered(f.x, f.y, f.z)), unknownDrop: g.some(f => f.unknownDrop),
+      // A cave's mouth seen from outside: the last seen spot is still under the sky, the unseen
+      // cell past it is under the rock. Either covered makes it a way into the cave.
+      back: Math.min(...g.map(f => f.back)), unknownDrop: g.some(f => f.unknownDrop),
+      surface: !g.some(f => covered(f.x, f.y, f.z) || (f.into && covered(f.into.x, f.into.y, f.into.z))),
     })
   }
   out.ways.sort((a, b) => a.dist - b.dist)

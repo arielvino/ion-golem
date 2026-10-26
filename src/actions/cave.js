@@ -179,7 +179,7 @@ async function doCaveExplore(parts) {
         const fwd = (at) => !heading || Math.hypot(at.x - feet.x, at.z - feet.z) < 1 || angle([at.x - feet.x, at.z - feet.z], heading) <= AHEAD_ANGLE
         const costly = open.filter(x => !affordable.includes(x) && fwd(x.at))
         const drop = w.drops.find(d => fwd(d.at) && d.dist <= 12)
-        const behind = affordable.length ? ` (the other ways on lead back: ${affordable.map(x => `${x.dir} ${x.dist}m`).join(', ')})` : ''
+        const behind = affordable.length ? ` (the other ways on are behind you: ${affordable.map(x => `${x.dir} ${x.dist}m`).join(', ')})` : ''
         why = costly.length ? `the way on goes down drops that would take ${Math.min(...costly.map(x => x.back))} blocks to climb back (have ${blocks}, the way in already needs ${t.back})`
           : w.water && w.water.dist <= 8 && fwd(w.water.at) ? `water ahead (${w.water.dist}m ${w.water.dir})`
           : drop ? `a drop of ${drop.depth} blocks ${drop.dist}m ${drop.dir} — too deep to go down safely${behind}`
