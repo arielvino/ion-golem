@@ -32,4 +32,13 @@ function makeMovements(bot, walk, gate = terraformGate) {
   return mv
 }
 
-module.exports = { makeMovements }
+// Cave walks (actions/cave.js): the walk's rules, with no drop the bot takes damage from. The
+// way out may also tower up 1x1: it climbs back the drops the way in went down.
+function makeCaveMovements(bot, { out = false } = {}) {
+  const mv = makeMovements(bot, true)
+  mv.maxDropDown = 3
+  if (out) mv.allow1by1towers = true
+  return mv
+}
+
+module.exports = { makeMovements, makeCaveMovements }
