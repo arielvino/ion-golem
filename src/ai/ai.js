@@ -14,6 +14,7 @@ const { parseBlueprint: parseBlueprintRaw } = require('../lib/blueprint')
 const { isProvider, providerNames } = require('./ctxProviders')
 const { queueInterjection } = require('../engine/interjection')
 const { Talk } = require('./talk')
+const mind = require('./mind')
 
 // --- Chat logging ---
 const CHAT_LOG_DIR = () => path.join(state.BOT_DATA_DIR, 'chat-logs')
@@ -149,7 +150,8 @@ async function handleMessages(batch) {
   // Every turn is numbered from the [BOOT] turn (0) and carries the last one in a line.
   const turn = ++state.turnIndex
   const trigger = turnTrigger(batch, isPlayer)
-  const turnLine = `TURN=${turn}${state.prevTurn ? ` PREV=[${state.prevTurn}]` : ''}`
+  const mindLine = mind.render(turn)
+  const turnLine = `TURN=${turn}${state.prevTurn ? ` PREV=[${state.prevTurn}]` : ''}${mindLine ? ` ${mindLine}` : ''}`
   state.prevTurn = formatPrevTurn({ turn, trigger, outcome: 'no reply (cut off)' })
   const input = [context, state.talk.render(Date.now(), turnStart), turnLine, ...lines].filter(Boolean).join('\n')
   for (const m of batch) logChat({ type: 'user', username: m.username, message: m.message, context })
@@ -161,6 +163,10 @@ async function handleMessages(batch) {
     const nodeBefore = currentNode()
     const planApplied = applyPlanTags(rawReply, isPlayerMessage ? username : 'self')
     if (planApplied.length) console.log(color(c.magenta, `\n  [PLAN] ${planApplied.join('; ')}\n`))
+
+    // [MIND:...] — the working state of mind carried to the next turn (ai/mind.js).
+    const mindApplied = mind.apply(rawReply, turn, nodeBefore)
+    if (mindApplied) console.log(color(c.magenta, `  [MIND] ${mindApplied}`))
 
     // [NOTE:...] — the model's running story (world/journal.js).
     const notesApplied = applyNoteTags(rawReply, nodeBefore)
@@ -295,7 +301,7 @@ async function handleMessages(batch) {
       // Early chat send: before first tag
       if (!chatSent) {
         // A real tag has content after the colon; a bare "[ACTION:]" mentioned in prose isn't one.
-        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|BLUEPRINT|CTX|LOG|ASKBREAK):[^\]\s]/)
+        const tagIdx = fullText.search(/\[(?:ACTION|PLAN|NOTE|MIND|BLUEPRINT|CTX|LOG|ASKBREAK):[^\]\s]/)
         if (tagIdx > 0) {
           chatText = fullText.substring(0, tagIdx).trim()
           if (chatText && !/^[.\s…]+$/.test(chatText)) {
@@ -347,6 +353,7 @@ async function handleMessages(batch) {
         .replace(/\s*\[PLAN:[^\]]+\]/g, '')
         .replace(/\s*\[NOTE:(?:[^[\]]|\[[^[\]]*\])*\]/g, '')
         .replace(/\s*\[CTX:[^\]]+\]/g, '')
+        .replace(/\s*\[MIND:[^\]]*\]/g, '')
         .replace(/\s*\[ASKBREAK:[^\]]+\]/g, '')
         .replace(/\s*\[BLUEPRINT:[\s\S]*?\]/g, '').trim()
 
@@ -398,6 +405,7 @@ async function handleMessages(batch) {
       planErrors: Math.max(0, state.planErrors.length - planErrorsBefore),
       said: chatText && !/^[.\s…]+$/.test(chatText) ? chatText : '',
     })
+    mind.noteTurn(pendingActions, currentNode())
     recordTurn({
       said: chatText && !/^[.\s…]+$/.test(chatText) ? chatText : '',
       actions: pendingActions,
