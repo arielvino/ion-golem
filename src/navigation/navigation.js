@@ -178,6 +178,7 @@ async function digBlock(pos, opts = {}) {
       return { ok: false, reason: 'unbreakable', block: b.name }
     }
     removeBlock(pos.x, pos.y, pos.z)
+    require('../perception/caves').noteDug(pos)   // its own hole is no cave
     // Record the now-open cell in the honest DB as its true post-dig block
     // (air/cave_air, or water if it flowed in). removeBlock only DELETES the row,
     // which leaves the cell "unknown" — and the STRICT liveStep refuses to enter
@@ -1310,6 +1311,7 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal, movements = null
     const r = await dig.call(this, block, ...rest)
     dug++
     removeBlock(p.x, p.y, p.z)
+    require('../perception/caves').noteDug(p)
     logGameEvent('mine', name, 1, p.x, p.y, p.z, { tool: bot.heldItem?.name || 'hand', reason: 'walk' })
     console.log(`  pathfinder: dug ${name} at ${p.x},${p.y},${p.z}`)
     return r

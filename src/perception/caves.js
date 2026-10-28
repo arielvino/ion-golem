@@ -28,8 +28,9 @@ const DUG_MAX = 4096
 const dug = new Set()
 function noteDug(pos) {
   if (dug.size >= DUG_MAX) dug.delete(dug.values().next().value)
-  dug.add(`${pos.x},${pos.y},${pos.z}`)
+  dug.add(`${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`)
 }
+const isDug = (x, y, z) => dug.size > 0 && dug.has(`${x},${y},${z}`)
 
 // Natural, but no cave roof: ice spikes lean over open air (8 of 11 false places on the real
 // server were under them), and snow lies on top of things.
@@ -112,4 +113,4 @@ function suspectCaves(registry, { snap, side, x0, y0, z0, ox, oy, oz }, seen, dr
   return out.sort((a, b) => a.dist - b.dist)
 }
 
-module.exports = { suspectCaves, noteDug, MIN_CELLS, PIT_DEPTH }
+module.exports = { suspectCaves, noteDug, isDug, MIN_CELLS, PIT_DEPTH }

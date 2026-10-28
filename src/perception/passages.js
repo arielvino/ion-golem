@@ -104,9 +104,10 @@ function noteBody(feet, minY, height) {
 // The ways on from feet {x,y,z}. → { ways: [{ dir, dist, at, into, cells, back, surface, unknownDrop }] (at: the
 // nearest seen spot of it; into: the unseen cell next to that spot),
 // drops: [{ dir, dist, at, depth, landing }] (deeper than SAFE_DROP; landing false = unseen),
-// water: { dir, dist, at } | null, lava: { dir, dist, at } | null, reached }. Nearest first.
+// water: { dir, dist, at } | null, lava: { dir, dist, at } | null, reached, natural (reached spots
+// the bot didn't dig itself) }. Nearest first.
 function waysFrom(feet, m = map) {
-  const out = { ways: [], drops: [], water: null, lava: null, reached: 0 }
+  const out = { ways: [], drops: [], water: null, lava: null, reached: 0, natural: 0 }
   if (!m) return out
   // For walking, solid is solid: leaves and logs hold the bot as rock does. Only the roof test
   // (a way covered by rock or not) tells them apart.
@@ -160,6 +161,9 @@ function waysFrom(feet, m = map) {
     if (frontier) front.push({ x: c.x, y: c.y, z: c.z, dist: c.dist, back: c.back, unknownDrop, into })
   }
   out.reached = seenAt.size
+  // Reached spots the bot didn't dig out itself: few of them = it stands in its own tunnel.
+  const { isDug } = require('./caves')
+  for (const n of seenAt.values()) if (!isDug(n.x, n.y, n.z) && !isDug(n.x, n.y + 1, n.z)) out.natural++
 
   // Frontier spots, joined into ways.
   const parent = front.map((_, i) => i)
@@ -177,7 +181,9 @@ function waysFrom(feet, m = map) {
     for (const f of g) { sx += f.x; sy += f.y; sz += f.z }
     const cx = sx / g.length + 0.5 - (feet.x + 0.5), cz = sz / g.length + 0.5 - (feet.z + 0.5), cy = sy / g.length - feet.y
     out.ways.push({
-      dir: Math.hypot(cx, cz) < 1.5 ? dirOf(near.x - feet.x, near.y - feet.y, near.z - feet.z) : dirOf(cx, cy, cz), dist: near.dist, at: { x: near.x, y: near.y, z: near.z }, into: near.into, cells: g.length,
+      dir: Math.hypot(cx, cz) >= 1.5 ? dirOf(cx, cy, cz)
+        : near.into ? dirOf(near.into.x - feet.x, near.into.y - feet.y, near.into.z - feet.z)
+        : dirOf(near.x - feet.x, near.y - feet.y, near.z - feet.z), dist: near.dist, at: { x: near.x, y: near.y, z: near.z }, into: near.into, cells: g.length,
       // A cave's mouth seen from outside: the last seen spot is still under the sky, the unseen
       // cell past it is under the rock. Either covered makes it a way into the cave.
       back: Math.min(...g.map(f => f.back)), unknownDrop: g.some(f => f.unknownDrop),

@@ -26,6 +26,7 @@ const VIEW_R = 24           // look this far on each leg
 const WALK_DEFAULT = 48     // blocks walked before stopping by default
 const LEGS_MAX = 30
 const PEEKS_MAX = 12        // looks over an edge per run
+const NATURAL_MIN = 8       // CAVE= needs this many reached spots the bot didn't dig itself
 const TRAIL_GAP = 24        // farther than this from the trail's end: that trail is not this cave's
 const TORCH_BELOW = 7       // light at the eye this low after a leg: put a torch up
 const TORCHES_LOW = 2       // stop when down to this many
@@ -140,7 +141,11 @@ async function doCaveExplore(parts) {
     if (o.at) {
       const t = o.at
       const r = await pathfinderWalk(t.x, t.y, t.z, 2, 60000, reachGoal(t.x, t.y, t.z, 2), bot.movementsFor?.cave)
-      if (!r.ok) { why = r.reason === 'abort' ? null : `couldn't reach the cave at ${fmt(t)} (${r.reason})`; return false }
+      if (!r.ok) {
+        if (trail.get()?.points.length <= 2) trail.clear()   // never got in: no way in to keep
+        why = r.reason === 'abort' ? null : `couldn't reach the cave at ${fmt(t)} (${r.reason})`
+        return false
+      }
       last = bot.entity.position.clone()   // the walk there is not the cave's
     }
     for (let leg = 0; leg < LEGS_MAX; leg++) {
@@ -196,16 +201,15 @@ async function doCaveExplore(parts) {
       // The way goes over an edge whose bottom isn't seen: go to the edge and look down first.
       if (pick.unknownDrop && pick.into && !peeked.has(fmt(pick.into)) && peeked.size < PEEKS_MAX) {
         peeked.add(fmt(pick.into))
+        // A look ends the first choice (DIR is checked once), but sets no heading: the edge it
+        // looked over may be too deep to take.
         first = false
-        const p0 = bot.entity.position.clone()
         if (pick.dist > 0) {
           const a = pick.at
           const r = await pathfinderWalk(a.x, a.y, a.z, 0, Math.max(20000, pick.dist * 2000), reachGoal(a.x, a.y, a.z, 0), bot.movementsFor?.cave)
           if (isAborted() || r.reason === 'abort') return null
           if (!r.ok) { failed.add(fmt(a)); continue }
         }
-        const mv = [pick.into.x + 0.5 - p0.x, pick.into.z + 0.5 - p0.z]
-        if (Math.hypot(...mv) >= 1) heading = mv
         console.log(`  [cave] peeking over the edge at ${fmt(pick.into)}`)
         await peek(bot, pick.into)
         leg--
@@ -293,6 +297,8 @@ function contextLine() {
   let roof = false
   for (let k = 2; k <= 32 && !roof; k++) roof = m.get(feet.x, feet.y + k, feet.z) === passages.SOLID
   if (!t && !roof) return ''
+  // Its own staircase or tunnel has a rock roof too, but it is no cave.
+  if (w.natural < NATURAL_MIN) return ''
   const parts = []
   const blocks = count(bot, SCAFFOLD)
   if (t) parts.push(`way in from ${fmt(t.mouth)}: ${trail.length(t)} blocks back${t.back ? `, ${t.back} blocks to climb (have ${blocks})` : ''}`)
