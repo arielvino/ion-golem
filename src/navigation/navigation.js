@@ -178,6 +178,7 @@ async function digBlock(pos, opts = {}) {
       return { ok: false, reason: 'unbreakable', block: b.name }
     }
     removeBlock(pos.x, pos.y, pos.z)
+    require('../perception/caves').noteDug(pos)   // its own hole is no cave
     // Record the now-open cell in the honest DB as its true post-dig block
     // (air/cave_air, or water if it flowed in). removeBlock only DELETES the row,
     // which leaves the cell "unknown" — and the STRICT liveStep refuses to enter
@@ -1266,7 +1267,7 @@ const PATHFINDER_NAV = !process.argv.includes('--cardinal')
 const NO_MOVE_MS = 15000
 const NO_MOVE_DIST = 0.3
 
-async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
+async function pathfinderWalk(tx, ty, tz, range, timeout, goal, movements = null) {
   const bot = state.bot
   console.log(`\n  pathfinder: GoalNear ${tx},${ty},${tz} r=${range} (timeout=${Math.round(timeout / 1000)}s)`)
   // Same hostile / critical-status guard runStrategy checks between steps, polled
@@ -1297,7 +1298,7 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
   // The walk's own rules (it may bridge and dig where the terraform gate allows), and a
   // record of every block it changes: logged; a placed one is kept from being dug as a
   // path block, a dug one goes through the no-unpermitted-breaking check first.
-  const walkMovements = bot.movementsFor?.walk
+  const walkMovements = movements || bot.movementsFor?.walk
   if (walkMovements) bot.pathfinder.setMovements(walkMovements)
   const heldBefore = bot.heldItem?.name
   let bridged = 0, dug = 0
@@ -1310,6 +1311,7 @@ async function pathfinderWalk(tx, ty, tz, range, timeout, goal) {
     const r = await dig.call(this, block, ...rest)
     dug++
     removeBlock(p.x, p.y, p.z)
+    require('../perception/caves').noteDug(p)
     logGameEvent('mine', name, 1, p.x, p.y, p.z, { tool: bot.heldItem?.name || 'hand', reason: 'walk' })
     console.log(`  pathfinder: dug ${name} at ${p.x},${p.y},${p.z}`)
     return r
@@ -1441,4 +1443,4 @@ async function navigateTo(tx, ty, tz, range = 2, timeout = 45000, opts = {}) {
 // Returns how many blocks are clear, up to `blocks`.
 // verifyWalkable and visionWalk removed — replaced by cardinalWalk
 
-module.exports = { navigateTo, digHeading, until, digBlock, placeBlockAt, hasWalkableLOS, cardinalWalk, tunnelStep, staircaseStep, pillarUp, isUnderground }
+module.exports = { navigateTo, pathfinderWalk, digHeading, until, digBlock, FALLS, placeBlockAt, hasWalkableLOS, cardinalWalk, tunnelStep, staircaseStep, pillarUp, isUnderground }

@@ -12,6 +12,7 @@ module.exports = {
 
   // Minimum gap between repeated autonomous responses of the same kind.
   DROWNING_DEBOUNCE: 8000,   // re-dispatch swimup at most this often
+  UNBURY_DEBOUNCE: 1500,     // re-dispatch unbury at most this often
   ENV_DAMAGE_DEBOUNCE: 3000, // re-react to environmental damage at most this often
 
   // A dispatched reflex attack takes a moment to reach melee (prepend delay + equip).

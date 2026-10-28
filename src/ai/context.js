@@ -232,6 +232,7 @@ function getBotContext() {
     if (/overworld/.test(bot.game.dimension || '')) {
       const land = formatLand(landforms(view.blocks, view.eye), view.eye)
       if (land) sightInfo += ' ' + land
+      sightInfo += require('../actions/cave').contextLine()
     }
     const ms = Date.now() - t0
     if (ms > 250) console.log(`  [SIGHT] slow ${ms}ms (snapshot ${view.ms.snapshot.toFixed(0)}, rays ${view.ms.rays.toFixed(0)}, blocks ${view.ms.blocks.toFixed(0)}, caves ${view.ms.caves.toFixed(0)}, places ${r?.ms}) — ${view.blocks.length} blocks`)
